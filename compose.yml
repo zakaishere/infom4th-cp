@@ -1,0 +1,176 @@
+# The whole platform: `docker compose up -d --build` (after creating .env, see
+# docs/DEPLOY_VPS.md). Needs a Linux Docker engine with cgroup v2 (any modern Linux,
+# or Docker Desktop). On first start the judges build the language images they need.
+#
+# Shared servers: everything here is scoped to this Compose project (containers,
+# networks, volumes). Set COMPOSE_PROJECT_NAME in .env to a name no other project on the
+# server uses. Memory is capped per service and logs are rotated, so the platform
+# cannot exhaust the host's RAM or disk.
+name: cp-platform
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  database:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    mem_limit: ${DB_MEMORY:-1g}
+    logging: *logging
+    environment:
+      POSTGRES_DB: cp_platform
+      POSTGRES_USER: cp_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - cp_database:/var/lib/postgresql/data
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cp_app -d cp_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    restart: unless-stopped
+    mem_limit: ${RABBITMQ_MEMORY:-512m}
+    logging: *logging
+    hostname: cp-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: cp
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - cp_rabbitmq:/var/lib/rabbitmq
+    networks: [judging]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  backend:
+    build: ./backend
+    image: ${COMPOSE_PROJECT_NAME:-cp-platform}-backend:local
+    restart: unless-stopped
+    mem_limit: ${BACKEND_MEMORY:-1g}
+    logging: *logging
+    environment:
+      # The JVM sizes its heap from the container limit above.
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+      DB_URL: jdbc:postgresql://database:5432/cp_platform
+      DB_USERNAME: cp_app
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN}
+      BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
+      MAIL_HOST: ${MAIL_HOST:-localhost}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@localhost}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "${API_BIND:-127.0.0.1}:${SERVER_PORT:-8081}:8081"
+    networks: [data, judging, edge]
+    depends_on:
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/actuator/health/readiness >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 6
+  # The website: built UI plus a reverse proxy for /api. Open http://<server-ip>/ (WEB_PORT).
+  web:
+    build: ./frontend
+    image: ${COMPOSE_PROJECT_NAME:-cp-platform}-web:local
+    restart: unless-stopped
+    mem_limit: 128m
+    logging: *logging
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-80}:80"
+    networks: [edge]
+    depends_on:
+      backend:
+        condition: service_healthy
+  # Judges: they run submissions in throw-away sandbox containers through the host's
+  # Docker engine (no network, read-only, non-root, CPU/memory limited).
+  judge-official:
+    build: ./judge
+    image: ${COMPOSE_PROJECT_NAME:-cp-platform}-judge:local
+    init: true
+    restart: unless-stopped
+    # The worker itself; each sandbox it starts has its own CPU and memory limit.
+    mem_limit: 512m
+    stop_grace_period: 30s
+    logging: *logging
+    environment: &judge-environment
+      # Override both on additional judge hosts that reach the API/broker over a private network.
+      API_URL: ${JUDGE_API_URL:-http://backend:8081}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN}
+      RABBITMQ_URL: ${JUDGE_RABBITMQ_URL:-amqp://cp:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/%2F}
+      WORKER_NAME: ${OFFICIAL_WORKER_NAME:-official-1}
+      JUDGE_LANE: official
+      # Initial concurrency before an administrator saves a setting (live-adjustable).
+      JUDGE_SLOTS: ${OFFICIAL_JUDGE_SLOTS:-2}
+      # Physical ceiling; raising it requires restarting this worker.
+      JUDGE_MAX_SLOTS: ${OFFICIAL_JUDGE_MAX_SLOTS:-${OFFICIAL_JUDGE_SLOTS:-2}}
+      JUDGE_MAX_MEMORY_MB: ${JUDGE_MAX_MEMORY_MB:-1024}
+      JUDGE_MEMORY_BUDGET_MB: ${OFFICIAL_MEMORY_BUDGET_MB:-}
+      # Both workers below share one Docker host. Budgets are optional (they follow the slot count).
+      JUDGE_HOST_ID: ${JUDGE_HOST_ID:-judge-host-1}
+      JUDGE_HOST_MEMORY_BUDGET_MB: ${JUDGE_HOST_MEMORY_BUDGET_MB:-}
+      JUDGE_CONTROL_INTERVAL_SECONDS: ${JUDGE_CONTROL_INTERVAL_SECONDS:-5}
+      # Languages offered. Missing images are built automatically on first start.
+      JUDGE_LANGUAGES: ${JUDGE_LANGUAGES:-CPP,CPP20,C,JAVA,PYTHON,PYPY,JAVASCRIPT,GO,RUST,KOTLIN,CSHARP,RUBY,PHP}
+      JUDGE_BUILD_IMAGES: ${JUDGE_BUILD_IMAGES:-true}
+      JUDGE_COMPILE_SECONDS: ${JUDGE_COMPILE_SECONDS:-60}
+      JUDGE_HOST_WORK_ROOT: ${JUDGE_HOST_WORK_ROOT:-/var/lib/cp-judge}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${JUDGE_HOST_WORK_ROOT:-/var/lib/cp-judge}:/judge/work
+    networks: [judging]
+    depends_on:
+      backend:
+        condition: service_healthy
+  judge-internal:
+    build: ./judge
+    image: ${COMPOSE_PROJECT_NAME:-cp-platform}-judge:local
+    init: true
+    restart: unless-stopped
+    mem_limit: 512m
+    stop_grace_period: 30s
+    logging: *logging
+    environment:
+      <<: *judge-environment
+      WORKER_NAME: ${INTERNAL_WORKER_NAME:-internal-1}
+      JUDGE_LANE: internal
+      JUDGE_SLOTS: ${INTERNAL_JUDGE_SLOTS:-1}
+      JUDGE_MAX_SLOTS: ${INTERNAL_JUDGE_MAX_SLOTS:-${INTERNAL_JUDGE_SLOTS:-1}}
+      JUDGE_MEMORY_BUDGET_MB: ${INTERNAL_MEMORY_BUDGET_MB:-}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${JUDGE_HOST_WORK_ROOT:-/var/lib/cp-judge}:/judge/work
+    networks: [judging]
+    depends_on:
+      backend:
+        condition: service_healthy
+      judge-official:
+        condition: service_started
+volumes:
+  cp_database:
+  cp_rabbitmq:
+networks:
+  data:
+  judging:
+  edge:

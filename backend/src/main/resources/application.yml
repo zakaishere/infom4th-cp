@@ -1,0 +1,89 @@
+server:
+  port: ${SERVER_PORT:8081}
+  # The website container sends the real client address in X-Forwarded-For; Tomcat trusts it
+  # only from private-network proxies, so per-IP rate limits see each contestant separately.
+  forward-headers-strategy: native
+  error:
+    include-message: never
+    include-stacktrace: never
+  tomcat:
+    connection-timeout: 10s
+    max-connections: 400
+    accept-count: 100
+    threads:
+      max: 100
+spring:
+  application:
+    name: cp-platform
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/cp_platform}
+    username: ${DB_USERNAME:cp_app}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:15}
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+    clean-disabled: true
+    validate-on-migrate: true
+  sql:
+    init:
+      mode: never
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:cp}
+    password: ${RABBITMQ_PASSWORD:}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 5s
+    template:
+      mandatory: true
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_AUTH:true}
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+  task:
+    scheduling:
+      pool:
+        size: 3
+    execution:
+      pool:
+        core-size: 1
+        max-size: 2
+        queue-capacity: 100
+cp:
+  dispatch:
+    enabled: ${JUDGE_DISPATCH_ENABLED:true}
+  scheduling:
+    enabled: ${CONTEST_SCHEDULING_ENABLED:true}
+  judge:
+    worker-token: ${WORKER_TOKEN:}
+  bootstrap:
+    email: ${BOOTSTRAP_EMAIL:}
+    password: ${BOOTSTRAP_PASSWORD:}
+  public-url: ${PUBLIC_URL:http://localhost:3000}
+  cors-origins: ${CORS_ORIGINS:http://localhost:3000}
+  mail:
+    from: ${MAIL_FROM:noreply@localhost}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,rabbit
