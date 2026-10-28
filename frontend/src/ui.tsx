@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 export const VERDICTS: Record<string, { label: string; short: string; tone: string }> = {
   ACCEPTED: { label: "Accepted", short: "AC", tone: "ok" },
@@ -152,53 +152,8 @@ export function Markdown({ text }: { text?: string | null }) {
   return <div className="statement" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-/** Plain textarea editor with line numbers, tab indentation and auto-indent. */
-export function CodeEditor({ value, onChange, onSubmit, readOnly }: {
-  value: string; onChange?: (v: string) => void; onSubmit?: () => void; readOnly?: boolean;
-}) {
-  const area = useRef<HTMLTextAreaElement>(null);
-  const gutter = useRef<HTMLDivElement>(null);
-  const lines = Math.max(1, value.split("\n").length);
-  const edit = (next: string, cursor: number) => {
-    onChange?.(next);
-    requestAnimationFrame(() => {
-      area.current?.setSelectionRange(cursor, cursor);
-    });
-  };
-  return (
-    <div className="editor">
-      <div className="gutter" ref={gutter} aria-hidden>
-        {Array.from({ length: lines }, (_, i) => <div key={i}>{i + 1}</div>)}
-      </div>
-      <textarea
-        ref={area}
-        value={value}
-        readOnly={readOnly}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoComplete="off"
-        aria-label="Source code"
-        onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
-        onChange={(e) => onChange?.(e.target.value)}
-        onKeyDown={(e) => {
-          const t = e.currentTarget, start = t.selectionStart, end = t.selectionEnd;
-          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); onSubmit?.(); return; }
-          if (readOnly) return;
-          if (e.key === "Tab") {
-            e.preventDefault();
-            edit(value.slice(0, start) + "    " + value.slice(end), start + 4);
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-            const indent = value.slice(lineStart, start).match(/^\s*/)?.[0] ?? "";
-            const extra = /[{:(\[]\s*$/.test(value.slice(lineStart, start)) ? "    " : "";
-            edit(value.slice(0, start) + "\n" + indent + extra + value.slice(end), start + 1 + indent.length + extra.length);
-          }
-        }}
-      />
-    </div>
-  );
-}
+/** Syntax-highlighted code editor (CodeMirror). */
+export { CodeEditor } from "./components/CodeEditor";
 
 export const TEMPLATES: Record<string, string> = {
   CPP: "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n\n    return 0;\n}\n",

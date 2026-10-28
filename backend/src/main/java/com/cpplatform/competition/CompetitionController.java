@@ -11,8 +11,9 @@ import java.time.Instant;
 @RestController
 public class CompetitionController {
     private final Database db;private final CompetitionService contests;private final SubmissionService submissions;
-    private final Permissions access;private final StandingsService standings;
-    public CompetitionController(Database db,CompetitionService contests,SubmissionService submissions,Permissions access,StandingsService standings) {
+    private final Permissions access;private final StandingsService standings;private final PracticeService practice;
+    public CompetitionController(Database db,CompetitionService contests,SubmissionService submissions,Permissions access,StandingsService standings,PracticeService practice) {
+        this.practice=practice;
         this.db=db;this.contests=contests;this.submissions=submissions;this.access=access;this.standings=standings;
     }
     @PostMapping("/api/manage/competitions") @ResponseStatus(HttpStatus.CREATED)
@@ -120,12 +121,19 @@ public class CompetitionController {
     }
     @PostMapping("/api/manage/runs/{run}/control")
     Object control(Authentication auth,@PathVariable UUID run,@RequestBody Map<String,Object> body){contests.control(Actor.of(auth),run,body);return Map.of("ok",true);}
+    /** Practice catalog with community statistics and the caller's own status per problem. */
     @GetMapping("/api/practice")
-    Object practice(){return db.jdbc.queryForList("SELECT v.id,v.title,p.slug,v.difficulty FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id JOIN problems p ON p.id=pp.problem_id ORDER BY pp.published_at DESC LIMIT 200");}
+    Object practiceCatalog(Authentication auth){return Map.of("problems",practice.catalog(Actor.of(auth)),"tags",practice.allTags());}
     @GetMapping("/api/practice/{version}")
-    Object practiceProblem(@PathVariable UUID version) {
-        Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM practice_publications WHERE problem_version_id=?)",version),HttpStatus.NOT_FOUND,"Practice problem not found");return safeProblem(version);
+    Object practiceProblem(Authentication auth,@PathVariable UUID version) {
+        var stats=practice.stats(Actor.of(auth),version);
+        var result=new LinkedHashMap<String,Object>(safeProblem(version));
+        result.put("stats",stats);return result;
     }
+    @GetMapping("/api/manage/practice")
+    Object managePractice(Authentication auth){return practice.manage(Actor.of(auth));}
+    @PatchMapping("/api/manage/practice/{problem}")
+    Object updatePractice(Authentication auth,@PathVariable UUID problem,@RequestBody Map<String,Object> body){practice.update(Actor.of(auth),problem,body);return Map.of("ok",true);}
     @PostMapping("/api/practice/{version}/submissions") @ResponseStatus(HttpStatus.ACCEPTED)
     Object practiceSubmit(Authentication auth,@PathVariable UUID version,@RequestHeader("Idempotency-Key") UUID key,@RequestBody Map<String,Object> body) {
         return Map.of("submissionId",submissions.submit(Actor.of(auth),null,null,version,key,body),"status","QUEUED");
@@ -146,14 +154,14 @@ public class CompetitionController {
         // Per-test verdicts in test order. Hidden test content is never returned; tests after an
         // early stop are reported as not run. Sample tests are marked so contestants can retry them locally.
         if(!judging.isEmpty() && judging.get(0).get("verdict")!=null)
-            result.put("cases",db.jdbc.queryForList("SELECT row_number() OVER (ORDER BY g.position,t.position) AS number,t.is_sample AS sample,c.verdict,c.execution_time_ms,c.peak_memory_kb FROM test_cases t JOIN test_case_groups g ON g.id=t.group_id LEFT JOIN test_case_results c ON c.test_case_id=t.id AND c.job_id=? WHERE t.problem_version_id=? ORDER BY g.position,t.position",
-                    judging.get(0).get("job_id"),s.get("problem_version_id")));
+            result.put("cases",db.jdbc.queryForList("SELECT row_number() OVER (ORDER BY g.position,t.position) AS number,t.is_sample AS sample,c.verdict,c.execution_time_ms,c.peak_memory_kb FROM test_cases t JOIN test_case_groups g ON g.id=t.group_id LEFT JOIN test_case_results c ON c.test_case_id=t.id AND c.job_id=? WHERE t.problem_version_id=? AND (t.is_sample OR NOT ?) ORDER BY g.position,t.position",
+                    judging.get(0).get("job_id"),s.get("problem_version_id"),Boolean.TRUE.equals(s.get("samples_only"))));
         return result;
     }
     @GetMapping("/api/submissions")
     Object history(Authentication auth,@RequestParam(required=false) UUID run,@RequestParam(defaultValue="0") int offset) {
         Api.require(offset>=0 && offset<=1000000,HttpStatus.BAD_REQUEST,"Invalid offset");
-        return db.jdbc.queryForList("SELECT s.id,s.context,s.run_id,s.problem_slot,s.problem_version_id,s.language_code,s.submitted_at,latest.status,latest.verdict,latest.execution_time_ms,latest.peak_memory_kb,latest.passed_tests,latest.total_tests,u.handle AS submitted_by_handle FROM submissions s JOIN users u ON u.id=s.submitted_by "
+        return db.jdbc.queryForList("SELECT s.id,s.context,s.run_id,s.problem_slot,s.problem_version_id,s.language_code,s.samples_only,s.submitted_at,latest.status,latest.verdict,latest.execution_time_ms,latest.peak_memory_kb,latest.passed_tests,latest.total_tests,u.handle AS submitted_by_handle FROM submissions s JOIN users u ON u.id=s.submitted_by "
                 +"LEFT JOIN LATERAL (SELECT j.status,r.verdict,r.execution_time_ms,r.peak_memory_kb,r.passed_tests,r.total_tests FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) latest ON true "
                 // Team entries see every member's submissions for the runs they share.
                 +"WHERE (s.submitted_by=? OR s.entry_id IN (SELECT m.entry_id FROM run_entry_members m WHERE m.user_id=?)) AND (?::uuid IS NULL OR s.run_id=?::uuid) ORDER BY s.submitted_at DESC LIMIT 100 OFFSET ?",Actor.of(auth).id(),Actor.of(auth).id(),run,run,offset);

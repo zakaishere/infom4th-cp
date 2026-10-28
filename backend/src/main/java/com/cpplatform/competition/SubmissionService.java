@@ -45,10 +45,13 @@ public class SubmissionService {
             submission=db.id("INSERT INTO submissions(run_id,competition_version_id,entry_id,submitted_by,problem_slot,problem_version_id,language_code,source_code,idempotency_key,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,clock_timestamp()) RETURNING id",
                     run,r.get("competition_version_id"),member.get("entry_id"),actor.id(),slot,version,language,source,key);
         } else {
-            Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM practice_publications WHERE problem_version_id=?)",practiceVersion),HttpStatus.NOT_FOUND,"Practice problem not found");
+            Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM practice_publications WHERE problem_version_id=? AND NOT hidden)",practiceVersion),HttpStatus.NOT_FOUND,"Practice problem not found");
             version=practiceVersion;
-            submission=db.id("INSERT INTO submissions(context,submitted_by,problem_version_id,language_code,source_code,idempotency_key) VALUES ('PRACTICE',?,?,?,?,?) RETURNING id",
-                    actor.id(),version,language,source,key);
+            // mode=samples: "run examples" judges only the statement's example tests and is not counted.
+            boolean samples="samples".equals(body.get("mode"));
+            if(samples)Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM test_cases WHERE problem_version_id=? AND is_sample)",version),HttpStatus.CONFLICT,"This problem has no example tests");
+            submission=db.id("INSERT INTO submissions(context,submitted_by,problem_version_id,language_code,source_code,idempotency_key,samples_only) VALUES ('PRACTICE',?,?,?,?,?,?) RETURNING id",
+                    actor.id(),version,language,source,key,samples);
         }
         db.jdbc.update("INSERT INTO judging_jobs(submission_id,problem_version_id,priority) VALUES (?,?,?)",submission,version,run==null?0:100);
         return submission;

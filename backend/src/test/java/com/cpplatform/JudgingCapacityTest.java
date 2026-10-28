@@ -91,7 +91,7 @@ class JudgingCapacityTest {
         catch(ResponseStatusException e){return e.getStatusCode().value()==429?"BUSY":"CONFLICT";}
     }
     Map<String,Object> accepted(UUID job) {
-        var tests=db.jdbc.queryForList("SELECT id FROM test_cases WHERE problem_version_id=(SELECT problem_version_id FROM judging_jobs WHERE id=?)",job);
+        var tests=db.jdbc.queryForList("SELECT t.id FROM test_cases t JOIN judging_jobs j ON j.problem_version_id=t.problem_version_id JOIN submissions s ON s.id=j.submission_id WHERE j.id=? AND (t.is_sample OR NOT s.samples_only)",job);
         return Map.of("verdict","ACCEPTED","executionTimeMs",5,"peakMemoryKb",512,
                 "cases",tests.stream().map(t->Map.of("id",t.get("id"),"verdict","ACCEPTED","executionTimeMs",5,"peakMemoryKb",512)).toList());
     }
@@ -351,6 +351,48 @@ class JudgingCapacityTest {
         assertEquals("FINISHED",db.one("SELECT status FROM contest_runs WHERE id=?",run).get("status"));
         assertEquals("FINISHED",db.one("SELECT status FROM competitions WHERE id=?",contest).get("status"));
         assertThrows(ResponseStatusException.class,()->contests.register(user(false).actor,contest,null));
+    }
+
+    @Test void practiceCatalogRunsExamplesOnlyAndCountsRealSubmissions() throws Exception {
+        UUID internal=worker("internal",4);Problem p=problem();
+        var c=judge.claim(p.job,internal,0).orElseThrow();
+        judge.complete(p.job,internal,Api.uuid(c.get("leaseToken")),accepted(p.job));
+        judge.finishValidations();lab.approve(p.owner.actor,p.version,"Validated");
+        lab.publishPractice(p.owner.actor,p.version);
+        UUID problemId=(UUID)db.one("SELECT problem_id FROM problem_versions WHERE id=?",p.version).get("problem_id");
+        var practice=context.getBean(com.cpplatform.competition.PracticeService.class);
+        practice.update(p.owner.actor,problemId,Map.of("tags",List.of("DP","  Graphs ","dp")));
+        assertEquals(List.of("dp","graphs"),List.of((String[])db.jdbc.queryForObject("SELECT tags FROM practice_publications WHERE problem_id=?",java.sql.Array.class,problemId).getArray()));
+        assertThrows(ResponseStatusException.class,()->practice.update(user(false).actor,problemId,Map.of("hidden",true)));
+
+        User u=user(false);
+        // "Run examples": judged on the single example test only and never counted.
+        UUID run=submissions.submit(u.actor,null,null,p.version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main(){}","mode","samples"));
+        UUID runJob=db.jdbc.queryForObject("SELECT id FROM judging_jobs WHERE submission_id=?",UUID.class,run);
+        var runClaim=judge.claim(runJob,internal,0).orElseThrow();
+        assertEquals(1,((List<?>)runClaim.get("tests")).size());
+        judge.complete(runJob,internal,Api.uuid(runClaim.get("leaseToken")),accepted(runJob));
+        assertEquals(1,db.one("SELECT total_tests FROM judging_results WHERE job_id=?",runJob).get("total_tests"));
+        var row=practice.catalog(u.actor).stream().filter(x->problemId.equals(x.get("problem_id"))).findFirst().orElseThrow();
+        assertEquals(0L,((Number)row.get("tried_by")).longValue());assertNull(row.get("my_status"));
+        // A real submission is judged on every test and counts.
+        UUID real=submissions.submit(u.actor,null,null,p.version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main(){ }"));
+        UUID realJob=db.jdbc.queryForObject("SELECT id FROM judging_jobs WHERE submission_id=?",UUID.class,real);
+        var realClaim=judge.claim(realJob,internal,0).orElseThrow();
+        assertEquals(2,((List<?>)realClaim.get("tests")).size());
+        judge.complete(realJob,internal,Api.uuid(realClaim.get("leaseToken")),accepted(realJob));
+        row=practice.stats(u.actor,p.version);
+        assertEquals(1L,((Number)row.get("solved_by")).longValue());assertEquals("SOLVED",row.get("my_status"));
+        assertEquals(1L,((Number)row.get("accepted")).longValue());
+        // Through HTTP: tags serialize as a JSON list for contestants and organizers.
+        var catalogJson=JSON.readTree(mvc.perform(get("/api/practice").header("Authorization","Bearer "+u.token)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertTrue(catalogJson.toString().contains("[\"dp\",\"graphs\"]"));
+        mvc.perform(get("/api/practice/"+p.version).header("Authorization","Bearer "+u.token)).andExpect(status().isOk());
+        mvc.perform(get("/api/manage/practice").header("Authorization","Bearer "+p.owner.token)).andExpect(status().isOk());
+        // Hidden problems leave the catalog and refuse submissions.
+        practice.update(p.owner.actor,problemId,Map.of("hidden",true));
+        assertTrue(practice.catalog(u.actor).stream().noneMatch(x->problemId.equals(x.get("problem_id"))));
+        assertThrows(ResponseStatusException.class,()->submissions.submit(u.actor,null,null,p.version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","x")));
     }
 
     @Test void signedInUsersChangeTheirPasswordAndOtherSessionsEnd() throws Exception {

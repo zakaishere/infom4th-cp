@@ -1,0 +1,80 @@
+/* Practice catalog, coding workspace and the CodeMirror editor. */
+
+/* Editor */
+.code-editor { flex: 1; min-height: 240px; display: flex; border: 1px solid #12384a; overflow: hidden; background: #0b2633; }
+.code-editor .cm-editor { flex: 1; min-width: 0; }
+.code-editor .cm-editor.cm-focused { outline: none; }
+.code-editor:focus-within { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.editor-wrap .code-editor { min-height: 360px; }
+
+/* Difficulty, status, tags */
+.difficulty { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
+.difficulty.easy { color: #0f8a5f; background: color-mix(in srgb, #17b26a 16%, transparent); }
+.difficulty.medium { color: #b7791f; background: color-mix(in srgb, #f2b84b 20%, transparent); }
+.difficulty.hard { color: #c0392b; background: color-mix(in srgb, #ff6b5b 16%, transparent); }
+:root[data-theme="dark"] .difficulty.easy { color: #3ddc97; }
+:root[data-theme="dark"] .difficulty.medium { color: #f2b84b; }
+:root[data-theme="dark"] .difficulty.hard { color: #ff8a7a; }
+.status-icon { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem; font-weight: 700; }
+.status-icon.solved { background: var(--ok); color: #fff; }
+.status-icon.tried { color: var(--warn); font-size: 0.7rem; }
+.tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem; }
+.tag-chip { display: inline-flex; align-items: center; font-size: 0.78rem; font-weight: 500; padding: 0.15rem 0.6rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 9%, var(--card)); border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent); color: var(--fg); cursor: pointer; }
+.tag-chip.small { font-size: 0.72rem; padding: 0.05rem 0.5rem; }
+.tag-chip:hover { border-color: var(--primary); }
+.tag-chip.active { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+button.tag-chip { font-weight: 500; }
+
+/* Catalog */
+.practice-hero { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;
+  padding: 1.4rem 1.6rem; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); border-top: 4px solid var(--primary); }
+.practice-progress { display: flex; gap: 1.2rem; align-items: center; }
+.practice-progress .ring-label strong { font-size: 1.3rem; font-family: var(--font-display); }
+.progress-line { display: grid; grid-template-columns: 74px 1fr 46px; gap: 0.5rem; align-items: center; }
+.bar.diff-easy > div { background: #17b26a; } .bar.diff-medium > div { background: #f2b84b; } .bar.diff-hard > div { background: #ff6b5b; }
+.practice-filters { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.6rem; }
+.practice-filters .search { flex: 1 1 240px; max-width: 380px; }
+.tag-filter { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+table.practice-table td { vertical-align: middle; padding: 0.75rem 0.8rem; }
+.practice-table tbody tr { cursor: pointer; }
+.practice-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
+.practice-table tbody tr:hover td { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.practice-table tr.row-solved td:first-child { box-shadow: inset 3px 0 0 var(--ok); }
+.problem-link { font-weight: 600; color: var(--fg); font-size: 1rem; }
+.problem-link:hover { color: var(--primary); }
+@media (max-width: 760px) { .hide-narrow { display: none; } }
+
+/* Workspace: statement | divider | editor + console */
+.workspace { display: grid; height: calc(100vh - 58px); min-height: 520px; background: var(--bg); }
+.ws-left, .ws-right { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--card); }
+.ws-bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--card); }
+.ws-tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 0.5rem; }
+.ws-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; padding: 0.55rem 0.9rem; color: var(--muted); }
+.ws-tabs button.active { border-bottom-color: var(--primary); color: var(--fg); }
+.ws-scroll { flex: 1; overflow: auto; padding: 1rem 1.4rem 2rem; }
+.ws-scroll h1 { font-size: 1.6rem; }
+.ws-meta { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.ws-divider { cursor: col-resize; background: var(--line); transition: background 0.15s; touch-action: none; }
+.ws-divider:hover, body.resizing .ws-divider { background: var(--primary); }
+body.resizing { cursor: col-resize; user-select: none; }
+.ws-editor { flex: 1; display: flex; min-height: 0; padding: 0; }
+.ws-editor .code-editor { border: 0; min-height: 0; }
+.ws-console { flex: none; max-height: 42%; overflow: auto; padding: 0.8rem 1rem; border-top: 1px solid var(--line); background: var(--card); }
+.ws-console.has-result { min-height: 120px; }
+.verdict-big { font-family: var(--font-display); font-size: 1.25rem; font-weight: 700; }
+.verdict-big.ok { color: var(--ok); } .verdict-big.bad { color: var(--danger); } .verdict-big.warn { color: var(--warn); } .verdict-big.neutral { color: var(--muted); }
+.compiler-output { margin: 0; padding: 0.6rem 0.8rem; background: var(--code-bg); color: #ffb4a9; font-size: 0.82rem; max-height: 200px; overflow: auto; }
+@media (max-width: 900px) {
+  .workspace { display: flex; flex-direction: column; height: auto; }
+  .ws-divider { display: none; }
+  .ws-scroll { max-height: none; }
+  .ws-editor { min-height: 420px; }
+  .ws-console { max-height: none; }
+}
+
+/* Admin practice set */
+.tag-editor { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.tag-editor input { width: 140px; padding: 0.2rem 0.45rem; font-size: 0.85rem; }
+.tag-chip .x { margin-left: 0.3rem; opacity: 0.7; }
+tr.hidden-row td { opacity: 0.55; }

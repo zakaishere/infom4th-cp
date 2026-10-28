@@ -6,6 +6,7 @@ import ContestWizard from "./ContestWizard";
 import { ContestDetail, ContestList } from "./Contests";
 import { ProblemEditor, ProblemList } from "./Problems";
 import { Audit, Languages, Users } from "./Platform";
+import PracticeSet from "./PracticeSet";
 
 type Item = { key: string; label: string; icon: string; count?: number };
 
@@ -22,6 +23,7 @@ export default function Admin({ parts }: { parts: string[] }) {
     ] },
     { title: "Build", items: [
       setter && { key: "problems", label: "Problem lab", icon: "✎", count: review || undefined },
+      organizer && { key: "practice", label: "Practice set", icon: "★" },
     ] },
     { title: "System", items: [
       superAdmin && { key: "judging", label: "Judges & capacity", icon: "⚙" },
@@ -39,6 +41,7 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "problems" && parts[1] === "new") page = <ProblemWizard />;
   else if (current === "problems" && parts[1]) page = <ProblemEditor versionId={parts[1]} />;
   else if (current === "problems") page = <ProblemList />;
+  else if (current === "practice" && organizer) page = <PracticeSet />;
   else if (current === "judging" && superAdmin) page = <JudgingSettings />;
   else if (current === "languages" && superAdmin) page = <Languages />;
   else if (current === "users" && superAdmin) page = <Users />;

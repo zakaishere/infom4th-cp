@@ -189,7 +189,7 @@ function References({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSav
             <Field label="Expected verdict"><select value={form.expectedVerdict} onChange={(e) => setForm({ ...form, expectedVerdict: e.target.value })}>
               {Object.entries(VERDICTS).filter(([k]) => k !== "JUDGE_ERROR").map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
           </div>
-          <div style={{ height: 320, display: "flex" }}><CodeEditor value={form.sourceCode} onChange={(s) => setForm({ ...form, sourceCode: s })} /></div>
+          <div style={{ height: 320, display: "flex" }}><CodeEditor value={form.sourceCode} onChange={(s) => setForm({ ...form, sourceCode: s })} language={form.language} /></div>
           <div><button className="primary" disabled={busy || !form.sourceCode.trim()}>Add reference</button></div>
         </form>
       )}

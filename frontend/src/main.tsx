@@ -2,6 +2,7 @@ import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./refresh.css";
+import "./practice.css";
 import { AuthProvider, ToastProvider, navigate, useAuth, useRoute, useTheme } from "./app";
 import { logout } from "./api";
 import { Loading } from "./ui";

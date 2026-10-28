@@ -189,7 +189,7 @@ export default function ProblemWizard() {
             <p className="muted" style={{ margin: 0 }}>Paste a correct solution. It runs on every test in the real sandbox to prove the tests and limits are right.</p>
             <Field label="Language"><select value={d.referenceLanguage} style={{ maxWidth: 220 }} onChange={(e) => set({ referenceLanguage: e.target.value, referenceCode: d.referenceCode.trim() && d.referenceCode !== TEMPLATES[d.referenceLanguage] ? d.referenceCode : TEMPLATES[e.target.value] ?? "" })}>
               {d.languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l]}</option>)}</select></Field>
-            <div style={{ height: 360, display: "flex" }}><CodeEditor value={d.referenceCode} onChange={(v) => set({ referenceCode: v })} /></div>
+            <div style={{ height: 360, display: "flex" }}><CodeEditor value={d.referenceCode} onChange={(v) => set({ referenceCode: v })} language={d.referenceLanguage} /></div>
           </div>
         )}
         {step === 4 && (

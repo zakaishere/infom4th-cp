@@ -13,7 +13,7 @@ export type ProblemDetail = {
 export type SubmissionRow = {
   id: string; problem_slot: number | null; problem_version_id: string; language_code: string; submitted_at: string;
   status: string | null; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null;
-  passed_tests: number | null; total_tests: number | null; submitted_by_handle?: string;
+  passed_tests: number | null; total_tests: number | null; submitted_by_handle?: string; samples_only?: boolean;
 };
 
 export const pending = (s: { status: string | null }) => s.status === "QUEUED" || s.status === "RUNNING" || s.status === "RETRY";
@@ -47,7 +47,7 @@ export function ProblemStatement({ problem, label }: { problem: ProblemDetail; l
   );
 }
 
-function uuid() {
+export function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
   // Plain-HTTP LAN deployments lack randomUUID; getRandomValues is still available.
   const b = crypto.getRandomValues(new Uint8Array(16));
@@ -56,8 +56,8 @@ function uuid() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-function draftKey(scope: string, language: string) { return "cp.draft." + scope + "." + language; }
-function readDraft(scope: string, language: string) {
+export function draftKey(scope: string, language: string) { return "cp.draft." + scope + "." + language; }
+export function readDraft(scope: string, language: string) {
   try { return localStorage.getItem(draftKey(scope, language)); } catch { return null; }
 }
 
@@ -112,7 +112,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
       </div>
       {disabled && disabledReason && <div className="notice warn small">{disabledReason}</div>}
       {languages.length === 0 && <div className="notice warn small">No language is currently enabled for this problem.</div>}
-      <CodeEditor value={source} onChange={setSource} onSubmit={submit} />
+      <CodeEditor value={source} onChange={setSource} onSubmit={submit} language={language} />
       <div className="small muted">Read from standard input, write to standard output. Java classes must be named Main. Drafts are saved in this browser.</div>
     </div>
   );
@@ -144,14 +144,14 @@ export function SubmissionTable({ rows, labels, onOpen, showAuthor }: { rows: Su
   );
 }
 
-type SubmissionDetail = {
+export type SubmissionDetail = {
   submission: { id: string; language_code: string; source_code: string; submitted_at: string };
   judging: { status: string; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null; passed_tests: number | null; total_tests: number | null; public_feedback: string | null; generation: number }[];
   cases?: { number: number; sample: boolean; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null }[];
 };
 
 /** Per-test results: which test failed, and how long each took. Hidden test data is never shown. */
-function TestCases({ cases, compileError }: { cases: NonNullable<SubmissionDetail["cases"]>; compileError: boolean }) {
+export function TestCases({ cases, compileError }: { cases: NonNullable<SubmissionDetail["cases"]>; compileError: boolean }) {
   if (compileError) return null;
   const firstFailure = cases.find((c) => c.verdict && c.verdict !== "ACCEPTED");
   return (
@@ -193,7 +193,7 @@ export function SubmissionModal({ id, onClose }: { id: string; onClose: () => vo
           {detail.data.cases && <TestCases cases={detail.data.cases} compileError={latest?.verdict === "COMPILATION_ERROR"} />}
           {latest?.public_feedback && <><strong>Compiler output</strong><pre className="card-flat small" style={{ maxHeight: 220, overflow: "auto" }}>{latest.public_feedback}</pre></>}
           <strong>Source</strong>
-          <pre className="card-flat small mono" style={{ maxHeight: 360, overflow: "auto" }}>{detail.data.submission.source_code}</pre>
+          <div style={{ height: 320, display: "flex" }}><CodeEditor value={detail.data.submission.source_code} language={detail.data.submission.language_code} readOnly /></div>
         </div>
       )}
     </Modal>
