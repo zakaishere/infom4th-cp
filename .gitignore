@@ -11,3 +11,6 @@
 node_modules/
 dist/
 .env.bak
+
+# Personal scratch copies of work in progress (never committed).
+draft/

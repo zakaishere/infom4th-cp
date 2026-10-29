@@ -208,6 +208,35 @@ class BackendWorkflowTest {
                 "INSERT INTO submissions(run_id,competition_version_id,entry_id,submitted_by,problem_slot,problem_version_id,language_code,source_code,idempotency_key,submitted_at) SELECT run_id,competition_version_id,entry_id,submitted_by,problem_slot,problem_version_id,language_code,source_code,?,now()-interval '1 day' FROM submissions WHERE id=?",
                 UUID.randomUUID(),submission));
     }
+    @Test void analyticsCoverServerPlatformAndContestRuns() throws Exception {
+        var analytics=context.getBean(com.cpplatform.analytics.AnalyticsService.class);
+        Problem p=validation();pass(p);UUID officialWorker=worker("official",2);User entrant=user(false);
+        UUID contest=contests.create(p.owner.actor,Map.of("slug","analytics-"+UUID.randomUUID(),"title","Analytics contest","languages",List.of("CPP"),"durationSeconds",120));
+        contests.attach(p.owner.actor,contest,p.version,1,"A");
+        contests.rehearsal(p.owner.actor,contest,Map.of());
+        java.time.Instant start=java.time.Instant.now().plusSeconds(2);
+        UUID run=contests.schedule(p.owner.actor,contest,start,"PUBLIC");
+        contests.register(entrant.actor,contest,null);
+        while(java.time.Instant.now().isBefore(start))Thread.sleep(20);
+        UUID submission=submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}"));
+        UUID job=db.jdbc.queryForObject("SELECT id FROM judging_jobs WHERE submission_id=?",UUID.class,submission);
+        var claim=judge.claim(job,officialWorker,0).orElseThrow();
+        judge.complete(job,officialWorker,Api.uuid(claim.get("leaseToken")),accepted(claim));
+        analytics.sample();
+        assertTrue(db.jdbc.queryForObject("SELECT count(*) FROM metric_samples",Integer.class)>=1);
+        analytics.closeDays();analytics.closeDays();
+        assertEquals(db.jdbc.queryForObject("SELECT count(DISTINCT day) FROM daily_reports",Integer.class),db.jdbc.queryForObject("SELECT count(*) FROM daily_reports",Integer.class));
+        assertTrue(((Number)analytics.day(java.time.LocalDate.now(java.time.ZoneOffset.UTC)).get("submissions")).longValue()>=1);
+        assertTrue(((List<?>)analytics.timeseries(24).get("activity")).size()>=240);
+        var stats=analytics.run(p.owner.actor,run);
+        assertEquals(1L,((Map<?,?>)stats.get("totals")).get("accepted"));
+        assertEquals(1L,((Map<?,?>)((List<?>)stats.get("problems")).get(0)).get("solved"));
+        assertTrue(analytics.contests(p.owner.actor).stream().anyMatch(r->run.equals(r.get("run_id"))));
+        assertThrows(ResponseStatusException.class,()->analytics.run(entrant.actor,run));
+        mvc.perform(get("/api/admin/analytics/overview").header("Authorization","Bearer "+p.owner.token)).andExpect(status().isOk()).andExpect(jsonPath("$.server.cpus").isNumber());
+        mvc.perform(get("/api/admin/analytics/daily").header("Authorization","Bearer "+p.owner.token)).andExpect(status().isOk()).andExpect(jsonPath("$.today.day").isString());
+        mvc.perform(get("/api/admin/analytics/overview").header("Authorization","Bearer "+entrant.token)).andExpect(status().isForbidden());
+    }
     @Test void privateContestRequiresAnInvitation() {
         Problem p=validation();pass(p);worker("official",2);User entrant=user(false);
         UUID contest=contests.create(p.owner.actor,Map.of("slug","private-"+UUID.randomUUID(),"title","Private contest","languages",List.of("CPP")));
