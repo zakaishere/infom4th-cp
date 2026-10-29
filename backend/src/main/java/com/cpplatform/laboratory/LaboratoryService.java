@@ -14,7 +14,11 @@ public class LaboratoryService {
     @Transactional
     public UUID create(Actor actor,Map<String,Object> body) {
         access.setter(actor);
-        UUID problem=db.id("INSERT INTO problems(slug,owner_id) VALUES (?,?) RETURNING id",Api.text(body,"slug",120),actor.id());
+        String slug=Api.text(body,"slug",120);
+        Api.require(slug.matches("[a-z0-9]+(-[a-z0-9]+)*"),HttpStatus.BAD_REQUEST,"Short name may contain lowercase letters, digits and single dashes");
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problems WHERE slug=?)",slug),HttpStatus.CONFLICT,
+                "A problem with the short name \""+slug+"\" already exists. Choose another short name, or delete the old problem in the Problem lab.");
+        UUID problem=db.id("INSERT INTO problems(slug,owner_id) VALUES (?,?) RETURNING id",slug,actor.id());
         UUID version=db.id("INSERT INTO problem_versions(problem_id,version_number,title,created_by) VALUES (?,1,?,?) RETURNING id",
                 problem,Api.text(body,"title",255),actor.id());
         edit(actor,version,body);db.audit(actor.id(),"PROBLEM_CREATE","problem",problem,null);return version;
