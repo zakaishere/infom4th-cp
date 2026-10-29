@@ -17,7 +17,11 @@ import java.util.*;
 public class ServerMetrics {
     private final Database db;private final DataSource dataSource;
     public final String host=hostName();
-    public ServerMetrics(Database db,DataSource dataSource){this.db=db;this.dataSource=dataSource;}
+    public ServerMetrics(Database db,DataSource dataSource) {
+        this.db=db;this.dataSource=dataSource;
+        // The first CPU reading only sets a baseline and reports 0; take it now so the first sample is real.
+        if(ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os){os.getCpuLoad();os.getProcessCpuLoad();}
+    }
 
     private static String hostName() {
         try {return InetAddress.getLocalHost().getHostName();} catch(Exception e) {return "backend";}
