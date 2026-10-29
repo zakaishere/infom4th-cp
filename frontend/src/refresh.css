@@ -204,3 +204,21 @@ table.problem-table { border-collapse: separate; border-spacing: 0 6px; }
 .control-bar button.danger { color: #ff9b8f; border-color: #ff6b5b; }
 .control-bar .muted { color: #a9c4cc; }
 .control-bar .eyebrow { color: #35c7e8; }
+
+/* Analytics charts: one hue (primary); a second series is the lighter area beneath the line. */
+.analytics-chart svg { display: block; overflow: visible; }
+.chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-axis { fill: var(--muted); font-size: 11px; font-family: var(--font-sans); }
+.chart-line { fill: none; stroke: var(--primary); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-area { fill: color-mix(in srgb, var(--primary) 22%, transparent); stroke: none; }
+.chart-cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart-dot { fill: var(--primary); stroke: var(--card); stroke-width: 2; }
+.chart-tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); padding: 0.35rem 0.55rem; font-size: 0.8rem; white-space: nowrap; }
+.chart-legend { display: flex; gap: 0.9rem; color: var(--muted); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.swatch { display: inline-block; width: 14px; }
+.swatch.line { height: 2px; background: var(--primary); }
+.swatch.area { height: 10px; background: color-mix(in srgb, var(--primary) 22%, transparent); }
+.bar-row { display: grid; grid-template-columns: minmax(90px, 9rem) 1fr auto; align-items: center; gap: 0.6rem; }
+.bar-track { height: 10px; background: var(--card-2); }
+.bar-track > div { height: 100%; background: var(--primary); border-radius: 0 4px 4px 0; min-width: 2px; }

@@ -7,6 +7,7 @@ import { ContestDetail, ContestList } from "./Contests";
 import { ProblemEditor, ProblemList } from "./Problems";
 import { Audit, Languages, Users } from "./Platform";
 import PracticeSet from "./PracticeSet";
+import Analytics from "./Analytics";
 
 type Item = { key: string; label: string; icon: string; count?: number };
 
@@ -20,6 +21,7 @@ export default function Admin({ parts }: { parts: string[] }) {
     { title: "Run", items: [
       { key: "overview", label: "Overview", icon: "◉" },
       organizer && { key: "contests", label: "Contests", icon: "⚑", count: live || undefined },
+      organizer && { key: "analytics", label: "Analytics", icon: "▤" },
     ] },
     { title: "Build", items: [
       setter && { key: "problems", label: "Problem lab", icon: "✎", count: review || undefined },
@@ -41,6 +43,7 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "problems" && parts[1] === "new") page = <ProblemWizard />;
   else if (current === "problems" && parts[1]) page = <ProblemEditor versionId={parts[1]} />;
   else if (current === "problems") page = <ProblemList />;
+  else if (current === "analytics" && organizer) page = <Analytics />;
   else if (current === "practice" && organizer) page = <PracticeSet />;
   else if (current === "judging" && superAdmin) page = <JudgingSettings />;
   else if (current === "languages" && superAdmin) page = <Languages />;
