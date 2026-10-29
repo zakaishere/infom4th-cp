@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { post, put } from "../../api";
 import { useAction, useData } from "../../app";
-import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, ReasonDialog, Stat, when } from "../../ui";
+import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, ReasonDialog, Stat, ago, when } from "../../ui";
 
 type ImportRow = { email: string; handle: string; displayName?: string; role?: string };
 type ImportResult = ImportRow & { status: string; error?: string; password?: string };
@@ -79,34 +79,177 @@ function BulkImport({ onDone }: { onDone: () => void }) {
   );
 }
 
-export function Users() {
-  const [offset, setOffset] = useState(0);
-  const users = useData<{ id: string; email: string; handle: string; display_name: string; status: string }[]>("/api/admin/users?offset=" + offset);
-  const [grant, setGrant] = useState<{ id: string; handle: string; role: string } | null>(null);
+/** A user's role is their highest one; every account also keeps PARTICIPANT. */
+const ROLES: Record<string, { label: string; tone: string; help: string }> = {
+  SUPER_ADMIN: { label: "Super admin", tone: "bad", help: "Manages the whole platform: users, judges, languages" },
+  ADMIN: { label: "Organizer", tone: "warn", help: "Creates and runs contests" },
+  MODERATOR: { label: "Problem setter", tone: "info", help: "Writes and tests problems" },
+  PARTICIPANT: { label: "Participant", tone: "neutral", help: "Takes part in contests and practice" },
+};
+const ROLE_ORDER = ["SUPER_ADMIN", "ADMIN", "MODERATOR", "PARTICIPANT"];
+const mainRole = (roles: string[]) => ROLE_ORDER.find((r) => roles.includes(r)) ?? "PARTICIPANT";
+
+type UserRow = { id: string; email: string; handle: string; display_name: string; status: string; roles: string[]; created_at: string; last_seen_at: string | null; submissions: number };
+type RoleChange = { id: string; handle: string; from: string; to: string };
+type StatusChange = { id: string; handle: string; status: string };
+
+function RoleBadge({ role }: { role: string }) {
+  return <Badge tone={ROLES[role]?.tone ?? "neutral"}>{ROLES[role]?.label ?? role}</Badge>;
+}
+
+/** Shared confirmation dialogs for role and status changes. */
+function UserDialogs({ role, status, onClose, onDone }: { role: RoleChange | null; status: StatusChange | null; onClose: () => void; onDone: () => void }) {
   const { run } = useAction();
   return (
+    <>
+      {role && <ReasonDialog title={`Make @${role.handle} ${ROLES[role.to].label.toLowerCase()}`} confirm="Change role" danger={role.to === "SUPER_ADMIN" || role.from === "SUPER_ADMIN"}
+        description={<>From <RoleBadge role={role.from} /> to <RoleBadge role={role.to} />. {ROLES[role.to].help}. It applies at the user's next request.</>} onClose={onClose}
+        onSubmit={(reason) => run(async () => { await put("/api/admin/users/" + role.id + "/role", { role: role.to, reason }); onClose(); onDone(); }, "Role changed")} />}
+      {status && <ReasonDialog title={(status.status === "ACTIVE" ? "Reactivate" : "Suspend") + " @" + status.handle} confirm={status.status === "ACTIVE" ? "Reactivate" : "Suspend"} danger={status.status !== "ACTIVE"}
+        description={status.status === "ACTIVE" ? "The user can sign in again." : "The user is signed out everywhere and cannot sign in. Their submissions and results are kept."} onClose={onClose}
+        onSubmit={(reason) => run(async () => { await put("/api/admin/users/" + status.id + "/status", { status: status.status, reason }); onClose(); onDone(); }, "Status changed")} />}
+    </>
+  );
+}
+
+export function Users({ importOpen = false }: { importOpen?: boolean }) {
+  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  const [role, setRole] = useState("");
+  const [status, setStatus] = useState("");
+  const [importing, setImporting] = useState(importOpen);
+  const [roleChange, setRoleChange] = useState<RoleChange | null>(null);
+  const [statusChange, setStatusChange] = useState<StatusChange | null>(null);
+  useEffect(() => { const t = setTimeout(() => { setQ(search.trim()); setOffset(0); }, 300); return () => clearTimeout(t); }, [search]);
+  const params = new URLSearchParams({ offset: String(offset) });
+  if (q) params.set("q", q); if (role) params.set("role", role); if (status) params.set("status", status);
+  const users = useData<{ total: number; users: UserRow[]; roleCounts: { role: string; count: number }[] }>("/api/admin/users?" + params);
+  const counts = Object.fromEntries((users.data?.roleCounts ?? []).map((c) => [c.role, c.count]));
+  const total = users.data?.total ?? 0;
+  return (
     <div className="stack">
-      <div className="page-head" style={{ marginBottom: 0 }}><div><h1>Users & roles</h1><p>Grants are additive and audited. ADMIN organizes contests, MODERATOR sets problems, SUPER_ADMIN manages the platform.</p></div></div>
-      <BulkImport onDone={users.reload} />
+      <div className="page-head" style={{ marginBottom: 0 }}>
+        <div><h1>Users & roles</h1><p>Each user has one role. Changes are audited and apply at the user's next request.</p></div>
+        <button className={importing ? "" : "primary"} onClick={() => setImporting(!importing)}>{importing ? "Close import" : "+ Import users"}</button>
+      </div>
+      {importing && <BulkImport onDone={users.reload} />}
+      <div className="stat-tiles">
+        {ROLE_ORDER.slice(0, 3).map((r) => <Stat key={r} label={ROLES[r].label + "s"} value={counts[r] ?? 0} />)}
+        <Stat label="All users" value={counts.PARTICIPANT ?? "…"} />
+      </div>
+      <div className="card row" style={{ alignItems: "flex-end" }}>
+        <Field label="Search"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, handle or email" style={{ minWidth: 240 }} /></Field>
+        <Field label="Role"><select value={role} onChange={(e) => { setRole(e.target.value); setOffset(0); }}>
+          <option value="">All roles</option>{ROLE_ORDER.map((r) => <option key={r} value={r}>{r === "PARTICIPANT" ? "Participants only" : ROLES[r].label}</option>)}</select></Field>
+        <Field label="Status"><select value={status} onChange={(e) => { setStatus(e.target.value); setOffset(0); }}>
+          <option value="">Any status</option><option value="ACTIVE">Active</option><option value="SUSPENDED">Suspended</option><option value="DISABLED">Disabled</option></select></Field>
+        {(search || role || status) && <button className="small" onClick={() => { setSearch(""); setRole(""); setStatus(""); }}>Clear filters</button>}
+      </div>
       <ErrorBox error={users.error} />
-      {users.loading ? <Loading /> : (
+      {users.loading ? <Loading /> : !users.data?.users.length ? <Empty>No user matches these filters.</Empty> : (
         <div className="card table-wrap"><table>
-          <thead><tr><th>User</th><th>Email</th><th>Status</th><th /></tr></thead>
-          <tbody>{(users.data ?? []).map((u) => (
-            <tr key={u.id}>
-              <td><strong>{u.display_name}</strong><div className="small muted">@{u.handle}</div></td>
-              <td className="small">{u.email}</td>
-              <td><Badge tone={u.status === "ACTIVE" ? "ok" : "neutral"}>{u.status}</Badge></td>
-              <td className="right"><div className="row" style={{ justifyContent: "flex-end" }}>
-                {["MODERATOR", "ADMIN", "SUPER_ADMIN"].map((role) => <button key={role} className="small" onClick={() => setGrant({ id: u.id, handle: u.handle, role })}>+ {role}</button>)}
-              </div></td>
-            </tr>
-          ))}</tbody>
+          <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Submissions</th><th>Last sign-in</th><th>Change role</th><th /></tr></thead>
+          <tbody>{users.data.users.map((u) => {
+            const current = mainRole(u.roles);
+            return (
+              <tr key={u.id}>
+                <td><a href={"#/admin/users/" + u.id}><strong>{u.display_name}</strong></a><div className="small muted">@{u.handle} · {u.email}</div></td>
+                <td><RoleBadge role={current} /></td>
+                <td><Badge tone={u.status === "ACTIVE" ? "ok" : "bad"}>{u.status}</Badge></td>
+                <td className="small">{u.submissions}</td>
+                <td className="small">{u.last_seen_at ? ago(u.last_seen_at) : "never"}</td>
+                <td><select value={current} aria-label={"Role of @" + u.handle} onChange={(e) => setRoleChange({ id: u.id, handle: u.handle, from: current, to: e.target.value })} style={{ minWidth: 150 }}>
+                  {ROLE_ORDER.map((r) => <option key={r} value={r}>{ROLES[r].label}</option>)}</select></td>
+                <td className="right"><a className="btn small" href={"#/admin/users/" + u.id}>Details & log</a></td>
+              </tr>
+            );
+          })}</tbody>
         </table></div>
       )}
-      <div className="row"><button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous</button><button disabled={(users.data?.length ?? 0) < 100} onClick={() => setOffset(offset + 100)}>Next</button></div>
-      {grant && <ReasonDialog title={`Grant ${grant.role} to @${grant.handle}`} confirm="Grant role" danger={grant.role === "SUPER_ADMIN"} onClose={() => setGrant(null)}
-        onSubmit={(reason) => run(async () => { await put("/api/admin/users/" + grant.id + "/roles", { role: grant.role, reason }); setGrant(null); }, "Role granted. It applies at the user's next request.")} />}
+      <div className="row"><button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous</button>
+        <span className="small muted">{total ? `${offset + 1}–${Math.min(offset + 100, total)} of ${total}` : ""}</span>
+        <button disabled={offset + 100 >= total} onClick={() => setOffset(offset + 100)}>Next</button></div>
+      <UserDialogs role={roleChange} status={statusChange} onClose={() => { setRoleChange(null); setStatusChange(null); }} onDone={users.reload} />
+    </div>
+  );
+}
+
+type AuditRow = { id: number; actor_handle: string | null; action: string; resource_type: string; resource_id: string | null; reason: string | null; metadata: string; created_at: string; target_handle?: string | null; by_user?: boolean };
+
+function AuditTable({ rows, showActor = true }: { rows: AuditRow[]; showActor?: boolean }) {
+  return (
+    <div className="card table-wrap"><table>
+      <thead><tr><th>When</th>{showActor && <th>Actor</th>}<th>Action</th><th>Reason</th><th>Changes</th></tr></thead>
+      <tbody>{rows.map((a) => (
+        <tr key={a.id}>
+          <td className="small">{when(a.created_at)}</td>
+          {showActor && <td className="small">{a.actor_handle ? "@" + a.actor_handle : "system"}</td>}
+          <td><strong className="small">{a.action}</strong><div className="small muted mono">{a.resource_type}{a.target_handle ? " · @" + a.target_handle : ""}</div></td>
+          <td className="small">{a.reason}</td>
+          <td className="small mono">{a.metadata && a.metadata !== "{}" ? <pre style={{ margin: 0 }}>{JSON.stringify(JSON.parse(a.metadata), null, 1)}</pre> : ""}</td>
+        </tr>
+      ))}</tbody>
+    </table></div>
+  );
+}
+
+export function UserDetail({ id }: { id: string }) {
+  const user = useData<any>("/api/admin/users/" + id);
+  const [roleChange, setRoleChange] = useState<RoleChange | null>(null);
+  const [statusChange, setStatusChange] = useState<StatusChange | null>(null);
+  const [filter, setFilter] = useState<"all" | "by" | "about">("all");
+  if (user.error && !user.data) return <ErrorBox error={user.error} />;
+  if (!user.data) return <Loading />;
+  const u = user.data, a = u.activity;
+  const roles: string[] = u.roles.map((r: any) => r.role);
+  const current = mainRole(roles);
+  const audit = (u.audit as AuditRow[]).filter((r) => filter === "all" || (filter === "by") === !!r.by_user);
+  return (
+    <div className="stack">
+      <a href="#/admin/users" className="small">← All users</a>
+      <div className="page-head" style={{ marginBottom: 0 }}>
+        <div><h1>{u.display_name}</h1><p>@{u.handle} · {u.email} · joined {when(u.created_at)}</p></div>
+        <div className="row"><RoleBadge role={current} /><Badge tone={u.status === "ACTIVE" ? "ok" : "bad"}>{u.status}</Badge></div>
+      </div>
+      <div className="grid grid-2">
+        <section className="card stack">
+          <h3 style={{ margin: 0 }}>Role</h3>
+          <div className="stack" style={{ gap: "0.4rem" }}>
+            {ROLE_ORDER.map((r) => (
+              <label key={r} className="row" style={{ cursor: "pointer", alignItems: "flex-start" }}>
+                <input type="radio" name="role" checked={current === r} onChange={() => setRoleChange({ id: u.id, handle: u.handle, from: current, to: r })} />
+                <span><strong>{ROLES[r].label}</strong><div className="small muted">{ROLES[r].help}</div></span>
+              </label>
+            ))}
+          </div>
+          <span className="small muted">{u.roles.filter((r: any) => r.role !== "PARTICIPANT").map((r: any) => `${ROLES[r.role]?.label ?? r.role} since ${when(r.granted_at)}${r.granted_by ? " by @" + r.granted_by : ""}`).join(" · ") || "No staff role."}</span>
+          <div className="row">{u.status === "ACTIVE"
+            ? <button className="small danger" onClick={() => setStatusChange({ id: u.id, handle: u.handle, status: "SUSPENDED" })}>Suspend account</button>
+            : <button className="small primary" onClick={() => setStatusChange({ id: u.id, handle: u.handle, status: "ACTIVE" })}>Reactivate account</button>}</div>
+        </section>
+        <section className="card stack">
+          <h3 style={{ margin: 0 }}>Activity</h3>
+          <div className="capacity-numbers">
+            <Stat label="Submissions" value={a.submissions} hint={`${a.accepted} accepted`} />
+            <Stat label="Contests" value={a.contest_entries} />
+            <Stat label="Teams" value={a.teams} />
+            <Stat label="Problems owned" value={a.problems_owned} />
+            <Stat label="Contests owned" value={a.competitions_owned} />
+            <Stat label="Active sessions" value={a.active_sessions} />
+          </div>
+          <span className="small muted">Last sign-in {a.last_seen_at ? ago(a.last_seen_at) : "never"} · last submission {a.last_submission_at ? ago(a.last_submission_at) : "never"}</span>
+        </section>
+      </div>
+      <div className="row-between">
+        <h2 style={{ margin: 0 }}>Audit log</h2>
+        <div className="tabs" style={{ marginBottom: 0 }}>
+          {([["all", "Everything"], ["by", "Actions by this user"], ["about", "Changes to this user"]] as const).map(([k, l]) =>
+            <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>{l}</button>)}
+        </div>
+      </div>
+      {audit.length ? <AuditTable rows={audit} /> : <Empty>No audit entries.</Empty>}
+      <UserDialogs role={roleChange} status={statusChange} onClose={() => { setRoleChange(null); setStatusChange(null); }} onDone={user.reload} />
     </div>
   );
 }
@@ -164,27 +307,22 @@ export function Languages() {
 
 export function Audit() {
   const [type, setType] = useState("");
-  const log = useData<{ id: number; actor_handle: string | null; action: string; resource_type: string; resource_id: string | null; reason: string | null; metadata: string; created_at: string }[]>("/api/admin/audit?latest=true" + (type ? "&type=" + type : ""), 15000);
+  const [actorInput, setActorInput] = useState("");
+  const [actor, setActor] = useState("");
+  useEffect(() => { const t = setTimeout(() => setActor(actorInput.trim().replace(/^@/, "")), 300); return () => clearTimeout(t); }, [actorInput]);
+  const params = new URLSearchParams({ latest: "true" });
+  if (type) params.set("type", type); if (actor) params.set("actor", actor);
+  const log = useData<AuditRow[]>("/api/admin/audit?" + params, 15000);
   return (
     <div className="stack">
       <div className="page-head" style={{ marginBottom: 0 }}><div><h1>Audit log</h1><p>Append-only record of privileged actions with actor, time, reason and previous/new values.</p></div>
-        <Field label="Resource"><select value={type} onChange={(e) => setType(e.target.value)} style={{ width: 220 }}>
-          <option value="">All</option><option value="judging_settings">Judging settings</option><option value="worker">Workers</option><option value="run">Runs</option><option value="competition">Competitions</option><option value="submission">Submissions</option><option value="user">Users</option><option value="language">Languages</option></select></Field></div>
+        <div className="row" style={{ alignItems: "flex-end" }}>
+          <Field label="Actor"><input value={actorInput} onChange={(e) => setActorInput(e.target.value)} placeholder="Handle or email" style={{ width: 200 }} /></Field>
+          <Field label="Resource"><select value={type} onChange={(e) => setType(e.target.value)} style={{ width: 220 }}>
+            <option value="">All</option><option value="judging_settings">Judging settings</option><option value="worker">Workers</option><option value="run">Runs</option><option value="competition">Competitions</option><option value="submission">Submissions</option><option value="user">Users</option><option value="language">Languages</option><option value="problem">Problems</option></select></Field>
+        </div></div>
       <ErrorBox error={log.error} />
-      {log.loading ? <Loading /> : !log.data?.length ? <Empty>No entries.</Empty> : (
-        <div className="card table-wrap"><table>
-          <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Reason</th><th>Changes</th></tr></thead>
-          <tbody>{log.data.map((a) => (
-            <tr key={a.id}>
-              <td className="small">{when(a.created_at)}</td>
-              <td className="small">{a.actor_handle ? "@" + a.actor_handle : "system"}</td>
-              <td><strong className="small">{a.action}</strong><div className="small muted mono">{a.resource_type}</div></td>
-              <td className="small">{a.reason}</td>
-              <td className="small mono">{a.metadata && a.metadata !== "{}" ? <pre style={{ margin: 0 }}>{JSON.stringify(JSON.parse(a.metadata), null, 1)}</pre> : ""}</td>
-            </tr>
-          ))}</tbody>
-        </table></div>
-      )}
+      {log.loading ? <Loading /> : !log.data?.length ? <Empty>No entries.</Empty> : <AuditTable rows={log.data} />}
       <p className="small muted">Shows the newest 200 entries matching the filter.</p>
     </div>
   );
