@@ -395,6 +395,36 @@ class JudgingCapacityTest {
         assertThrows(ResponseStatusException.class,()->submissions.submit(u.actor,null,null,p.version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","x")));
     }
 
+    @Test void problemsCanBeDeletedAndRestoredWithoutLosingHistory() throws Exception {
+        UUID internal=worker("internal",4);Problem p=problem();
+        var c=judge.claim(p.job,internal,0).orElseThrow();
+        judge.complete(p.job,internal,Api.uuid(c.get("leaseToken")),accepted(p.job));
+        judge.finishValidations();lab.approve(p.owner.actor,p.version,"Validated");
+        String slug=(String)db.one("SELECT p.slug FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=?",p.version).get("slug");
+        // In a contest that has not finished: deleting is refused and names the contest.
+        UUID contest=contests.create(p.owner.actor,Map.of("slug","del-"+UUID.randomUUID(),"title","Blocking contest","languages",List.of("CPP")));
+        contests.attach(p.owner.actor,contest,p.version,1,"A");
+        var blocked=assertThrows(ResponseStatusException.class,()->lab.delete(p.owner.actor,p.version,"cleanup"));
+        assertTrue(blocked.getReason().contains("Blocking contest"));
+        contests.detach(p.owner.actor,contest,1);
+        // Other users cannot delete someone else's problem.
+        assertThrows(ResponseStatusException.class,()->lab.delete(user(false).actor,p.version,"no"));
+        mvc.perform(post("/api/lab/problems/"+p.version+"/delete").header("Authorization","Bearer "+p.owner.token).contentType("application/json")
+                .content("{\"reason\":\"Old test problem\"}")).andExpect(status().isOk());
+        String deletedList=mvc.perform(get("/api/lab/problems?deleted=true").header("Authorization","Bearer "+p.owner.token)).andReturn().getResponse().getContentAsString();
+        String activeList=mvc.perform(get("/api/lab/problems").header("Authorization","Bearer "+p.owner.token)).andReturn().getResponse().getContentAsString();
+        assertTrue(deletedList.contains(p.version.toString()));assertFalse(activeList.contains(p.version.toString()));
+        // The name is free again; deleted problems cannot be attached or published.
+        assertNotEquals(slug,db.one("SELECT p.slug FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=?",p.version).get("slug"));
+        assertNotNull(lab.create(p.owner.actor,Map.of("slug",slug,"title","Same name again","statement","x","languages",List.of("CPP"))));
+        assertThrows(ResponseStatusException.class,()->contests.attach(p.owner.actor,contest,p.version,1,"A"));
+        assertThrows(ResponseStatusException.class,()->lab.publishPractice(p.owner.actor,p.version));
+        // History stays: the validation submission still exists.
+        assertTrue(db.exists("SELECT EXISTS(SELECT 1 FROM submissions WHERE problem_version_id=?)",p.version));
+        lab.restore(p.owner.actor,p.version,"Needed again");
+        contests.attach(p.owner.actor,contest,p.version,1,"A");
+    }
+
     @Test void signedInUsersChangeTheirPasswordAndOtherSessionsEnd() throws Exception {
         User u=user(false);
         String email=(String)db.one("SELECT email FROM users WHERE id=?",u.actor.id()).get("email");

@@ -5,29 +5,56 @@ import { Badge, CodeEditor, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Mar
 
 const STATUS_TONE: Record<string, string> = { DRAFT: "neutral", IN_TESTING: "info", READY_FOR_REVIEW: "warn", APPROVED: "ok", PUBLISHED: "ok", ARCHIVED: "neutral" };
 
+type LabRow = { id: string; slug: string; version_id: string; title: string; version_number: number; status: string; deleted_at: string | null };
+
 export function ProblemList() {
-  const list = useData<{ id: string; slug: string; version_id: string; title: string; version_number: number; status: string }[]>("/api/lab/problems");
+  const [showDeleted, setShowDeleted] = useState(false);
+  const list = useData<LabRow[]>("/api/lab/problems" + (showDeleted ? "?deleted=true" : ""));
+  const [filter, setFilter] = useState("");
+  const [target, setTarget] = useState<{ row: LabRow; action: "delete" | "restore" } | null>(null);
+  const { run } = useAction();
+  const rows = (list.data ?? []).filter((p) => (p.title + " " + p.slug).toLowerCase().includes(filter.toLowerCase()));
   return (
     <div className="stack" style={{ gap: "1.5rem" }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><div className="eyebrow">Problem lab</div><h1>Problems</h1><p>The wizard walks you through statement, tests, a reference solution, validation and approval. Open a problem for advanced editing.</p></div>
-        <button className="primary" onClick={() => navigate("/admin/problems/new")}>+ New problem</button>
+        <div><div className="eyebrow">Problem lab</div><h1>{showDeleted ? "Deleted problems" : "Problems"}</h1>
+          <p>{showDeleted ? "Restore a problem to use it again. Contest history and submissions were never removed."
+            : "The wizard walks you through statement, tests, a reference solution, validation and approval. Open a problem for advanced editing."}</p></div>
+        <div className="row">
+          <button className="ghost" onClick={() => setShowDeleted(!showDeleted)}>{showDeleted ? "← Back to problems" : "🗑 Show deleted"}</button>
+          {!showDeleted && <button className="primary" onClick={() => navigate("/admin/problems/new")}>+ New problem</button>}
+        </div>
       </div>
+      <input placeholder="Filter by title" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 320 }} />
       <ErrorBox error={list.error} />
-      {list.loading ? <Loading /> : !list.data?.length ? <Empty>No problems yet.</Empty> : (
+      {list.loading ? <Loading /> : !rows.length ? <Empty>{showDeleted ? "No deleted problems." : "No problems yet."}</Empty> : (
         <div className="card table-wrap">
           <table>
             <thead><tr><th>Problem</th><th>Version</th><th>Status</th><th /></tr></thead>
-            <tbody>{list.data.map((p) => (
+            <tbody>{rows.map((p) => (
               <tr key={p.version_id}>
                 <td><strong>{p.title}</strong><div className="small muted mono">{p.slug}</div></td>
                 <td>v{p.version_number}</td>
-                <td><Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge></td>
-                <td className="right"><a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a></td>
+                <td>{showDeleted ? <Badge>Deleted {p.deleted_at ? when(p.deleted_at) : ""}</Badge> : <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>}</td>
+                <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                  {showDeleted ? <button className="small primary" onClick={() => setTarget({ row: p, action: "restore" })}>Restore</button> : <>
+                    <a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a>
+                    <button className="small danger" onClick={() => setTarget({ row: p, action: "delete" })} title="Delete this problem">Delete</button>
+                  </>}
+                </div></td>
               </tr>
             ))}</tbody>
           </table>
         </div>
+      )}
+      {target && (
+        <ReasonDialog title={(target.action === "delete" ? "Delete “" : "Restore “") + target.row.title + "”"} confirm={target.action === "delete" ? "Delete problem" : "Restore"}
+          danger={target.action === "delete"} onClose={() => setTarget(null)}
+          description={target.action === "delete"
+            ? "The problem (all its versions) leaves the Problem lab, the contest wizard and Practice. Finished contests, scoreboards and submissions keep it, so nothing breaks. You can restore it later from “Show deleted”. A problem used by a contest that has not finished cannot be deleted."
+            : "The problem comes back to the Problem lab. If it was in Practice, show it again from the Practice set."}
+          onSubmit={(reason) => run(async () => { await post("/api/lab/problems/" + target.row.version_id + "/" + target.action, { reason }); setTarget(null); list.reload(); },
+            target.action === "delete" ? "Problem deleted" : "Problem restored")} />
       )}
     </div>
   );

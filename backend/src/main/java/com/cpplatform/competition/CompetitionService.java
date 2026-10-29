@@ -86,6 +86,7 @@ public class CompetitionService {
         access.competition(actor,competition,false);access.problemRead(actor,problemVersion);
         db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competition);
         var v=version(competition);Api.require(v.get("sealed_at")==null,HttpStatus.CONFLICT,"Clone the contest snapshot before editing");
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions pv JOIN problems p ON p.id=pv.problem_id WHERE pv.id=? AND p.archived_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"This problem was deleted; restore it first");
         db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points) SELECT ?,?,?,problem_id,id,? FROM problem_versions WHERE id=?",
                 v.get("id"),slot,label,points,problemVersion);
     }

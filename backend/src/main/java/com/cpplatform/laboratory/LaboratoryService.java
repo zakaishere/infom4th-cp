@@ -119,10 +119,42 @@ public class LaboratoryService {
         db.jdbc.update("INSERT INTO problem_reviews(problem_version_id,reviewer_id,decision,reason) VALUES (?,?,'APPROVED',?)",version,actor.id(),reason);
         db.audit(actor.id(),"PROBLEM_APPROVE","problem_version",version,reason);
     }
+    /**
+     * Deletes a problem from the lab (all its versions). History stays intact: submissions,
+     * finished contests and their scoreboards keep referring to it, so this is a soft delete
+     * (problems.archived_at). Refused while a contest that has not finished uses the problem.
+     * The short name gets a suffix so the same name can be reused for a new problem.
+     */
+    @Transactional
+    public void delete(Actor actor,UUID version,String reason) {
+        access.problem(actor,version,true);
+        var p=db.one("SELECT p.id,p.slug,p.archived_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=? FOR UPDATE OF p",version);
+        Api.require(p.get("archived_at")==null,HttpStatus.CONFLICT,"The problem is already deleted");
+        UUID problem=(UUID)p.get("id");
+        var contests=db.jdbc.queryForList("SELECT DISTINCT c.title FROM competition_problems cp JOIN competition_versions cv ON cv.id=cp.competition_version_id "
+                +"JOIN competitions c ON c.id=cv.competition_id WHERE cp.problem_id=? AND c.status NOT IN ('FINISHED','ARCHIVED') ORDER BY 1",String.class,problem);
+        Api.require(contests.isEmpty(),HttpStatus.CONFLICT,"Used by a contest that has not finished: "+String.join(", ",contests)+". Remove it from that contest first.");
+        db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=?",problem);
+        String suffix="-deleted-"+UUID.randomUUID().toString().substring(0,6);
+        String slug=((String)p.get("slug"));
+        slug=slug.substring(0,Math.min(slug.length(),120-suffix.length())).replaceAll("-+$","")+suffix;
+        db.jdbc.update("UPDATE problems SET archived_at=now(),slug=? WHERE id=?",slug,problem);
+        db.audit(actor.id(),"PROBLEM_DELETE","problem",problem,reason);
+    }
+    /** Brings a deleted problem back to the lab. Its practice publication stays hidden until shown again. */
+    @Transactional
+    public void restore(Actor actor,UUID version,String reason) {
+        access.problem(actor,version,true);
+        var p=db.one("SELECT p.id,p.archived_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=? FOR UPDATE OF p",version);
+        Api.require(p.get("archived_at")!=null,HttpStatus.CONFLICT,"The problem is not deleted");
+        db.jdbc.update("UPDATE problems SET archived_at=NULL WHERE id=?",p.get("id"));
+        db.audit(actor.id(),"PROBLEM_RESTORE","problem",(UUID)p.get("id"),reason);
+    }
     @Transactional
     public void publishPractice(Actor actor,UUID version) {
         access.organizer(actor);access.problem(actor,version,false);
         var row=db.one("SELECT problem_id,status FROM problem_versions WHERE id=? FOR UPDATE",version);
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problems WHERE id=? AND archived_at IS NOT NULL)",row.get("problem_id")),HttpStatus.CONFLICT,"Restore the problem before publishing it");
         Api.require(List.of("APPROVED","PUBLISHED").contains(row.get("status")),HttpStatus.CONFLICT,"Approve the problem first");
         if("APPROVED".equals(row.get("status"))) db.jdbc.update("UPDATE problem_versions SET status='PUBLISHED' WHERE id=?",version);
         db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by) VALUES (?,?,?) ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now()",row.get("problem_id"),version,actor.id());
