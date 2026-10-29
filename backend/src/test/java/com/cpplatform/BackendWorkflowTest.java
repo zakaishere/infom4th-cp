@@ -237,6 +237,31 @@ class BackendWorkflowTest {
         mvc.perform(get("/api/admin/analytics/daily").header("Authorization","Bearer "+p.owner.token)).andExpect(status().isOk()).andExpect(jsonPath("$.today.day").isString());
         mvc.perform(get("/api/admin/analytics/overview").header("Authorization","Bearer "+entrant.token)).andExpect(status().isForbidden());
     }
+    @Test void usersShowRolesAndRoleChangesAreGuardedAndAudited() throws Exception {
+        User admin=user(true),target=user(false);String bearer="Bearer "+admin.token;
+        String handle=(String)db.one("SELECT handle FROM users WHERE id=?",target.actor.id()).get("handle");
+        mvc.perform(get("/api/admin/users").param("q",handle).header("Authorization",bearer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.users[0].roles[0]").value("PARTICIPANT"));
+        mvc.perform(put("/api/admin/users/"+target.actor.id()+"/role").header("Authorization",bearer).contentType("application/json")
+                .content("{\"role\":\"ADMIN\",\"reason\":\"Runs the spring round\"}")).andExpect(status().isOk());
+        mvc.perform(put("/api/admin/users/"+target.actor.id()+"/role").header("Authorization",bearer).contentType("application/json")
+                .content("{\"role\":\"MODERATOR\",\"reason\":\"Now writes problems\"}")).andExpect(status().isOk());
+        assertEquals(List.of("MODERATOR","PARTICIPANT"),db.jdbc.queryForList("SELECT role_code FROM user_roles WHERE user_id=? ORDER BY role_code",String.class,target.actor.id()));
+        mvc.perform(get("/api/admin/users").param("q",handle).param("role","MODERATOR").header("Authorization",bearer)).andExpect(jsonPath("$.total").value(1));
+        mvc.perform(get("/api/admin/users").param("q",handle).param("role","PARTICIPANT").header("Authorization",bearer)).andExpect(jsonPath("$.total").value(0));
+        // Cannot demote yourself; suspension signs the user out.
+        mvc.perform(put("/api/admin/users/"+admin.actor.id()+"/role").header("Authorization",bearer).contentType("application/json")
+                .content("{\"role\":\"PARTICIPANT\",\"reason\":\"oops\"}")).andExpect(status().isConflict());
+        mvc.perform(put("/api/admin/users/"+target.actor.id()+"/status").header("Authorization",bearer).contentType("application/json")
+                .content("{\"status\":\"SUSPENDED\",\"reason\":\"Shared an account\"}")).andExpect(status().isOk());
+        mvc.perform(get("/api/admin/users").header("Authorization","Bearer "+target.token)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/admin/users/"+target.actor.id()).header("Authorization",bearer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUSPENDED")).andExpect(jsonPath("$.audit.length()").value(3))
+                .andExpect(jsonPath("$.audit[0].action").value("USER_SUSPEND"));
+        String adminHandle=(String)db.one("SELECT handle FROM users WHERE id=?",admin.actor.id()).get("handle");
+        mvc.perform(get("/api/admin/audit").param("latest","true").param("actor",adminHandle).header("Authorization",bearer))
+                .andExpect(jsonPath("$.length()").value(3)).andExpect(jsonPath("$[2].target_handle").value(handle));
+    }
     @Test void privateContestRequiresAnInvitation() {
         Problem p=validation();pass(p);worker("official",2);User entrant=user(false);
         UUID contest=contests.create(p.owner.actor,Map.of("slug","private-"+UUID.randomUUID(),"title","Private contest","languages",List.of("CPP")));

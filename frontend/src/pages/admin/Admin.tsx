@@ -5,7 +5,7 @@ import ProblemWizard from "./ProblemWizard";
 import ContestWizard from "./ContestWizard";
 import { ContestDetail, ContestList } from "./Contests";
 import { ProblemEditor, ProblemList } from "./Problems";
-import { Audit, Languages, Users } from "./Platform";
+import { Audit, Languages, UserDetail, Users } from "./Platform";
 import PracticeSet from "./PracticeSet";
 import Analytics from "./Analytics";
 
@@ -47,7 +47,8 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "practice" && organizer) page = <PracticeSet />;
   else if (current === "judging" && superAdmin) page = <JudgingSettings />;
   else if (current === "languages" && superAdmin) page = <Languages />;
-  else if (current === "users" && superAdmin) page = <Users />;
+  else if (current === "users" && superAdmin && parts[1] && parts[1] !== "import") page = <UserDetail key={parts[1]} id={parts[1]} />;
+  else if (current === "users" && superAdmin) page = <Users key={parts[1] ?? ""} importOpen={parts[1] === "import"} />;
   else if (current === "audit" && superAdmin) page = <Audit />;
   else page = <div className="empty">Choose a section.</div>;
   return (
@@ -71,7 +72,7 @@ export default function Admin({ parts }: { parts: string[] }) {
         <div className="quick">
           {organizer && <button className="primary small" onClick={() => navigate("/admin/contests/new")}>+ New contest</button>}
           {setter && <button className="small" onClick={() => navigate("/admin/problems/new")}>+ New problem</button>}
-          {superAdmin && <button className="small" onClick={() => navigate("/admin/users")}>+ Import users</button>}
+          {superAdmin && <button className="small" onClick={() => navigate("/admin/users/import")}>+ Import users</button>}
         </div>
       </nav>
       <main className="admin-main">{page}</main>
