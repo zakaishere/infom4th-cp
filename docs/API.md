@@ -155,6 +155,23 @@ requested immutable imageId. Read image IDs from /api/admin/judge. Validation sn
 Existing contests keep those snapshots during later global runtime rollouts.
 New job claims must match the problem snapshot pin, worker lane, memory budget and available worker slots.
 
+## Benchmark (SUPER_ADMIN)
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| GET | /api/admin/benchmark | Private problem state, judges online and recent runs |
+| POST | /api/admin/benchmark/problem | Creates and validates the private problem, replacing an out-of-date one |
+| POST | /api/admin/benchmark/runs | count (1-1000), language, lane (official or internal), spreadSeconds, optional sourceCode, reason |
+| GET | /api/admin/benchmark/runs/{id} | Summary and every submission's timing in milliseconds; never source code |
+| POST | /api/admin/benchmark/runs/{id}/cancel | Drops submissions still waiting; ones being judged finish |
+| GET | /api/admin/benchmark/runs/{id}/report.xlsx | Excel workbook: Summary, Submissions and Tests sheets |
+
+One benchmark runs at a time. The contest judges are refused while an official contest is
+running or starts within 30 minutes. Times start when a submission entered the queue, so
+the browser and the HTTP request are not included. Benchmark submissions never count for
+practice statistics, Sigma, ratings or contests, but they do appear in Analytics as the
+"Benchmark" kind and in the platform's judged and queue totals.
+
 ## Judging capacity administration
 
 SUPER_ADMIN only. A slot is one submission being compiled and run at a time; it

@@ -157,6 +157,7 @@ public class AdminController {
     Object rejudge(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body) {
         Actor actor=Actor.of(auth);var s=db.one("SELECT * FROM submissions WHERE id=? FOR UPDATE",id);
         Api.require(!"LABORATORY".equals(s.get("context")),HttpStatus.CONFLICT,"Clone and revalidate laboratory versions");
+        Api.require(!"BENCHMARK".equals(s.get("context")),HttpStatus.CONFLICT,"Start a new benchmark instead of rejudging one");
         if(s.get("run_id")==null)Api.require(actor.superAdmin(),HttpStatus.FORBIDDEN,"Super administrator required for non-contest rejudging");
         else {var r=db.one("SELECT competition_id FROM contest_runs WHERE id=?",s.get("run_id"));access.competition(actor,(UUID)r.get("competition_id"),false);}
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM judging_jobs WHERE submission_id=? AND status IN ('QUEUED','RUNNING','RETRY'))",id),HttpStatus.CONFLICT,"Judging is already active");

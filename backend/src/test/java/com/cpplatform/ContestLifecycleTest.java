@@ -344,6 +344,119 @@ class ContestLifecycleTest {
         assertEquals(404,http("GET","/api/teams/"+UUID.randomUUID()+"/profile",member.token,null).statusCode());
     }
 
+    /** Other tests may leave a contest open, and that rightly keeps benchmarks off the contest judges. */
+    void noOpenContests(){db.jdbc.update("UPDATE contest_runs SET status='FINISHED' WHERE kind='OFFICIAL' AND status IN ('PENDING','RUNNING')");}
+
+    @Test void benchmarkMeasuresRealJudgingAndStaysPrivate() throws Exception {
+        User admin=user(true),player=user(false);
+        contest(admin,0);// registers the judges and enables C++
+        noOpenContests();
+        UUID internal=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='internal' ORDER BY registered_at DESC LIMIT 1");
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        assertEquals(403,http("GET","/api/admin/benchmark",player.token,null).statusCode());
+        assertEquals(403,http("POST","/api/admin/benchmark/problem",player.token,null).statusCode());
+        assertEquals("NONE",json(http("GET","/api/admin/benchmark",admin.token,null)).get("problem").get("state").asText());
+        assertEquals(409,http("POST","/api/admin/benchmark/runs",admin.token,"{\"count\":2,\"language\":\"CPP\"}").statusCode(),"the problem must be ready first");
+
+        var prepared=json(http("POST","/api/admin/benchmark/problem",admin.token,null));
+        assertEquals("VALIDATING",prepared.get("state").asText());
+        assertEquals(12,prepared.get("tests").asInt());
+        UUID version=UUID.fromString(prepared.get("version_id").asText());
+        accept(db.id("SELECT id FROM submissions WHERE problem_version_id=? AND context='LABORATORY'",version),internal);
+        judge.finishValidations();
+        var state=json(http("GET","/api/admin/benchmark",admin.token,null));
+        assertEquals("READY",state.get("problem").get("state").asText());
+        assertEquals("CPP",state.get("problem").get("languages").get(0).get("code").asText());
+
+        // Hidden from the lab, Practice and contests.
+        assertFalse(http("GET","/api/lab/problems",admin.token,null).body().contains(version.toString()));
+        assertEquals(409,http("POST","/api/lab/problems/"+version+"/approve",admin.token,"{\"reason\":\"no\"}").statusCode());
+        assertFalse(http("GET","/api/practice",player.token,null).body().contains(version.toString()));
+        var practice=HttpRequest.newBuilder(URI.create(base+"/api/practice/"+version+"/submissions")).header("Authorization","Bearer "+player.token).header("Content-Type","application/json").header("Idempotency-Key",UUID.randomUUID().toString()).POST(HttpRequest.BodyPublishers.ofString("{\"language\":\"CPP\",\"sourceCode\":\"x\"}")).build();
+        assertEquals(404,HTTP.send(practice,HttpResponse.BodyHandlers.ofString()).statusCode());
+        UUID other=contests.create(admin.actor,new HashMap<>(Map.of("slug","bench-"+UUID.randomUUID(),"title","No","languages",List.of("CPP"),"durationSeconds",3600)));
+        assertThrows(Exception.class,()->contests.attach(admin.actor,other,version,1,"A"));
+
+        // Validation of limits, then a real run on the contest judges.
+        assertEquals(400,http("POST","/api/admin/benchmark/runs",admin.token,"{\"count\":1001,\"language\":\"CPP\"}").statusCode());
+        assertEquals(409,http("POST","/api/admin/benchmark/runs",admin.token,"{\"count\":2,\"language\":\"RUST\"}").statusCode());
+        var started=http("POST","/api/admin/benchmark/runs",admin.token,"{\"count\":3,\"language\":\"CPP\",\"lane\":\"official\",\"reason\":\"Load test\"}");
+        assertEquals(201,started.statusCode(),started.body());
+        String run=JSON.readTree(started.body()).get("runId").asText();
+        assertEquals(409,http("POST","/api/admin/benchmark/runs",admin.token,"{\"count\":1,\"language\":\"CPP\"}").statusCode(),"one benchmark at a time");
+        assertEquals(409,http("POST","/api/admin/benchmark/problem",admin.token,null).statusCode());
+        assertEquals(3,db.jdbc.queryForObject("SELECT count(*) FROM judge_outbox o JOIN judging_jobs j ON j.id=o.job_id JOIN submissions s ON s.id=j.submission_id WHERE s.benchmark_id=?::uuid AND o.lane='OFFICIAL'",Long.class,run));
+
+        var ids=db.jdbc.queryForList("SELECT id FROM submissions WHERE benchmark_id=?::uuid ORDER BY benchmark_position",UUID.class,run);
+        assertEquals(3,ids.size());
+        assertTrue(judge.claim(db.id("SELECT id FROM judging_jobs WHERE submission_id=?",ids.get(0)),internal,0).isEmpty(),"an official benchmark runs only on official judges");
+        // complete() is exercised by hand so the worker's timing report is part of the test.
+        UUID job=db.id("SELECT id FROM judging_jobs WHERE submission_id=?",ids.get(0));
+        var claimed=judge.claim(job,official,0).orElseThrow();
+        var cases=((List<?>)claimed.get("tests")).stream().map(t->Map.of("id",((Map<?,?>)t).get("id"),"verdict","ACCEPTED","executionTimeMs",7,"peakMemoryKb",2048)).toList();
+        judge.complete(job,official,Api.uuid(claimed.get("leaseToken")),Map.of("verdict","ACCEPTED","cases",cases,"executionTimeMs",7,"peakMemoryKb",2048,"timings",Map.of("compileMs",900,"testsMs",1500,"totalMs",3000)));
+        accept(ids.get(1),official);
+        assertEquals(403,http("POST","/api/admin/benchmark/runs/"+run+"/cancel",player.token,"{}").statusCode());
+        assertEquals(1,json(http("POST","/api/admin/benchmark/runs/"+run+"/cancel",admin.token,"{\"reason\":\"Enough\"}")).get("cancelled").asInt());
+
+        var report=json(http("GET","/api/admin/benchmark/runs/"+run,admin.token,null));
+        assertFalse(report.get("active").asBoolean());
+        assertFalse(report.toString().contains("source_code"));
+        assertEquals(2,report.get("summary").get("finished").asInt());
+        assertEquals(1,report.get("summary").get("failed").asInt());
+        assertEquals(2,report.get("summary").get("accepted").asInt());
+        var first=report.get("rows").get(0);
+        assertEquals(900,first.get("compile_ms").asInt());
+        assertEquals(1500,first.get("tests_ms").asInt());
+        assertEquals(600,first.get("sandbox_ms").asInt());
+        assertEquals(7,first.get("execution_time_ms").asInt());
+        assertEquals(12,first.get("total_tests").asInt());
+        assertTrue(first.get("total_ms").asLong()>=0);
+        assertEquals("BENCHMARK_CANCELLED",report.get("rows").get(2).get("error").asText());
+        assertEquals(900,report.get("summary").get("metrics").get("compile_ms").get("max").asInt());
+
+        // The Excel file: a valid workbook with one row per submission and per test.
+        assertEquals(403,http("GET","/api/admin/benchmark/runs/"+run+"/report.xlsx",player.token,null).statusCode());
+        var download=HTTP.send(HttpRequest.newBuilder(URI.create(base+"/api/admin/benchmark/runs/"+run+"/report.xlsx")).header("Authorization","Bearer "+admin.token).build(),HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200,download.statusCode());
+        assertTrue(download.headers().firstValue("content-disposition").orElse("").contains(".xlsx"));
+        var parts=new HashMap<String,org.w3c.dom.Document>();
+        try(var zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(download.body()))) {
+            for(var entry=zip.getNextEntry();entry!=null;entry=zip.getNextEntry())parts.put(entry.getName(),javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new java.io.ByteArrayInputStream(zip.readAllBytes())));
+        }
+        assertTrue(parts.keySet().containsAll(List.of("[Content_Types].xml","_rels/.rels","xl/workbook.xml","xl/_rels/workbook.xml.rels","xl/styles.xml","xl/worksheets/sheet1.xml","xl/worksheets/sheet2.xml","xl/worksheets/sheet3.xml")));
+        assertEquals(1+3,parts.get("xl/worksheets/sheet2.xml").getElementsByTagName("row").getLength());
+        assertEquals(1+24,parts.get("xl/worksheets/sheet3.xml").getElementsByTagName("row").getLength());
+        assertTrue(parts.get("xl/worksheets/sheet2.xml").getDocumentElement().getTextContent().contains("BENCHMARK_CANCELLED"));
+
+        // None of it reaches anyone's score, and the admin's own submission limit is untouched.
+        fresh();
+        assertEquals(0,context.getBean(LeaderboardService.class).compute().players().stream().filter(r->r.key().equals(admin.actor.id())).count());
+        assertEquals(0,json(http("GET","/api/submissions",admin.token,null)).findValues("context").stream().filter(c->c.asText().equals("BENCHMARK")).count());
+        assertEquals(200,http("GET","/api/admin/analytics/latency",admin.token,null).statusCode());
+        var analytics=json(http("GET","/api/admin/analytics/submissions?kind=Benchmark",admin.token,null));
+        assertTrue(analytics.size()>=3);
+        assertEquals("official",analytics.get(0).get("lane").asText());
+    }
+
+    @Test void benchmarkKeepsOffContestJudgesDuringAContest() throws Exception {
+        User admin=user(true);UUID contest=contest(admin,0);
+        UUID internal=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='internal' ORDER BY registered_at DESC LIMIT 1");
+        var problem=json(http("GET","/api/admin/benchmark",admin.token,null)).get("problem");
+        if(!"READY".equals(problem.get("state").asText())) {
+            // Other tests may have left a ready problem; otherwise prepare one.
+            var prepared=json(http("POST","/api/admin/benchmark/problem",admin.token,null));
+            accept(db.id("SELECT id FROM submissions WHERE problem_version_id=?::uuid AND context='LABORATORY'",prepared.get("version_id").asText()),internal);
+            judge.finishValidations();
+        }
+        UUID run=contests.schedule(admin.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        var refused=http("POST","/api/admin/benchmark/runs",admin.token,"{\"count\":1,\"language\":\"CPP\",\"lane\":\"official\"}");
+        assertEquals(409,refused.statusCode(),refused.body());
+        assertTrue(refused.body().contains("A contest is running"),refused.body());
+        noOpenContests();
+        assertEquals("FINISHED",db.one("SELECT status FROM contest_runs WHERE id=?",run).get("status"));
+    }
+
     @Test void adminsCanSeeTeamsAndWhatTheyPlayed() throws Exception {
         User owner=user(true),captain=user(false),member=user(false),idle=user(false);
         var created=JSON.readTree(http("POST","/api/teams",captain.token,"{\"name\":\"Team "+UUID.randomUUID()+"\"}").body());

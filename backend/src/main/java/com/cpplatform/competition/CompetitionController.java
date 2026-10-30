@@ -171,7 +171,7 @@ public class CompetitionController {
         return db.jdbc.queryForList("SELECT s.id,s.context,s.run_id,s.problem_slot,s.problem_version_id,s.language_code,s.samples_only,s.submitted_at,latest.status,latest.verdict,latest.execution_time_ms,latest.peak_memory_kb,latest.passed_tests,latest.total_tests,u.handle AS submitted_by_handle FROM submissions s JOIN users u ON u.id=s.submitted_by "
                 +"LEFT JOIN LATERAL (SELECT j.status,r.verdict,r.execution_time_ms,r.peak_memory_kb,r.passed_tests,r.total_tests FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) latest ON true "
                 // Team entries see every member's submissions for the runs they share.
-                +"WHERE (s.submitted_by=? OR s.entry_id IN (SELECT m.entry_id FROM run_entry_members m WHERE m.user_id=?)) AND (?::uuid IS NULL OR s.run_id=?::uuid) ORDER BY s.submitted_at DESC LIMIT 100 OFFSET ?",Actor.of(auth).id(),Actor.of(auth).id(),run,run,offset);
+                +"WHERE s.context<>'BENCHMARK' AND (s.submitted_by=? OR s.entry_id IN (SELECT m.entry_id FROM run_entry_members m WHERE m.user_id=?)) AND (?::uuid IS NULL OR s.run_id=?::uuid) ORDER BY s.submitted_at DESC LIMIT 100 OFFSET ?",Actor.of(auth).id(),Actor.of(auth).id(),run,run,offset);
     }
     /** Jury submission monitor for one run; source is fetched separately through /api/submissions/{id}. */
     @GetMapping("/api/manage/runs/{run}/submissions")

@@ -31,7 +31,7 @@ public class SubmissionService {
         limits.check("submit-global",200,1);
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM judging_jobs WHERE status IN ('QUEUED','RUNNING','RETRY') OFFSET ?)",((Number)admission.get("max_queued_submissions")).intValue()-1),
                 HttpStatus.TOO_MANY_REQUESTS,"Judge queue is full; retry later");
-        long pending=db.jdbc.queryForObject("SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE s.submitted_by=? AND j.status IN ('QUEUED','RUNNING','RETRY')",Long.class,actor.id());
+        long pending=db.jdbc.queryForObject("SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE s.submitted_by=? AND s.context<>'BENCHMARK' AND j.status IN ('QUEUED','RUNNING','RETRY')",Long.class,actor.id());
         Api.require(pending<((Number)admission.get("pending_submissions_per_user")).longValue(),HttpStatus.TOO_MANY_REQUESTS,"Too many pending submissions");
         Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM languages WHERE code=? AND enabled)",language),HttpStatus.BAD_REQUEST,"Language is disabled");
         UUID submission,version;

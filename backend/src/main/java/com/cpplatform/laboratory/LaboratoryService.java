@@ -172,6 +172,8 @@ public class LaboratoryService {
     @Transactional
     public void approve(Actor actor,UUID version,String reason) {
         access.organizer(actor);access.problem(actor,version,false);
+        // Never approved, so it can never reach Practice either.
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=? AND p.system_benchmark)",version),HttpStatus.CONFLICT,"The benchmark problem cannot be approved");
         db.one("SELECT id FROM problem_versions WHERE id=? FOR UPDATE",version);
         Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions v WHERE v.id=? AND v.status='READY_FOR_REVIEW' AND EXISTS(SELECT 1 FROM problem_validation_results p WHERE p.problem_version_id=v.id AND p.status='PASSED'))",version),
                 HttpStatus.CONFLICT,"A passing validation and review-ready version are required");
