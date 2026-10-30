@@ -138,8 +138,8 @@ public class AnalyticsService {
 
     // One row per submission with its latest judging. Times are milliseconds; a rejudge is timed from when it was requested.
     private static final String TIMED="SELECT s.id,s.submitted_at,s.context,s.samples_only,s.language_code,s.submitted_by,u.handle,pv.title AS problem,c.title AS contest,r.kind AS run_kind,cp.label,"+
-            "CASE WHEN s.context='CONTEST' THEN 'Contest' WHEN s.context='LABORATORY' THEN 'Problem testing' WHEN s.samples_only THEN 'Practice examples' ELSE 'Practice' END AS kind,"+
-            "CASE WHEN s.context='CONTEST' THEN 'official' ELSE 'internal' END AS lane,"+
+            "CASE WHEN s.context='CONTEST' THEN 'Contest' WHEN s.context='LABORATORY' THEN 'Problem testing' WHEN s.context='BENCHMARK' THEN 'Benchmark' WHEN s.samples_only THEN 'Practice examples' ELSE 'Practice' END AS kind,"+
+            "CASE WHEN s.context='CONTEST' OR (SELECT b.lane FROM benchmark_runs b WHERE b.id=s.benchmark_id)='official' THEN 'official' ELSE 'internal' END AS lane,"+
             "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.worker,l.compile_ms,l.tests_ms,"+
             "round(extract(epoch FROM coalesce(l.first_started_at,now())-l.created_at)*1000) AS wait_ms,"+
             "round(extract(epoch FROM l.completed_at-coalesce(l.last_started_at,l.first_started_at))*1000) AS judge_ms,"+

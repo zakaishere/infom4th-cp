@@ -53,6 +53,8 @@ first start builds the language images (15–30 min); see [docs/DEPLOY_VPS.md](d
 - Community: global Sigma leaderboards for players and teams, player profiles (activity,
   skills, contest rating, medals and badges), head to head, private rivals, contest
   replays, team pages and a downloadable share card. All of it reads public results only.
+- Benchmark (Control room, super administrators): send up to 1000 submissions through the
+  real queue and judges on a private problem, see every timing, and download an Excel report.
 
 See [API](docs/API.md), [operations](docs/OPERATIONS.md),
 [database](docs/DATABASE.md), and [security assumptions](docs/SECURITY.md).

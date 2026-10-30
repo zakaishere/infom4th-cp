@@ -80,6 +80,13 @@ a.person:hover { text-decoration: none; color: var(--accent); }
 .podium-person .name { max-width: 100%; }
 .standings td.who strong a { color: inherit; }
 
+/* Benchmark */
+.benchmark-stats { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+.benchmark-form { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; align-items: start; }
+.benchmark-summary { cursor: pointer; font-weight: 700; margin-bottom: 0.5rem; }
+.benchmark-rows { max-height: 480px; overflow: auto; }
+.benchmark-source { width: 100%; min-height: 240px; font-size: 0.82rem; white-space: pre; }
+
 /* Sigma tier list */
 .tier-list { display: flex; gap: 0.5rem 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
 

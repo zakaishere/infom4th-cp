@@ -10,6 +10,7 @@ import { Audit, Languages, UserDetail, Users } from "./Platform";
 import { TeamDetail, Teams } from "./Teams";
 import PracticeSet from "./PracticeSet";
 import Analytics from "./Analytics";
+import Benchmark from "./Benchmark";
 
 type Item = { key: string; label: string; icon: string; count?: number };
 
@@ -31,6 +32,7 @@ export default function Admin({ parts }: { parts: string[] }) {
     ] },
     { title: "System", items: [
       superAdmin && { key: "judging", label: "Judges & capacity", icon: "⚙" },
+      superAdmin && { key: "benchmark", label: "Benchmark", icon: "⏱" },
       superAdmin && { key: "languages", label: "Languages", icon: "{}" },
       superAdmin && { key: "users", label: "Users", icon: "☺" },
       superAdmin && { key: "teams", label: "Teams", icon: "⚐" },
@@ -50,6 +52,7 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "analytics" && organizer) page = <Analytics />;
   else if (current === "practice" && organizer) page = <PracticeSet />;
   else if (current === "judging" && superAdmin) page = <JudgingSettings />;
+  else if (current === "benchmark" && superAdmin) page = <Benchmark />;
   else if (current === "languages" && superAdmin) page = <Languages />;
   else if (current === "users" && superAdmin && parts[1] && parts[1] !== "import") page = <UserDetail key={parts[1]} id={parts[1]} />;
   else if (current === "users" && superAdmin) page = <Users key={parts[1] ?? ""} importOpen={parts[1] === "import"} />;

@@ -95,6 +95,19 @@ export async function api<T = any>(method: string, path: string, options: Option
   return data as T;
 }
 
+/** Saves a protected file. A plain link cannot send the sign-in token, so it is fetched first. */
+export async function download(path: string, filename: string) {
+  if (session && session.expiresAt - Date.now() < 30_000) await refresh();
+  const send = () => fetch(path, { headers: session ? { Authorization: "Bearer " + session.accessToken } : {} });
+  let response = await send();
+  if (response.status === 401 && session && (await refresh())) response = await send();
+  if (!response.ok) throw new ApiError(response.status, statusText(response.status));
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url; link.download = filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function safeJson(text: string) {
   try {
     return JSON.parse(text);

@@ -26,7 +26,7 @@ public class LaboratoryController {
     @GetMapping
     Object list(Authentication auth,@RequestParam(defaultValue="false") boolean deleted) {
         Actor actor=Actor.of(auth);access.setter(actor);
-        return db.jdbc.queryForList("SELECT p.id,p.slug,v.id AS version_id,v.title,v.version_number,v.status,p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC LIMIT 500",
+        return db.jdbc.queryForList("SELECT p.id,p.slug,v.id AS version_id,v.title,v.version_number,v.status,p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE NOT p.system_benchmark AND (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC LIMIT 500",
                 actor.superAdmin(),actor.id(),actor.id(),deleted);
     }
     @PostMapping("/{version}/delete")
