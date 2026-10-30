@@ -3,7 +3,7 @@ import { get, post } from "../api";
 import { navigate, useAction, useAuth, useData, useServerClock, useToast } from "../app";
 import { ProblemStatement, SubmissionModal, SubmissionTable, SubmitPanel, pending, type ProblemDetail, type SubmissionRow } from "../components/Problem";
 import Standings, { SCORING_INFO, firstSolves, totalOf, useBoard, type Board } from "../components/Standings";
-import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, when } from "../ui";
+import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, timeOf, when } from "../ui";
 import type { RunDetail } from "./Lobby";
 
 type View = { kind: "problems" } | { kind: "problem"; slot: number } | { kind: "submissions" } | { kind: "scoreboard" } | { kind: "questions" };
@@ -41,7 +41,7 @@ export default function Arena({ runId }: { runId: string }) {
   const toast = useToast();
   const detail = useData<RunDetail>("/api/runs/" + runId, 20000);
   const mine = useData<MyRun[]>("/api/me/runs");
-  const now = useServerClock(detail.data?.serverTime);
+  const now = useServerClock();
   const [view, setView] = useState<View>({ kind: "problems" });
   const [problems, setProblems] = useState<Record<number, ProblemDetail>>({});
   const [openSubmission, setOpenSubmission] = useState<string | null>(null);
@@ -57,7 +57,13 @@ export default function Arena({ runId }: { runId: string }) {
 
   // Problems are withheld until the start; refetch the run as soon as the clock passes it.
   const reloadRun = detail.reload;
-  useEffect(() => { if (phase === "live" && !detail.data?.problems) reloadRun(); }, [phase, detail.data?.problems, reloadRun]);
+  useEffect(() => {
+    if (phase !== "live" || detail.data?.problems) return;
+    reloadRun();
+    // A small clock difference can reach the server just before the start, so keep trying until they arrive.
+    const timer = setInterval(reloadRun, 1000);
+    return () => clearInterval(timer);
+  }, [phase, detail.data?.problems, reloadRun]);
   const slot = view.kind === "problem" ? view.slot : null;
   useEffect(() => {
     if (slot === null || problems[slot] || phase === "upcoming") return;
@@ -102,6 +108,8 @@ export default function Arena({ runId }: { runId: string }) {
           if (events.some((e) => e.kind === "ANNOUNCEMENT")) { announcements.reload(); toast("info", "New announcement from the organizers"); setUnread((n) => n + 1); }
           if (events.some((e) => e.kind === "CLARIFICATION_UPDATED")) { clarifications.reload(); setUnread((n) => n + 1); }
           if (events.some((e) => e.kind === "SUBMISSION_JUDGED")) reloadSubmissions();
+          // Started, extended, paused, ended or results released by the organizers.
+          if (events.some((e) => e.kind === "RUN_UPDATED")) { reloadRun(); board.reload(); }
         }
         cursor = events[events.length - 1].id; first = false;
       } catch { /* transient; next poll retries */ }
@@ -344,7 +352,7 @@ function Questions({ runId, labels, canAsk, announcements, clarifications, reloa
         <h3 style={{ margin: 0 }}>Clarifications</h3>
         {clarifications.length === 0 ? <div className="empty">No clarifications yet.</div> : clarifications.map((c) => (
           <div key={c.id} className="card-flat">
-            <div className="row-between small muted"><span>{c.is_public ? "Answered for everyone" : "Your question"}</span><span>{new Date(c.created_at).toLocaleTimeString()}</span></div>
+            <div className="row-between small muted"><span>{c.is_public ? "Answered for everyone" : "Your question"}</span><span>{timeOf(c.created_at)}</span></div>
             <p style={{ margin: "0.25rem 0" }}><strong>Q:</strong> {c.question}</p>
             {c.answer ? <p style={{ margin: 0 }}><strong>A:</strong> {c.answer}</p> : <Badge>Waiting for the jury</Badge>}
           </div>
@@ -354,7 +362,7 @@ function Questions({ runId, labels, canAsk, announcements, clarifications, reloa
         <h3 style={{ margin: 0 }}>Announcements</h3>
         {announcements.length === 0 ? <div className="empty">No announcements.</div> : [...announcements].reverse().map((a) => (
           <div key={a.id} className="notice">
-            <div className="row-between"><strong>{a.title}</strong><span className="small muted">{new Date(a.published_at).toLocaleTimeString()}</span></div>
+            <div className="row-between"><strong>{a.title}</strong><span className="small muted">{timeOf(a.published_at)}</span></div>
             <Markdown text={a.body_md} />
           </div>
         ))}

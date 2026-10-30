@@ -123,6 +123,42 @@ export async function logout() {
   store(null);
 }
 
+// ---------- Server clock ----------
+// performance.now() keeps counting steadily even if someone changes the laptop's clock mid-contest.
+let clockBase = Date.now() - performance.now();
+let zone = "UTC";
+
+/** Current server time in milliseconds. Every contest timer on every screen reads this. */
+export function serverNow() {
+  return clockBase + performance.now();
+}
+
+/** The one time zone contest dates and times are shown in, whatever the laptop is set to. */
+export function displayTimeZone() {
+  return zone;
+}
+
+/** Uses the fastest of a few samples, because a quick response has the smallest network error. */
+export async function syncServerClock() {
+  let fastest = Infinity;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const sent = performance.now();
+      const response = await fetch("/api/time", { cache: "no-store" });
+      if (!response.ok) continue;
+      const body = await response.json();
+      const received = performance.now();
+      if (received - sent < fastest) {
+        fastest = received - sent;
+        clockBase = body.serverTime - (sent + received) / 2;
+        zone = body.timeZone;
+      }
+    } catch {
+      /* offline: keep the last known offset and try again at the next sync */
+    }
+  }
+}
+
 export const get = <T = any>(path: string) => api<T>("GET", path);
 export const post = <T = any>(path: string, body: unknown = {}, idempotencyKey?: string) => api<T>("POST", path, { body, idempotencyKey });
 export const put = <T = any>(path: string, body: unknown) => api<T>("PUT", path, { body });

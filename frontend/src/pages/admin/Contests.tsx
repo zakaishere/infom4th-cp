@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { del, patch, post } from "../../api";
+import { del, patch, post, serverNow } from "../../api";
 import { navigate, useAction, useData, useServerClock, useToast } from "../../app";
 import { SubmissionModal } from "../../components/Problem";
 import Standings from "../../components/Standings";
-import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, LiveDot, Loading, ReasonDialog, Verdict, clock, when } from "../../ui";
+import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, LiveDot, Loading, ReasonDialog, Verdict, clock, timeOf, when } from "../../ui";
 import { runPhase } from "../Home";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -158,7 +158,7 @@ export function ContestDetail({ id }: { id: string }) {
             </form>
           ) : official.status === "PENDING" ? (
             <div className="stack">
-              <div className="notice">Scheduled for <strong>{when(official.starts_at)}</strong> (starts in {clock(new Date(official.starts_at).getTime() - Date.now())}).</div>
+              <div className="notice">Scheduled for <strong>{when(official.starts_at)}</strong> (starts in {clock(new Date(official.starts_at).getTime() - serverNow())}).</div>
               <div><button className="primary" disabled={busy} onClick={() => setControlRun({ id: official.id, action: "start-now" })}>▶ Start now instead</button></div>
             </div>
           ) : <div className="notice small">The official contest {official.status === "RUNNING" ? "is running" : "has finished"}.</div>}
@@ -286,7 +286,7 @@ function RunMonitor({ run: r, problems, onChanged }: { run: Run; problems: { slo
               <thead><tr><th>Time</th><th>Entrant</th><th>Problem</th><th>Lang</th><th>Verdict</th><th className="right">Tests</th><th className="right">Time</th><th /></tr></thead>
               <tbody>{rows.map((s) => (
                 <tr key={s.id}>
-                  <td className="small">{new Date(s.submitted_at).toLocaleTimeString()}</td>
+                  <td className="small">{timeOf(s.submitted_at)}</td>
                   <td>{s.entry_name}<div className="small muted">@{s.handle}</div></td>
                   <td><strong>{labels[s.problem_slot] ?? s.problem_slot}</strong></td>
                   <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>
@@ -308,7 +308,7 @@ function RunMonitor({ run: r, problems, onChanged }: { run: Run; problems: { slo
         <div className="stack">
           {(clar.data ?? []).length === 0 ? <Empty>No questions.</Empty> : (clar.data ?? []).map((c) => (
             <div key={c.id} className="card-flat stack">
-              <div className="row-between small muted"><span>{new Date(c.created_at).toLocaleTimeString()}</span>{c.answer ? <Badge tone="ok">{c.is_public ? "Answered publicly" : "Answered"}</Badge> : <Badge tone="warn">Open</Badge>}</div>
+              <div className="row-between small muted"><span>{timeOf(c.created_at)}</span>{c.answer ? <Badge tone="ok">{c.is_public ? "Answered publicly" : "Answered"}</Badge> : <Badge tone="warn">Open</Badge>}</div>
               <div><strong>Q:</strong> {c.question}</div>
               {c.answer ? <div><strong>A:</strong> {c.answer}</div> : (
                 <form className="stack" onSubmit={(e) => {

@@ -256,11 +256,11 @@ class BackendWorkflowTest {
                 .content("{\"status\":\"SUSPENDED\",\"reason\":\"Shared an account\"}")).andExpect(status().isOk());
         mvc.perform(get("/api/admin/users").header("Authorization","Bearer "+target.token)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/admin/users/"+target.actor.id()).header("Authorization",bearer)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SUSPENDED")).andExpect(jsonPath("$.audit.length()").value(3))
+                .andExpect(jsonPath("$.status").value("SUSPENDED")).andExpect(jsonPath("$.audit.length()").value(4))
                 .andExpect(jsonPath("$.audit[0].action").value("USER_SUSPEND"));
         String adminHandle=(String)db.one("SELECT handle FROM users WHERE id=?",admin.actor.id()).get("handle");
         mvc.perform(get("/api/admin/audit").param("latest","true").param("actor",adminHandle).header("Authorization",bearer))
-                .andExpect(jsonPath("$.length()").value(3)).andExpect(jsonPath("$[2].target_handle").value(handle));
+                .andExpect(jsonPath("$.length()").value(4)).andExpect(jsonPath("$[2].target_handle").value(handle));
     }
     @Test void privateContestRequiresAnInvitation() {
         Problem p=validation();pass(p);worker("official",2);User entrant=user(false);

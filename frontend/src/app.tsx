@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, get, hasSession, onSessionChange, type Me } from "./api";
+import { ApiError, get, hasSession, onSessionChange, serverNow, syncServerClock, type Me } from "./api";
 
 // ---------- Routing (hash based, no server rewrites needed) ----------
 export function useRoute() {
@@ -142,18 +142,21 @@ export function useAction() {
 }
 
 // ---------- Server clock ----------
-/** Offset between the server clock and this browser; contest timing always follows the server. */
-export function useServerClock(serverTime?: string) {
-  const [offset, setOffset] = useState(0);
-  const [now, setNow] = useState(Date.now());
+/** Current server time, updated four times a second; contest timing never uses the laptop's clock. */
+export function useServerClock() {
+  const [now, setNow] = useState(serverNow);
   useEffect(() => {
-    if (serverTime) setOffset(new Date(serverTime).getTime() - Date.now());
-  }, [serverTime]);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 250);
+    const timer = setInterval(() => setNow(serverNow()), 250);
     return () => clearInterval(timer);
   }, []);
-  return now + offset;
+  return now;
+}
+
+/** Keeps the shared clock accurate, including after a laptop wakes from sleep. */
+export function keepServerClockSynced() {
+  setInterval(syncServerClock, 60000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncServerClock(); });
+  window.addEventListener("online", syncServerClock);
 }
 
 // ---------- Theme ----------

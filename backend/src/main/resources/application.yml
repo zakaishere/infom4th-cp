@@ -71,6 +71,8 @@ cp:
     email: ${BOOTSTRAP_EMAIL:}
     password: ${BOOTSTRAP_PASSWORD:}
   public-url: ${PUBLIC_URL:http://localhost:3000}
+  # Contest dates and times are shown in this zone on every screen, whatever a laptop is set to.
+  display-timezone: ${DISPLAY_TIMEZONE:UTC}
   cors-origins: ${CORS_ORIGINS:http://localhost:3000}
   mail:
     from: ${MAIL_FROM:noreply@localhost}
