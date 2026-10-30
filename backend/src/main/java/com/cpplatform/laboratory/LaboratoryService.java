@@ -11,6 +11,62 @@ import java.util.*;
 public class LaboratoryService {
     private final Database db; private final Permissions access;
     public LaboratoryService(Database db,Permissions access) {this.db=db;this.access=access;}
+    /** Atomic import: invalid tests/references roll back the entire new problem. Existing slugs are never edited. */
+    @Transactional
+    public Map<String,Object> importProblem(Actor actor,Map<String,Object> body) {
+        access.setter(actor);
+        String slug=Api.text(body,"slug",120);
+        Api.require(slug.matches("[a-z0-9]+(-[a-z0-9]+)*"),HttpStatus.BAD_REQUEST,"Invalid problem short name");
+        // Serialize imports of the same slug, including requests retried after a lost response.
+        db.jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))","problem-import:"+slug);
+        var existing=db.jdbc.queryForList("SELECT v.id FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE p.slug=? ORDER BY v.version_number DESC LIMIT 1",slug);
+        if(!existing.isEmpty()) {
+            UUID version=(UUID)existing.get(0).get("id");
+            access.problemRead(actor,version);
+            return Map.of("outcome","SKIPPED","versionId",version);
+        }
+        var fields=new LinkedHashMap<String,Object>();
+        fields.put("slug",slug);fields.put("title",Api.text(body,"title",255));
+        fields.put("statement",Api.text(body,"statement",262144));
+        for(String key:List.of("inputFormat","outputFormat","constraints","explanation","setterNotes")) {
+            Object value=body.getOrDefault(key,"");
+            Api.require(value instanceof String && ((String)value).length()<=262144,HttpStatus.BAD_REQUEST,"Invalid "+key);
+            fields.put(key,value);
+        }
+        String difficulty=Api.optional(body,"difficulty","MEDIUM",16),checker=Api.optional(body,"checker","TOKENS",32);
+        Api.require(List.of("EASY","MEDIUM","HARD").contains(difficulty),HttpStatus.BAD_REQUEST,"Invalid difficulty");
+        Api.require(List.of("EXACT","TRIMMED_LINES","TOKENS").contains(checker),HttpStatus.BAD_REQUEST,"Invalid checker");
+        fields.put("difficulty",difficulty);fields.put("checker",checker);
+        fields.put("timeLimitMs",Api.number(body,"timeLimitMs",2000,1,60000));
+        fields.put("memoryLimitMb",Api.number(body,"memoryLimitMb",256,16,4096));
+        fields.put("outputLimitKb",Api.number(body,"outputLimitKb",1024,1,65536));
+        Object rawLanguages=body.get("languages");
+        Api.require(rawLanguages instanceof List<?> && !((List<?>)rawLanguages).isEmpty() && ((List<?>)rawLanguages).size()<=16
+                && ((List<?>)rawLanguages).stream().allMatch(l->l instanceof String && ((String)l).matches("[A-Z][A-Z0-9_]{0,23}")),HttpStatus.BAD_REQUEST,"Invalid languages");
+        var languages=Api.languages(body);fields.put("languages",languages);
+        Object rawTests=body.get("tests"),rawReference=body.get("reference");
+        Api.require(rawTests instanceof List<?>,HttpStatus.BAD_REQUEST,"Tests are required");
+        var suite=new ArrayList<Map<String,Object>>();
+        for(Object value:(List<?>)rawTests) {
+            Api.require(value instanceof Map<?,?>,HttpStatus.BAD_REQUEST,"Invalid test case");
+            var test=(Map<?,?>)value;
+            Api.require(test.get("input") instanceof String && test.get("expected") instanceof String && test.get("sample") instanceof Boolean,HttpStatus.BAD_REQUEST,"Test input, expected output and sample flag are required");
+            suite.add(Map.of("input",test.get("input"),"expected",test.get("expected"),"sample",test.get("sample")));
+        }
+        Api.require(suite.stream().anyMatch(t->Boolean.TRUE.equals(t.get("sample"))) && suite.stream().anyMatch(t->Boolean.FALSE.equals(t.get("sample"))),HttpStatus.BAD_REQUEST,"Sample and hidden tests are required");
+        Api.require(rawReference instanceof Map<?,?>,HttpStatus.BAD_REQUEST,"A reference solution is required");
+        var reference=new LinkedHashMap<String,Object>();
+        ((Map<?,?>)rawReference).forEach((key,value)->reference.put(String.valueOf(key),value));
+        String language=Api.text(reference,"language",24);
+        Api.require(languages.contains(language),HttpStatus.BAD_REQUEST,"Reference language must be allowed for the problem");
+        Api.text(reference,"sourceCode",262144);
+        reference.put("label",Api.optional(reference,"label","Main solution",100));
+        reference.put("expectedVerdict","ACCEPTED");
+        UUID version=create(actor,fields);
+        tests(actor,version,suite);reference(actor,version,reference);
+        db.audit(actor.id(),"PROBLEM_IMPORT","problem_version",version,"Problem bank import");
+        return Map.of("outcome","IMPORTED","versionId",version);
+    }
     @Transactional
     public UUID create(Actor actor,Map<String,Object> body) {
         access.setter(actor);
@@ -70,7 +126,7 @@ public class LaboratoryService {
                 total+=((String)test.get(field)).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
             }
         }
-        Api.require(total<=4*1024*1024,HttpStatus.BAD_REQUEST,"Test suite exceeds 4 MiB");
+        Api.require(total<=16*1024*1024,HttpStatus.BAD_REQUEST,"Test suite exceeds 16 MiB");
         db.jdbc.update("DELETE FROM test_cases WHERE problem_version_id=?",version);
         db.jdbc.update("DELETE FROM test_case_groups WHERE problem_version_id=?",version);
         UUID group=db.id("INSERT INTO test_case_groups(problem_version_id,name,position) VALUES (?,'Main',0) RETURNING id",version);

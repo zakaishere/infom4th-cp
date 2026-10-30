@@ -89,6 +89,59 @@ class BackendWorkflowTest {
         mvc.perform(post("/internal/judge/workers").header("Authorization","Bearer "+u.token).contentType("application/json").content("{}")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/admin/users").header("Authorization","Bearer "+u.token)).andExpect(status().isForbidden());
     }
+    Map<String,Object> bankProblem(String slug) {
+        return new LinkedHashMap<>(Map.of("slug",slug,"title","Imported sum","statement","Add two integers", "languages",List.of("CPP"),
+                "setterNotes","Private algorithm explanation",
+                "tests",List.of(Map.of("input","2 3\n","expected","5\n","sample",true),Map.of("input","4 5\n","expected","9\n","sample",false)),
+                "reference",Map.of("language","CPP","sourceCode","int main() {}")));
+    }
+    @Test void bankImportIsAtomicRetrySafeAndPrivate() throws Exception {
+        User owner=user(true),participant=user(false);String slug="bank-"+UUID.randomUUID();
+        var body=bankProblem(slug);String content=JSON.writeValueAsString(body);
+        mvc.perform(post("/api/lab/problems/import").header("Authorization","Bearer "+participant.token).contentType("application/json").content(content)).andExpect(status().isForbidden());
+        String result=mvc.perform(post("/api/lab/problems/import").header("Authorization","Bearer "+owner.token).contentType("application/json").content(content))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("IMPORTED")).andReturn().getResponse().getContentAsString();
+        UUID version=UUID.fromString(JSON.readTree(result).get("versionId").asText());
+        mvc.perform(post("/api/lab/problems/import").header("Authorization","Bearer "+owner.token).contentType("application/json").content(content))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("SKIPPED")).andExpect(jsonPath("$.versionId").value(version.toString()));
+        assertEquals(1,db.jdbc.queryForObject("SELECT count(*) FROM problem_versions WHERE problem_id=(SELECT id FROM problems WHERE slug=?)",Integer.class,slug));
+        assertEquals(2,db.jdbc.queryForObject("SELECT count(*) FROM test_cases WHERE problem_version_id=?",Integer.class,version));
+        assertEquals(1,db.jdbc.queryForObject("SELECT count(*) FROM reference_solutions WHERE problem_version_id=?",Integer.class,version));
+        assertEquals("Private algorithm explanation",db.one("SELECT setter_notes FROM problem_versions WHERE id=?",version).get("setter_notes"));
+        mvc.perform(get("/api/lab/problems/"+version+"/status").header("Authorization","Bearer "+owner.token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DRAFT"))
+                .andExpect(jsonPath("$.tests").doesNotExist()).andExpect(jsonPath("$.references").doesNotExist()).andExpect(jsonPath("$.setter_notes").doesNotExist());
+        mvc.perform(get("/api/lab/problems/"+version+"/status").header("Authorization","Bearer "+participant.token)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/lab/problems/"+version+"/approve").header("Authorization","Bearer "+owner.token).contentType("application/json").content("{\"reason\":\"Attempt without validation\"}"))
+                .andExpect(status().isConflict());
+        var invalid=bankProblem("bad-bank-"+UUID.randomUUID());
+        var tooMany=new ArrayList<Map<String,Object>>();
+        for(int i=0;i<201;i++)tooMany.add(Map.of("input","1","expected","1","sample",i==0));
+        invalid.put("tests",tooMany);
+        mvc.perform(post("/api/lab/problems/import").header("Authorization","Bearer "+owner.token).contentType("application/json").content(JSON.writeValueAsString(invalid)))
+                .andExpect(status().isBadRequest());
+        assertFalse(db.exists("SELECT EXISTS(SELECT 1 FROM problems WHERE slug=?)",invalid.get("slug")),"Failed test upload must roll back creation");
+    }
+    @Test void concurrentBankRetriesCreateOnlyOneCompleteDraft() throws Exception {
+        User owner=user(true);var body=bankProblem("parallel-bank-"+UUID.randomUUID());
+        ExecutorService pool=Executors.newFixedThreadPool(2);
+        try {
+            List<Callable<Map<String,Object>>> calls=List.of(()->lab.importProblem(owner.actor,body),()->lab.importProblem(owner.actor,body));
+            var results=pool.invokeAll(calls);var outcomes=new HashSet<String>();var versions=new HashSet<Object>();
+            for(var result:results){var row=result.get(20,TimeUnit.SECONDS);outcomes.add((String)row.get("outcome"));versions.add(row.get("versionId"));}
+            assertEquals(Set.of("IMPORTED","SKIPPED"),outcomes);assertEquals(1,versions.size());
+        } finally {pool.shutdownNow();}
+    }
+    @Test void bankImportSupportsLargeSuitesButStillBoundsThem() {
+        User owner=user(true);var body=bankProblem("large-bank-"+UUID.randomUUID());
+        body.put("tests",List.of(Map.of("input","x".repeat(5*1024*1024),"expected","1","sample",true),Map.of("input","2","expected","2","sample",false)));
+        UUID version=(UUID)lab.importProblem(owner.actor,body).get("versionId");
+        assertEquals(2,db.jdbc.queryForObject("SELECT count(*) FROM test_cases WHERE problem_version_id=?",Integer.class,version));
+        var tooLarge=bankProblem("oversize-bank-"+UUID.randomUUID());
+        tooLarge.put("tests",List.of(Map.of("input","x".repeat(16*1024*1024),"expected","1","sample",true),Map.of("input","2","expected","2","sample",false)));
+        assertThrows(ResponseStatusException.class,()->lab.importProblem(owner.actor,tooLarge));
+        assertFalse(db.exists("SELECT EXISTS(SELECT 1 FROM problems WHERE slug=?)",tooLarge.get("slug")));
+    }
     @Test void refreshRotationRejectsReplayAndRevokesTheFamily() {
         User u=user(false);var next=auth.refresh(u.refresh).orElseThrow();
         assertTrue(auth.refresh(u.refresh).isEmpty());

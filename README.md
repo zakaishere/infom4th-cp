@@ -157,6 +157,18 @@ proctoring or anti-cheat.
 
 ## Tests
 
+Bulk problem import is available under **Problem lab → Bulk import**. Generate one
+file with `node scripts/package-problem-bank.mjs`, then upload
+`examples/problem-bank.import.json.gz` (smaller) or the plain `.json` copy. Choose draft import, validation, approval, or
+publication to Practice. Existing slugs are skipped. See
+[the import guide](docs/PROBLEM_BANK_IMPORT.md) for details and limits.
+
+Importer/package checks (after installing frontend dependencies):
+
+~~~sh
+node --test scripts/tests/problem-import.test.mjs
+~~~
+
 With JDK 17 on JAVA_HOME and PATH:
 
 ~~~powershell
