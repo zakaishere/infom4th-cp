@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth, useData } from "../../app";
-import { Badge, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Meter, Stat, VERDICTS, ago, when } from "../../ui";
+import { Badge, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Meter, Stat, VERDICTS, Verdict, ago, timeOf, when } from "../../ui";
 
 type Count = { key: string; count: number; accepted?: number };
 type Num = number | null | undefined;
@@ -324,9 +324,154 @@ function Contests() {
   );
 }
 
+type TimedRow = {
+  id: string; submitted_at: string; kind: string; language_code: string; handle: string; problem: string; contest: string | null; label: string | null; samples_only: boolean;
+  status: string | null; verdict: string | null; passed_tests: number | null; total_tests: number | null; execution_time_ms: number | null; peak_memory_kb: number | null;
+  generation: number | null; attempt_count: number | null; worker: string | null; wait_ms: number | null; judge_ms: number | null; server_ms: number | null;
+  compile_ms: number | null; tests_ms: number | null; sandbox_ms: number | null; accepted_ms: number | null; verdict_ms: number | null;
+};
+const KINDS = ["Contest", "Practice", "Practice examples", "Problem testing"];
+const RANGES: [number, string][] = [[1, "1 hour"], [6, "6 hours"], [24, "24 hours"], [168, "7 days"], [720, "30 days"]];
+
+function Range({ hours, setHours }: { hours: number; setHours: (h: number) => void }) {
+  return <div className="row">{RANGES.map(([h, l]) => <button key={h} className={"small" + (hours === h ? " primary" : "")} onClick={() => setHours(h)}>{l}</button>)}</div>;
+}
+
+function LatencyTable({ title, first, rows, name }: { title: string; first: string; rows?: any[]; name: (r: any) => string }) {
+  return (
+    <section className="card stack">
+      <h3 style={{ margin: 0 }}>{title}</h3>
+      {!rows?.length ? <span className="small muted">No finished submissions in this range.</span> : (
+        <div className="table-wrap"><table>
+          <thead><tr><th>{first}</th><th>Count</th><th>Accepted by server</th><th>Wait for judge</th><th>Judging</th><th>Verdict on screen</th><th>Compile</th><th>Tests</th><th>Sandbox</th></tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={name(r)}>
+              <td className="small"><strong>{name(r)}</strong></td><td className="small">{n(r.count)}</td>
+              {["accepted_ms", "wait_ms", "judge_ms", "verdict_ms"].map((c) => <td key={c} className="small mono">{ms(r["avg_" + c])}<div className="muted">p95 {ms(r["p95_" + c])}</div></td>)}
+              <td className="small mono">{ms(r.avg_compile_ms)}</td><td className="small mono">{ms(r.avg_tests_ms)}</td><td className="small mono">{ms(r.avg_sandbox_ms)}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </section>
+  );
+}
+
+function Submissions() {
+  const [hours, setHours] = useState(24);
+  const [kind, setKind] = useState("");
+  const [verdict, setVerdict] = useState("");
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  const [slowest, setSlowest] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t); }, [search]);
+  const params = new URLSearchParams({ hours: String(hours), slowest: String(slowest) });
+  if (kind) params.set("kind", kind); if (verdict) params.set("verdict", verdict); if (q) params.set("q", q);
+  const rows = useData<TimedRow[]>("/api/admin/analytics/submissions?" + params, 10000);
+  const stats = useData<any>("/api/admin/analytics/latency?hours=" + hours, 30000);
+  return (
+    <div className="stack" style={{ gap: "1.25rem" }}>
+      <Range hours={hours} setHours={setHours} />
+      <p className="small muted" style={{ margin: 0 }}>
+        <strong>Accepted by server</strong>: click until the server confirmed it. <strong>Wait for judge</strong>: queued until a judge took it. <strong>Judging</strong>: judge start to verdict.
+        <strong> Verdict on screen</strong>: click until the user saw the result, measured in their browser, including up to 2 seconds of page refresh.
+        Browser numbers and the compile, tests and sandbox split only exist for submissions made after this update, and only while the tab stayed open.
+      </p>
+      <LatencyTable title="Average latency by type" first="Type" rows={stats.data?.byKind} name={(r) => r.kind} />
+      <LatencyTable title="Average latency by language" first="Language" rows={stats.data?.byLanguage} name={(r) => LANGUAGE_NAMES[r.language_code] ?? r.language_code} />
+      <section className="card stack">
+        <div className="row-between"><h3 style={{ margin: 0 }}>Recent submissions</h3>
+          <div className="row" style={{ alignItems: "center" }}>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="User, problem or contest" style={{ width: 200 }} />
+            <select value={kind} aria-label="Type" onChange={(e) => setKind(e.target.value)}><option value="">All types</option>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
+            <select value={verdict} aria-label="Verdict" onChange={(e) => setVerdict(e.target.value)}><option value="">All verdicts</option>{Object.entries(VERDICTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+            <button className={"small" + (slowest ? " primary" : "")} onClick={() => setSlowest(!slowest)}>{slowest ? "Slowest first" : "Newest first"}</button>
+          </div></div>
+        <ErrorBox error={rows.error} />
+        {rows.loading ? <Loading /> : !rows.data?.length ? <Empty>No submission matches.</Empty> : (
+          <div className="table-wrap"><table>
+            <thead><tr><th>Time</th><th>User</th><th>Problem</th><th>Language</th><th>Result</th><th>Accepted</th><th>Wait</th><th>Judging</th><th>Verdict on screen</th><th>Run time</th><th>Memory</th><th>Judge</th></tr></thead>
+            <tbody>{rows.data.map((s) => (
+              <tr key={s.id}>
+                <td className="small">{timeOf(s.submitted_at)}</td>
+                <td className="small">@{s.handle}</td>
+                <td className="small">{s.label ? <strong>{s.label} </strong> : null}{s.problem}<div className="muted">{s.contest ?? s.kind}</div></td>
+                <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>
+                <td className="small"><Verdict status={s.status ?? undefined} verdict={s.verdict} />{s.total_tests ? <div className="muted mono">{s.passed_tests}/{s.total_tests} tests</div> : null}{(s.generation ?? 1) > 1 ? <div className="muted">rejudge</div> : null}</td>
+                <td className="small mono">{ms(s.accepted_ms)}</td><td className="small mono">{ms(s.wait_ms)}</td>
+                <td className="small mono" title={s.compile_ms != null ? `Compile ${ms(s.compile_ms)}, tests ${ms(s.tests_ms)}, sandbox ${ms(s.sandbox_ms)}` : undefined}>{ms(s.judge_ms)}</td>
+                <td className="small mono"><strong>{ms(s.verdict_ms)}</strong></td>
+                <td className="small mono">{ms(s.execution_time_ms)}</td>
+                <td className="small mono">{s.peak_memory_kb != null ? mb(s.peak_memory_kb / 1024) : "—"}</td>
+                <td className="small mono">{s.worker ?? "—"}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+      <span className="small muted">Refreshes every 10 seconds. Shows up to 100 submissions.</span>
+    </div>
+  );
+}
+
+function Capacity() {
+  const stats = useData<any>("/api/admin/analytics/latency?hours=168", 60000);
+  const [laneName, setLaneName] = useState("official");
+  const [judgeSeconds, setJudgeSeconds] = useState("");
+  const [gapMinutes, setGapMinutes] = useState(5);
+  if (stats.error && !stats.data) return <ErrorBox error={stats.error} />;
+  if (!stats.data) return <Loading />;
+  const lanes: any[] = stats.data.lanes;
+  const lane = lanes.find((l) => l.lane === laneName);
+  const measured = lanes.flatMap((l) => (l.avg_judge_ms != null ? [{ lane: l.lane, seconds: l.avg_judge_ms / 1000, count: l.count }] : []));
+  const own = measured.find((m) => m.lane === laneName);
+  const fallback = own ?? measured[0];
+  const seconds = Number(judgeSeconds) > 0 ? Number(judgeSeconds) : fallback?.seconds ?? 12;
+  const configured = Number(lane?.slots ?? 0);
+  const budget = stats.data.hostBudgetMb && stats.data.slotMemoryMb ? Math.floor(stats.data.hostBudgetMb / stats.data.slotMemoryMb) : null;
+  const slots = budget != null ? Math.min(configured, budget) : configured;
+  const perMinute = slots > 0 ? (slots / seconds) * 60 : 0;
+  const estimate = (users: number) => {
+    const rounds = Math.ceil(users / Math.max(slots, 1));
+    return { last: rounds * seconds, average: ((rounds + 1) / 2) * seconds };
+  };
+  const clock = (s: number) => (s < 90 ? Math.round(s) + " s" : s < 5400 ? Math.round(s / 60) + " min" : (s / 3600).toFixed(1) + " h");
+  return (
+    <div className="stack" style={{ gap: "1.25rem" }}>
+      <div className="card row" style={{ alignItems: "flex-end" }}>
+        <label className="field"><span>Judge</span><select value={laneName} onChange={(e) => { setLaneName(e.target.value); setJudgeSeconds(""); }}><option value="official">Contests (official)</option><option value="internal">Practice (internal)</option></select></label>
+        <label className="field"><span>Seconds to judge one submission</span><input type="number" min="0.1" step="0.1" value={judgeSeconds} placeholder={seconds.toFixed(1)} onChange={(e) => setJudgeSeconds(e.target.value)} style={{ width: 150 }} /></label>
+        <label className="field"><span>A user submits every (minutes)</span><input type="number" min="1" value={gapMinutes} onChange={(e) => setGapMinutes(Math.max(1, Number(e.target.value) || 1))} style={{ width: 150 }} /></label>
+      </div>
+      {!own && !judgeSeconds && <div className="notice warn small">No {laneName === "official" ? "contest" : "practice"} submissions were measured in the last 7 days{fallback ? `, so this uses the ${fallback.lane} average of ${fallback.seconds.toFixed(1)} s` : ", so this assumes 12 s"}. Treat it as a rough guide until you run a real test.</div>}
+      {budget != null && budget < configured && <div className="notice warn small">This judge has {configured} slots, but the memory budget allows {budget} running at once across both judges. The numbers use {budget}.</div>}
+      {lane && lane.cpus && configured > lane.cpus && <div className="notice warn small">{configured} slots on {lane.cpus} CPUs: submissions would compete for CPU, which slows judging and can cause false time limit verdicts.</div>}
+      <div className="stat-tiles">
+        <Stat label="Slots in use" value={slots} hint={`${lane?.cpus ?? "?"} CPUs · ${mb(lane?.memory_mb)}`} />
+        <Stat label="Judged per minute" value={Math.round(perMinute)} hint={`${n(Math.round(perMinute * 60))} per hour at full load`} />
+        <Stat label="Steady active users" value={n(Math.floor(perMinute * gapMinutes))} hint={`each submitting every ${gapMinutes} min, without a growing queue`} />
+      </div>
+      <section className="card stack">
+        <h3 style={{ margin: 0 }}>If this many users submit at the same moment</h3>
+        <div className="table-wrap"><table>
+          <thead><tr><th>Users at once</th><th>Average wait for a verdict</th><th>Last user's verdict</th><th>Queue load</th></tr></thead>
+          <tbody>{[slots || 1, 10, 25, 50, 100, 200, 500, 1000].filter((v, i, all) => all.indexOf(v) === i).sort((a, b) => a - b).map((users) => {
+            const e = estimate(users);
+            return <tr key={users}><td className="small"><strong>{n(users)}</strong></td><td className="small mono">{clock(e.average)}</td><td className="small mono">{clock(e.last)}</td>
+              <td className="small" style={{ minWidth: 120 }}>{users > Number(stats.data.limits.max_queued_submissions) ? <Badge tone="bad">Over queue limit</Badge> : <Badge tone={e.last > 300 ? "bad" : e.last > 60 ? "warn" : "ok"}>{e.last > 300 ? "Slow" : e.last > 60 ? "Noticeable" : "Fine"}</Badge>}</td></tr>;
+          })}</tbody>
+        </table></div>
+        <span className="small muted">
+          Estimate: rounds = users ÷ slots, last verdict = rounds × seconds, average = (rounds + 1) ÷ 2 × seconds. It assumes every submission takes the same time and that judging is the only limit, so problems with many tests or slow languages take longer. Limits in force: {stats.data.limits.pending_submissions_per_user} pending and {stats.data.limits.submissions_per_minute} per minute per user, {n(stats.data.limits.max_queued_submissions)} queued in total.
+        </span>
+      </section>
+    </div>
+  );
+}
+
 export default function Analytics() {
   const { superAdmin } = useAuth();
-  const tabs = superAdmin ? [["live", "Live"], ["history", "History"], ["daily", "Daily reports"], ["contests", "Contests"]] : [["contests", "Contests"]];
+  const tabs = superAdmin ? [["live", "Live"], ["history", "History"], ["daily", "Daily reports"], ["submissions", "Submissions"], ["capacity", "Capacity"], ["contests", "Contests"]] : [["contests", "Contests"]];
   const [tab, setTab] = useState(tabs[0][0]);
   return (
     <div className="stack">
@@ -337,6 +482,8 @@ export default function Analytics() {
       {tab === "live" && <Live />}
       {tab === "history" && <History />}
       {tab === "daily" && <Daily />}
+      {tab === "submissions" && <Submissions />}
+      {tab === "capacity" && <Capacity />}
       {tab === "contests" && <Contests />}
     </div>
   );

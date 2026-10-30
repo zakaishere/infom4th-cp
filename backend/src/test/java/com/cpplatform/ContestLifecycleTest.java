@@ -116,6 +116,39 @@ class ContestLifecycleTest {
         assertEquals("FINISHED",db.one("SELECT status FROM competitions WHERE id=?",contest).get("status"));
     }
 
+    @Test void submissionLatencyIsRecordedAndOnlyAdminsCanReadIt() throws Exception {
+        User owner=user(true),entrant=user(false),other=user(false);UUID contest=contest(owner,0);
+        var analytics=context.getBean(com.cpplatform.analytics.AnalyticsService.class);
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(entrant.actor,contest,null);
+        control(owner,run,"start-now");
+        UUID submission=submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}"));
+        UUID job=db.id("SELECT id FROM judging_jobs WHERE submission_id=?",submission);
+        var claimed=judge.claim(job,official,0).orElseThrow();
+        var cases=((List<?>)claimed.get("tests")).stream().map(t->Map.of("id",((Map<?,?>)t).get("id"),"verdict","ACCEPTED","executionTimeMs",10,"peakMemoryKb",1024)).toList();
+        judge.complete(job,official,Api.uuid(claimed.get("leaseToken")),Map.of("verdict","ACCEPTED","cases",cases,"executionTimeMs",10,"peakMemoryKb",1024,
+                "timings",Map.of("compileMs",3000,"testsMs",500,"totalMs",9000)));
+        String timing="/api/submissions/"+submission+"/timing";
+        assertEquals(403,http("POST",timing,other.token,"{\"acceptedMs\":1}").statusCode());
+        assertEquals(200,http("POST",timing,entrant.token,"{\"acceptedMs\":120}").statusCode());
+        assertEquals(200,http("POST",timing,entrant.token,"{\"acceptedMs\":999,\"verdictMs\":10400}").statusCode());
+        assertEquals(200,http("POST",timing,entrant.token,"{\"acceptedMs\":999,\"verdictMs\":99999}").statusCode());
+        var row=analytics.recentSubmissions(1,100,null,null,null,false).stream().filter(r->submission.equals(r.get("id"))).findFirst().orElseThrow();
+        assertEquals(120,((Number)row.get("accepted_ms")).intValue());
+        assertEquals(10400,((Number)row.get("verdict_ms")).intValue());
+        assertEquals(3000,((Number)row.get("compile_ms")).intValue());
+        assertEquals(5500,((Number)row.get("sandbox_ms")).intValue());
+        assertEquals("Contest",row.get("kind"));assertEquals("ACCEPTED",row.get("verdict"));
+        assertFalse(row.containsKey("source_code"));
+        var latency=analytics.latency(1);
+        assertTrue(((List<?>)latency.get("byKind")).stream().anyMatch(k->"Contest".equals(((Map<?,?>)k).get("kind"))));
+        assertTrue(((List<?>)latency.get("lanes")).stream().anyMatch(l->"official".equals(((Map<?,?>)l).get("lane")) && ((Map<?,?>)l).get("avg_judge_ms")!=null));
+        assertEquals(200,http("GET","/api/admin/analytics/latency",owner.token,null).statusCode());
+        assertEquals(403,http("GET","/api/admin/analytics/submissions",entrant.token,null).statusCode());
+        assertEquals(403,http("GET","/api/admin/analytics/latency",entrant.token,null).statusCode());
+    }
+
     @Test void endingARehearsalMovesItsClock() throws Exception {
         User owner=user(true);UUID contest=contest(owner,0);
         UUID rehearsal=db.id("SELECT id FROM contest_runs WHERE competition_id=? AND kind='REHEARSAL'",contest);

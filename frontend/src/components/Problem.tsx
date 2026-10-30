@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { post } from "../api";
 import { useData, useToast } from "../app";
+import { submissionAccepted } from "../lib/latency";
 import { CodeEditor, ErrorBox, LANGUAGE_NAMES, Loading, Markdown, Modal, TEMPLATES, VERDICTS, Verdict, timeOf, when } from "../ui";
 
 export type ProblemDetail = {
@@ -86,8 +87,10 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
   async function submit() {
     if (disabled || busy || !source.trim()) return;
     setBusy(true);
+    const clicked = performance.now();
     try {
-      await post(path, { language, sourceCode: source }, attemptKey);
+      const accepted = await post<{ submissionId: string }>(path, { language, sourceCode: source }, attemptKey);
+      submissionAccepted(accepted.submissionId, clicked);
       setAttemptKey(uuid());
       toast("success", "Submitted. Judging starts as soon as a judge slot is free.");
       onSubmitted();

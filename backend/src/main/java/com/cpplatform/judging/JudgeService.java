@@ -144,8 +144,10 @@ public class JudgeService {
         int total=tests.size();
         long time=metric(result,"executionTimeMs"),memory=metric(result,"peakMemoryKb");
         String feedback=verdict.equals("COMPILATION_ERROR")?bounded(result.get("compilerOutput"),16000):"";
-        db.jdbc.update("INSERT INTO judging_results(job_id,problem_version_id,verdict,execution_time_ms,peak_memory_kb,passed_tests,total_tests,public_feedback) VALUES (?,?,?,?,?,?,?,?)",
-                job,j.get("problem_version_id"),verdict,time,memory,passed,total,feedback);
+        // Optional: where the judging time went. Older workers do not send it.
+        Map<?,?> timings=result.get("timings") instanceof Map<?,?> m?m:Map.of();
+        db.jdbc.update("INSERT INTO judging_results(job_id,problem_version_id,verdict,execution_time_ms,peak_memory_kb,passed_tests,total_tests,public_feedback,compile_ms,tests_ms,judge_total_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                job,j.get("problem_version_id"),verdict,time,memory,passed,total,feedback,timing(timings,"compileMs"),timing(timings,"testsMs"),timing(timings,"totalMs"));
         for(Object item:cases) {
             Map<?,?> c=(Map<?,?>)item;
             db.jdbc.update("INSERT INTO test_case_results(job_id,problem_version_id,test_case_id,verdict,execution_time_ms,peak_memory_kb) VALUES (?,?,?,?,?,?)",
@@ -153,6 +155,9 @@ public class JudgeService {
         }
         db.jdbc.update("UPDATE judging_jobs SET status='COMPLETED',completed_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=?",job);
         db.jdbc.update("INSERT INTO run_events(run_id,kind) SELECT run_id,'SUBMISSION_JUDGED' FROM submissions WHERE id=? AND run_id IS NOT NULL",j.get("submission_id"));
+    }
+    private static Integer timing(Map<?,?> timings,String key) {
+        return timings.get(key) instanceof Number n && n.longValue()>=0 && n.longValue()<=Integer.MAX_VALUE?Integer.valueOf(n.intValue()):null;
     }
     private static long metric(Map<?,?> result,String key) {
         Object value=result.get(key);

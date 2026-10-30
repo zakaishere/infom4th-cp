@@ -4,6 +4,7 @@ import com.cpplatform.common.*;
 import com.cpplatform.identity.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.time.*;
@@ -133,6 +134,64 @@ public class AnalyticsService {
                 "(SELECT count(*) FROM judging_results r WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(mins=>?)) AS judged "+
                 "FROM b ORDER BY b.at",bucket,hours,bucket,bucket,bucket,bucket);
         return Map.of("bucketMinutes",bucket,"hours",hours,"server",serverRows,"activity",activity);
+    }
+
+    // One row per submission with its latest judging. Times are milliseconds; a rejudge is timed from when it was requested.
+    private static final String TIMED="SELECT s.id,s.submitted_at,s.context,s.samples_only,s.language_code,s.submitted_by,u.handle,pv.title AS problem,c.title AS contest,r.kind AS run_kind,cp.label,"+
+            "CASE WHEN s.context='CONTEST' THEN 'Contest' WHEN s.context='LABORATORY' THEN 'Problem testing' WHEN s.samples_only THEN 'Practice examples' ELSE 'Practice' END AS kind,"+
+            "CASE WHEN s.context='CONTEST' THEN 'official' ELSE 'internal' END AS lane,"+
+            "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.worker,l.compile_ms,l.tests_ms,"+
+            "round(extract(epoch FROM coalesce(l.first_started_at,now())-l.created_at)*1000) AS wait_ms,"+
+            "round(extract(epoch FROM l.completed_at-coalesce(l.last_started_at,l.first_started_at))*1000) AS judge_ms,"+
+            "round(extract(epoch FROM l.completed_at-l.created_at)*1000) AS server_ms,"+
+            "greatest(0,l.judge_total_ms-coalesce(l.compile_ms,0)-coalesce(l.tests_ms,0)) AS sandbox_ms,"+
+            "t.accepted_ms,t.verdict_ms "+
+            "FROM submissions s JOIN users u ON u.id=s.submitted_by JOIN problem_versions pv ON pv.id=s.problem_version_id "+
+            "LEFT JOIN contest_runs r ON r.id=s.run_id LEFT JOIN competitions c ON c.id=r.competition_id "+
+            "LEFT JOIN competition_problems cp ON cp.competition_version_id=s.competition_version_id AND cp.slot=s.problem_slot "+
+            "LEFT JOIN LATERAL (SELECT j.status,j.generation,j.attempt_count,j.created_at,j.first_started_at,j.last_started_at,j.completed_at,w.name AS worker,res.verdict,res.passed_tests,res.total_tests,res.execution_time_ms,res.peak_memory_kb,res.compile_ms,res.tests_ms,res.judge_total_ms "+
+            "FROM judging_jobs j LEFT JOIN judging_results res ON res.job_id=j.id LEFT JOIN judge_workers w ON w.id=j.worker_id WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) l ON true "+
+            "LEFT JOIN submission_client_timings t ON t.submission_id=s.id ";
+
+    /** Recent submissions with every latency we know, newest or slowest first. Never includes source code. */
+    public List<Map<String,Object>> recentSubmissions(int hours,int limit,String kind,String search,String verdict,boolean slowest) {
+        return db.jdbc.queryForList("SELECT * FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d "+
+                "WHERE (?::text IS NULL OR d.kind=?::text) AND (?::text IS NULL OR d.handle ILIKE '%'||?::text||'%' OR d.problem ILIKE '%'||?::text||'%' OR d.contest ILIKE '%'||?::text||'%') "+
+                "AND (?::text IS NULL OR d.verdict=?::text) ORDER BY "+(slowest?"d.server_ms DESC NULLS LAST":"d.submitted_at DESC")+" LIMIT ?",
+                hours,kind,kind,search,search,search,search,verdict,verdict,limit);
+    }
+
+    private static String spread(String column) {
+        return "round(avg("+column+")) AS avg_"+column+",round((percentile_cont(0.5) WITHIN GROUP (ORDER BY "+column+"))::numeric) AS p50_"+column+
+                ",round((percentile_cont(0.95) WITHIN GROUP (ORDER BY "+column+"))::numeric) AS p95_"+column+",max("+column+") AS max_"+column;
+    }
+
+    /** Latency by kind of submission and by language, and what each judge lane has available. */
+    public Map<String,Object> latency(int hours) {
+        String window="FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d WHERE d.status='COMPLETED' ";
+        String columns="count(*) AS count,"+spread("wait_ms")+","+spread("judge_ms")+","+spread("server_ms")+","+spread("accepted_ms")+","+spread("verdict_ms")+
+                ",round(avg(compile_ms)) AS avg_compile_ms,round(avg(tests_ms)) AS avg_tests_ms,round(avg(sandbox_ms)) AS avg_sandbox_ms,round(avg(total_tests),1) AS avg_tests ";
+        var result=new LinkedHashMap<String,Object>();
+        result.put("hours",hours);
+        result.put("byKind",db.jdbc.queryForList("SELECT kind,"+columns+window+"GROUP BY kind ORDER BY count(*) DESC",hours));
+        result.put("byLanguage",db.jdbc.queryForList("SELECT language_code,"+columns+window+"GROUP BY language_code ORDER BY count(*) DESC",hours));
+        // Examples only run a few tests, so they would make capacity look better than it is.
+        result.put("lanes",db.jdbc.queryForList("SELECT w.lane,w.workers,w.slots,w.cpus,w.memory_mb,m.count,m.avg_judge_ms,m.p95_judge_ms FROM "+
+                "(SELECT lane,count(*) AS workers,sum(coalesce(reported_target,desired_concurrency,default_concurrency)) AS slots,max(detected_cpus) AS cpus,max(detected_memory_mb) AS memory_mb FROM judge_workers WHERE "+ONLINE+" AND NOT drain_requested GROUP BY lane) w "+
+                "LEFT JOIN (SELECT lane,count(*) AS count,round(avg(judge_ms)) AS avg_judge_ms,round((percentile_cont(0.95) WITHIN GROUP (ORDER BY judge_ms))::numeric) AS p95_judge_ms "+window+"AND NOT samples_only GROUP BY lane) m ON m.lane=w.lane ORDER BY w.lane",hours));
+        result.put("limits",db.jdbc.queryForMap("SELECT pending_submissions_per_user,submissions_per_minute,max_queued_submissions FROM judging_settings"));
+        result.put("hostBudgetMb",db.jdbc.queryForObject("SELECT min(host_memory_budget_mb) FROM judge_workers WHERE "+ONLINE,Integer.class));
+        result.put("slotMemoryMb",db.jdbc.queryForObject("SELECT max(slot_memory_mb) FROM judge_workers WHERE "+ONLINE,Integer.class));
+        return result;
+    }
+
+    /** A contestant's browser reports its own timing; the first report of each value is kept. */
+    public void clientTiming(Actor actor,UUID submission,Map<String,Object> body) {
+        Api.require(actor.id().equals(db.one("SELECT submitted_by FROM submissions WHERE id=?",submission).get("submitted_by")),HttpStatus.FORBIDDEN,"Not your submission");
+        int accepted=Api.number(body,"acceptedMs",0,0,86400000);
+        Integer verdict=body.get("verdictMs")==null?null:Integer.valueOf(Api.number(body,"verdictMs",0,0,86400000));
+        db.jdbc.update("INSERT INTO submission_client_timings(submission_id,accepted_ms,verdict_ms) VALUES (?,?,?) "+
+                "ON CONFLICT (submission_id) DO UPDATE SET verdict_ms=coalesce(submission_client_timings.verdict_ms,excluded.verdict_ms)",submission,accepted,verdict);
     }
 
     public List<Map<String,Object>> reports(int days) {
