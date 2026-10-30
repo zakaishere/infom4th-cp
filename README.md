@@ -50,6 +50,9 @@ first start builds the language images (15–30 min); see [docs/DEPLOY_VPS.md](d
   contest arena (statements, editor, submissions, standings, clarifications), practice,
   teams, and a control room (contests and live run monitor, problem lab, judging
   settings, languages, users and roles, audit log).
+- Community: global Sigma leaderboards for players and teams, player profiles (activity,
+  skills, contest rating, medals and badges), head to head, private rivals, contest
+  replays, team pages and a downloadable share card. All of it reads public results only.
 
 See [API](docs/API.md), [operations](docs/OPERATIONS.md),
 [database](docs/DATABASE.md), and [security assumptions](docs/SECURITY.md).

@@ -103,7 +103,7 @@ export default function Lobby({ runId }: { runId: string }) {
       {phase.phase !== "upcoming" && (
         <section className="card" style={{ marginTop: "1.5rem" }}>
           <h2>Standings</h2>
-          <Standings runId={runId} labels={labels} me={entry?.entry_id} poll={phase.phase === "live" ? 5000 : 30000} />
+          <Standings runId={runId} labels={labels} me={entry?.entry_id} poll={phase.phase === "live" ? 5000 : 30000} links />
         </section>
       )}
     </main>

@@ -1,8 +1,9 @@
-import { StrictMode, useState } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./refresh.css";
 import "./practice.css";
+import "./profile.css";
 import { AuthProvider, ToastProvider, keepServerClockSynced, navigate, useAuth, useRoute, useTheme } from "./app";
 import { logout, syncServerClock } from "./api";
 import { Loading } from "./ui";
@@ -12,15 +13,18 @@ import Lobby from "./pages/Lobby";
 import Arena from "./pages/Arena";
 import { PracticeList, PracticeProblem } from "./pages/Practice";
 import Teams from "./pages/Teams";
+import Leaderboard from "./pages/Leaderboard";
+import Profile from "./pages/Profile";
+import HeadToHead from "./pages/HeadToHead";
+import TeamProfile from "./pages/TeamProfile";
 import Admin from "./pages/admin/Admin";
-import { ChangePassword } from "./components/Account";
+import { Avatar } from "./components/Avatar";
 
 function Shell() {
   const { me, loading, organizer, setter } = useAuth();
   const staff = organizer || setter;
   const { path, parts } = useRoute();
   const { theme, toggle } = useTheme();
-  const [account, setAccount] = useState(false);
   if (loading) return <Loading label="Connecting…" />;
   // Password reset links arrive as /reset-password?token=... from the backend email.
   if (!me || new URLSearchParams(window.location.search).has("token")) return <AuthPage />;
@@ -34,6 +38,10 @@ function Shell() {
   else if (parts[0] === "practice" && parts[1]) page = <PracticeProblem versionId={parts[1]} />;
   else if (parts[0] === "practice") page = <PracticeList />;
   else if (parts[0] === "teams") page = <Teams />;
+  else if (parts[0] === "leaderboard") page = <Leaderboard />;
+  else if (parts[0] === "u" && parts[1] && parts[2] === "vs" && parts[3]) page = <HeadToHead first={parts[1]} second={parts[3]} />;
+  else if (parts[0] === "u" && parts[1]) page = <Profile key={parts[1]} handle={parts[1]} />;
+  else if (parts[0] === "team" && parts[1]) page = <TeamProfile id={parts[1]} />;
   else if (parts[0] === "contests") page = <Home />;
   else if (staff && parts.length === 0) page = <Admin parts={[]} />;
   else if (parts[0] === "admin" && (organizer || setter)) page = <Admin parts={parts.slice(1)} />;
@@ -52,26 +60,27 @@ function Shell() {
               {link("/admin", "Control room")}
               {link("/contests", "Contests")}
               {link("/practice", "Practice")}
+              {link("/leaderboard", "Leaderboard")}
             </>
           ) : (
             <>
               {link("/", "Contests")}
               {link("/practice", "Practice")}
+              {link("/leaderboard", "Leaderboard")}
               {link("/teams", "Teams")}
             </>
           )}
         </nav>
         <div className="topbar-right">
           <button className="ghost small" onClick={toggle} title="Toggle theme">{theme === "dark" ? "☀" : "☾"}</button>
-          <button className="ghost small row" style={{ gap: "0.5rem", padding: "0.15rem 0.4rem" }} title="Account: change password" onClick={() => setAccount(true)}>
-            <span className="avatar">{(me.display_name || me.handle).slice(0, 1).toUpperCase()}</span>
+          <a className="btn ghost small row" style={{ gap: "0.5rem", padding: "0.15rem 0.4rem" }} title="Your profile" href={"#/u/" + me.handle}>
+            <Avatar handle={me.handle} size={28} />
             <span className="small muted">@{me.handle}</span>
-          </button>
+          </a>
           <button className="small" onClick={async () => { await logout(); navigate("/"); }}>Sign out</button>
         </div>
       </header>
       {page}
-      {account && <ChangePassword onClose={() => setAccount(false)} />}
     </>
   );
 }

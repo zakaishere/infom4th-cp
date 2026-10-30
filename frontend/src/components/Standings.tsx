@@ -79,8 +79,10 @@ function Podium({ b, names }: { b: Board; names: Record<string, { display_name: 
   );
 }
 
-export default function Standings({ runId, jury, me, poll = 5000, compactPodium }: { runId: string; labels?: Record<number, string>; jury?: boolean; me?: string | null; poll?: number; compactPodium?: boolean }) {
+export default function Standings({ runId, jury, me, poll = 5000, compactPodium, links }: { runId: string; labels?: Record<number, string>; jury?: boolean; me?: string | null; poll?: number; compactPodium?: boolean; links?: boolean }) {
   const board = useBoard(runId, jury, poll);
+  const rivals = useData<string[]>("/api/me/rivals/handles");
+  const isRival = (members?: string | null) => Boolean(members) && members!.split(", ").some((h) => rivals.data?.includes(h));
   // Rows whose result changed since the previous refresh flash briefly.
   const previous = useRef<Record<string, string>>({});
   const [changed, setChanged] = useState<Set<string>>(new Set());
@@ -153,9 +155,11 @@ export default function Standings({ runId, jury, me, poll = 5000, compactPodium 
               {b.standings.map((row) => {
                 const entry = names[row.entry];
                 return (
-                  <tr key={row.entry} className={[row.entry === me ? "me" : "", row.rank <= 3 && (b.scoring === "ICPC" ? row.solved : row.score) > 0 ? "r" + row.rank : "", changed.has(row.entry) ? "flash" : ""].join(" ")}>
+                  <tr key={row.entry} className={[row.entry === me ? "me" : "", isRival(entry?.members) ? "rival" : "", row.rank <= 3 && (b.scoring === "ICPC" ? row.solved : row.score) > 0 ? "r" + row.rank : "", changed.has(row.entry) ? "flash" : ""].join(" ")}>
                     <td className="rank">{row.rank}</td>
-                    <td className="who"><strong>{entry?.display_name ?? "—"}</strong>{row.entry === me && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
+                    {/* The arena leaves links out: following one would leave the contest screen. */}
+                    <td className="who"><strong>{links && entry?.members && !entry.members.includes(",") ? <a href={"#/u/" + entry.members}>{entry.display_name}</a> : entry?.display_name ?? "—"}</strong>{row.entry === me && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
+                      {isRival(entry?.members) && <span className="tag rival-tag" style={{ marginLeft: 6 }}>★ rival</span>}
                       {entry?.members && entry.members.includes(",") && <div className="small muted">{entry.members}</div>}</td>
                     <td className="right total">{totalOf(b, row)}</td>
                     {b.scoring === "ICPC" || b.scoring === "ATCODER" ? <td className="right mono">{minutes(row.penaltySeconds ?? 0)}</td> : null}

@@ -13,6 +13,7 @@ neither imported nor modified.
 | V5 | Access/reset credentials, refresh families, non-contest execution contexts, atomic judge outbox, team invites and event cursors |
 | V6 | Runtime image pins, private participant invitations and database-clock submission admission |
 | V7 | Immutable per-problem runtime image snapshots captured during validation |
+| V16 | Profile fields, the per-contest rated switch, saved final contest results and private rivals |
 
 Official submissions bind the submitting user, entry, run and exact problem snapshot
 through composite foreign keys. Laboratory/practice submissions explicitly have no
@@ -48,6 +49,11 @@ data. Only explicit participant DTOs reach public APIs.
 Runtime image pins are captured before a problem version is sealed. Later global
 runtime changes cannot silently replace that version's compiler/interpreter.
 Keep workers for old image IDs available while contests using them are active.
+
+contest_results saves final results of public contests whose scoreboard is released.
+It is derived data, rebuilt automatically when a rejudge changes a verdict. The rating
+is not stored: it is replayed from these rows in contest order, so a rejudge or a change
+to a contest's rated switch flows through by itself. Sigma is calculated the same way.
 
 V1-V4 were preserved. Never edit deployed migrations or use Flyway clean. Back up
 persistent volumes before upgrading and use separate migration/runtime accounts

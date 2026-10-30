@@ -153,6 +153,183 @@ class ContestLifecycleTest {
         assertEquals(403,http("GET","/api/admin/analytics/latency",entrant.token,null).statusCode());
     }
 
+    void accept(UUID submission,UUID worker) {
+        UUID job=db.id("SELECT id FROM judging_jobs WHERE submission_id=?",submission);
+        var claimed=judge.claim(job,worker,0).orElseThrow();
+        var cases=((List<?>)claimed.get("tests")).stream().map(t->Map.of("id",((Map<?,?>)t).get("id"),"verdict","ACCEPTED","executionTimeMs",10,"peakMemoryKb",1024)).toList();
+        judge.complete(job,worker,Api.uuid(claimed.get("leaseToken")),Map.of("verdict","ACCEPTED","cases",cases,"executionTimeMs",10,"peakMemoryKb",1024));
+    }
+    long sigma(LeaderboardService leaderboard,User user) {
+        return leaderboard.compute().players().stream().filter(r->r.key().equals(user.actor.id())).mapToLong(LeaderboardService.Row::score).sum();
+    }
+
+    @Test void leaderboardCountsOnlyPublicResultsAndNeverStaffOrExampleRuns() throws Exception {
+        var leaderboard=context.getBean(LeaderboardService.class);
+        User owner=user(true),entrant=user(false),sampler=user(false);UUID contest=contest(owner,600);
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(entrant.actor,contest,null);contests.register(owner.actor,contest,null);
+        control(owner,run,"start-now");
+        accept(submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        accept(submissions.submit(owner.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        assertEquals(0,sigma(leaderboard,entrant),"a live contest must not reveal results");
+        control(owner,run,"end-now");
+        assertEquals(0,sigma(leaderboard,entrant),"a frozen scoreboard must not be revealed");
+        control(owner,run,"release-standings");
+        assertTrue(sigma(leaderboard,entrant)>0);
+        assertEquals(0,sigma(leaderboard,owner),"staff can read the tests");
+
+        UUID version=db.id("SELECT cp.problem_version_id FROM competition_problems cp JOIN contest_runs r ON r.competition_version_id=cp.competition_version_id WHERE r.id=?",run);
+        lab.publishPractice(owner.actor,version);
+        UUID internal=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='internal' ORDER BY registered_at DESC LIMIT 1");
+        accept(submissions.submit(sampler.actor,null,null,version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}","mode","samples")),internal);
+        assertEquals(0,sigma(leaderboard,sampler),"running the examples is not a solve");
+        accept(submissions.submit(sampler.actor,null,null,version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),internal);
+        assertTrue(sigma(leaderboard,sampler)>0);
+        db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=(SELECT problem_id FROM problem_versions WHERE id=?)",version);
+        assertEquals(0,sigma(leaderboard,sampler),"a hidden practice problem stops paying");
+
+        fresh();
+        var response=http("GET","/api/leaderboard",entrant.token,null);
+        assertEquals(200,response.statusCode(),response.body());
+        var body=JSON.readTree(response.body());
+        assertTrue(body.get("me").get("rank").asInt()>=1);
+        assertTrue(body.get("me").get("score").asLong()>0);
+        assertFalse(response.body().contains("@example.test"));
+        assertFalse(response.body().contains(entrant.actor.id().toString()));
+        assertEquals(401,http("GET","/api/leaderboard",null,null).statusCode());
+    }
+
+    String handle(User user){return (String)db.one("SELECT handle FROM users WHERE id=?",user.actor.id()).get("handle");}
+    void fresh(){context.getBean(ContestResults.class).invalidate();context.getBean(LeaderboardService.class).invalidate();}
+    com.fasterxml.jackson.databind.JsonNode json(HttpResponse<String> response) throws Exception {
+        assertEquals(200,response.statusCode(),response.body());return JSON.readTree(response.body());
+    }
+
+    @Test void profilesShowOnlyPublicResultsAndRatingsFollowSavedContests() throws Exception {
+        User owner=user(true),winner=user(false),loser=user(false);UUID contest=contest(owner,0);
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(winner.actor,contest,null);contests.register(loser.actor,contest,null);
+        control(owner,run,"start-now");
+        accept(submissions.submit(winner.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        submissions.submit(loser.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}"));
+        fresh();
+        String path="/api/profiles/"+handle(winner);
+        var live=json(http("GET",path,loser.token,null));
+        assertEquals(0,live.get("contests").size(),"a running contest stays off the profile");
+        assertEquals(0,live.get("stats").get("submissions").asInt());
+        control(owner,run,"end-now");
+        fresh();
+        var response=http("GET",path,loser.token,null);
+        var done=json(response);
+        assertEquals(1,done.get("contests").size());
+        assertEquals(1,done.get("contests").get(0).get("rank").asInt());
+        assertEquals(1,done.get("medals").get("gold").asInt());
+        assertEquals(1,done.get("stats").get("solved").asInt());
+        assertTrue(done.get("rating").asInt()>Rating.START);
+        assertTrue(done.get("provisional").asBoolean());
+        assertEquals(1,done.get("ratingHistory").size());
+        assertFalse(done.get("own").asBoolean());
+        assertTrue(done.get("sigma").get("score").asLong()>0);
+        assertFalse(response.body().contains("@example.test"));
+        assertFalse(response.body().contains("password"));
+        assertFalse(response.body().contains("source_code"));
+        assertFalse(response.body().contains(winner.actor.id().toString()));
+        assertEquals(1,done.get("badges").size()-5,"six badges are always listed");
+        assertEquals(404,http("GET","/api/profiles/nobody_here_at_all",loser.token,null).statusCode());
+
+        // An unrated contest leaves the rating; the results stay.
+        var forbidden=http("POST","/api/manage/competitions/"+contest+"/rated",loser.token,"{\"rated\":false}");
+        assertEquals(403,forbidden.statusCode());
+        assertEquals(200,http("POST","/api/manage/competitions/"+contest+"/rated",owner.token,"{\"rated\":false,\"reason\":\"Training\"}").statusCode());
+        fresh();
+        var unrated=json(http("GET",path,loser.token,null));
+        assertTrue(unrated.get("rating").isNull());
+        assertEquals(1,unrated.get("contests").size());
+        http("POST","/api/manage/competitions/"+contest+"/rated",owner.token,"{\"rated\":true}");
+        fresh();
+
+        // Head to head from either side.
+        var versus=json(http("GET",path+"/vs/"+handle(loser),owner.token,null));
+        assertEquals(1,versus.get("record").get("a").asInt());
+        assertEquals(0,versus.get("record").get("b").asInt());
+        assertEquals(1,versus.get("onlyA").size());
+        assertEquals(0,versus.get("onlyB").size());
+        assertEquals(400,http("GET",path+"/vs/"+handle(winner),owner.token,null).statusCode());
+
+        // Replay ends on the final rank; someone who did not play gets nothing.
+        var replay=json(http("GET",path+"/contests/"+run+"/replay",loser.token,null));
+        assertEquals(60,replay.get("ranks").size());
+        assertEquals(1,replay.get("ranks").get(59).asInt());
+        assertEquals(1,replay.get("solves").size());
+        assertEquals(404,http("GET","/api/profiles/"+handle(owner)+"/contests/"+run+"/replay",loser.token,null).statusCode());
+    }
+
+    @Test void privateContestsNeverAppearOnProfiles() throws Exception {
+        User owner=user(true),entrant=user(false),viewer=user(false);UUID contest=contest(owner,0);
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PRIVATE");
+        contests.registerUsers(owner.actor,contest,List.of(handle(entrant)));
+        control(owner,run,"start-now");
+        accept(submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        control(owner,run,"end-now");
+        fresh();
+        var profile=json(http("GET","/api/profiles/"+handle(entrant),viewer.token,null));
+        assertEquals(0,profile.get("contests").size());
+        assertEquals(0,profile.get("stats").get("submissions").asInt());
+        assertEquals(404,http("GET","/api/profiles/"+handle(entrant)+"/contests/"+run+"/replay",viewer.token,null).statusCode());
+    }
+
+    @Test void playersEditTheirOwnProfileAndPinRivals() throws Exception {
+        User me=user(false),other=user(false);
+        var saved=http("PATCH","/api/me/profile",me.token,"{\"bio\":\"Hello\",\"school\":\"InfoM4th\",\"country\":\"MA\",\"github\":\"octo-cat\",\"codeforces\":\"tourist\"}");
+        assertEquals(200,saved.statusCode(),saved.body());
+        var mine=json(http("GET","/api/profiles/"+handle(me),other.token,null)).get("user");
+        assertEquals("Hello",mine.get("bio").asText());assertEquals("MA",mine.get("country").asText());assertEquals("octo-cat",mine.get("github").asText());
+        assertEquals(400,http("PATCH","/api/me/profile",me.token,"{\"github\":\"javascript:alert(1)\"}").statusCode());
+        assertEquals(400,http("PATCH","/api/me/profile",me.token,"{\"country\":\"zz\"}").statusCode());
+        assertEquals(400,http("PATCH","/api/me/profile",me.token,"{\"bio\":\""+"x".repeat(281)+"\"}").statusCode());
+
+        String path="/api/me/rivals/"+handle(other);
+        assertEquals(200,http("PUT",path,me.token,null).statusCode());
+        assertEquals(200,http("PUT",path,me.token,null).statusCode(),"pinning twice changes nothing");
+        assertEquals(400,http("PUT","/api/me/rivals/"+handle(me),me.token,null).statusCode());
+        assertEquals(404,http("PUT","/api/me/rivals/nobody_here_at_all",me.token,null).statusCode());
+        assertTrue(json(http("GET","/api/profiles/"+handle(other),me.token,null)).get("isRival").asBoolean());
+        assertEquals(handle(other),json(http("GET","/api/me/rivals/handles",me.token,null)).get(0).asText());
+        assertEquals(handle(other),json(http("GET","/api/me/rivals",me.token,null)).get(0).get("handle").asText());
+        assertEquals(0,json(http("GET","/api/me/rivals",other.token,null)).size(),"rivals are private to whoever pinned them");
+        assertEquals(200,http("DELETE",path,me.token,null).statusCode());
+        assertEquals(0,json(http("GET","/api/me/rivals/handles",me.token,null)).size());
+    }
+
+    @Test void teamProfilesListMembersAndResults() throws Exception {
+        User owner=user(true),captain=user(false),member=user(false);
+        var created=JSON.readTree(http("POST","/api/teams",captain.token,"{\"name\":\"Team "+UUID.randomUUID()+"\"}").body());
+        String team=created.get("teamId").asText();
+        http("POST","/api/teams/join",member.token,"{\"inviteToken\":\""+created.get("inviteToken").asText()+"\"}");
+        String crew=JSON.readTree(http("POST","/api/teams",owner.token,"{\"name\":\"Crew "+UUID.randomUUID()+"\"}").body()).get("teamId").asText();
+        UUID contest=contest(owner,0,Map.of("mode","TEAM","maxTeamSize",3),Map.of("teamIds",List.of(crew)));
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(captain.actor,contest,UUID.fromString(team));
+        control(owner,run,"start-now");
+        accept(submissions.submit(member.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        control(owner,run,"end-now");
+        fresh();
+        var response=http("GET","/api/teams/"+team+"/profile",member.token,null);
+        var body=json(response);
+        assertEquals(2,body.get("members").size());
+        assertEquals(1,body.get("contests").size());
+        assertTrue(body.get("sigma").get("score").asLong()>0);
+        assertFalse(response.body().contains("invite"));
+        assertFalse(response.body().contains("@example.test"));
+        var played=json(http("GET","/api/profiles/"+handle(member),captain.token,null));
+        assertEquals(handle(captain),played.get("playedWith").get(0).get("handle").asText());
+        assertEquals(404,http("GET","/api/teams/"+UUID.randomUUID()+"/profile",member.token,null).statusCode());
+    }
+
     @Test void adminsCanSeeTeamsAndWhatTheyPlayed() throws Exception {
         User owner=user(true),captain=user(false),member=user(false),idle=user(false);
         var created=JSON.readTree(http("POST","/api/teams",captain.token,"{\"name\":\"Team "+UUID.randomUUID()+"\"}").body());

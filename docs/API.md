@@ -104,6 +104,15 @@ the lifecycle scheduler. Accepted submissions continue judging after contest end
 | GET | /api/practice | Explicitly published practice |
 | GET | /api/practice/{versionId} | Statement and samples |
 | POST | /api/practice/{versionId}/submissions | Same submission body/header |
+| GET | /api/leaderboard | Global Sigma boards: top 100 players and teams, the caller's places, cached 30 seconds |
+| GET | /api/profiles/{handle} | Public profile: Sigma, rating history, activity, skills, badges, medals, contests. Public results only; never email, source or private contests |
+| GET | /api/profiles/{a}/vs/{b} | Head to head: record in shared contests and problems only one of them solved |
+| GET | /api/profiles/{handle}/contests/{runId}/replay | That player's rank through a finished public contest, 60 samples plus solves |
+| PATCH | /api/me/profile | bio, school, country (two letters), github, codeforces; the last two are usernames, not URLs |
+| GET | /api/me/rivals, /api/me/rivals/handles | Your pinned rivals with their standing / handles only (cheap, for scoreboards) |
+| PUT/DELETE | /api/me/rivals/{handle} | Pin (at most 10) or unpin a rival; private to you |
+| GET | /api/teams/{teamId}/profile | Members, Sigma, medals and public contest history |
+| POST | /api/manage/competitions/{id}/rated | rated (boolean), reason; organizers keep a contest out of the rating. Audited |
 
 Submission returns 202 and submissionId. Repeat the same idempotency key and body
 to recover a lost response. Reusing a key with changed content returns 409.

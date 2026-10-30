@@ -19,7 +19,7 @@ export default function Teams() {
           <h3>Your teams</h3>
           {teams.loading ? <Loading /> : !teams.data?.length ? <Empty>You are not in a team yet.</Empty> : teams.data.map((t) => (
             <div key={t.id} className="row-between card-flat">
-              <div><strong>{t.name}</strong> {t.captain_id === me?.id && <Badge tone="info">Captain</Badge>} {t.locked && <Badge tone="warn">Locked for a contest</Badge>}
+              <div><a href={"#/team/" + t.id}><strong>{t.name}</strong></a> {t.captain_id === me?.id && <Badge tone="info">Captain</Badge>} {t.locked && <Badge tone="warn">Locked for a contest</Badge>}
                 <div className="small muted">Members: {t.members}</div></div>
               {t.captain_id === me?.id && (
                 <button className="small" disabled={busy} onClick={() => run(async () => {

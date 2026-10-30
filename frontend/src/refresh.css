@@ -94,6 +94,17 @@ a.card { color: inherit; display: block; }
 .filters button { padding: 0.3rem 0.8rem; font-size: 0.85rem; border-color: var(--line); font-weight: 600; }
 .filters button.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 
+/* Sigma leaderboard */
+.sigma-hero { overflow: hidden; }
+.sigma-mark { position: absolute !important; right: 2.5rem; top: 50%; transform: translateY(-50%); font-family: var(--font-display); font-size: 11rem; font-weight: 700; line-height: 1; color: #35c7e8; opacity: 0.28; pointer-events: none; }
+.sigma-subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sigma-total { color: var(--primary); white-space: nowrap; }
+.sigma-easy { color: var(--ok); } .sigma-medium { color: var(--warn); } .sigma-hard { color: var(--danger); }
+.sigma-rules summary { cursor: pointer; font-family: var(--font-display); font-weight: 700; }
+.sigma-rules ul { margin: 0.75rem 0 0; padding-left: 1.2rem; color: var(--muted); }
+.sigma-rules li { margin-bottom: 0.3rem; }
+@media (max-width: 700px) { .sigma-mark { font-size: 6rem; right: 1rem; } }
+
 /* Scoreboard */
 .legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); align-items: center; }
 .legend i { display: inline-block; width: 14px; height: 14px; margin-right: 0.3rem; vertical-align: -2px; }
