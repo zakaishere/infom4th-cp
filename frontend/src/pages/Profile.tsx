@@ -5,7 +5,7 @@ import { ChangePassword } from "../components/Account";
 import { Avatar, TierChip } from "../components/Avatar";
 import { BarList, Heatmap, LineChart, SkillRadar } from "../components/Charts";
 import { SCORING_INFO } from "../components/Standings";
-import { drawCard } from "../lib/shareCard";
+import { drawCard, loadLogo } from "../lib/shareCard";
 import { Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Modal, Stat, VERDICTS, when } from "../ui";
 
 type Summary = { handle: string; display_name: string; sigma: number | null; rank: number | null; tier: string | null; solved: number; rating: number | null };
@@ -73,10 +73,15 @@ function EditProfile({ d, onClose, onSaved }: { d: Data; onClose: () => void; on
 function ShareCard({ d, onClose }: { d: Data; onClose: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    drawCard(canvas.current!, {
-      handle: d.user.handle, name: d.user.display_name, tier: d.sigma?.tier, sigma: d.sigma?.score, rank: d.sigma?.rank, players: d.playerCount,
-      rating: d.rating, solved: d.stats.solved, gold: Number(d.medals.gold), silver: Number(d.medals.silver), bronze: Number(d.medals.bronze),
+    let open = true;
+    loadLogo().then((logo) => {
+      if (!open) return;
+      drawCard(canvas.current!, {
+        handle: d.user.handle, name: d.user.display_name, tier: d.sigma?.tier, sigma: d.sigma?.score, rank: d.sigma?.rank, players: d.playerCount,
+        rating: d.rating, solved: d.stats.solved, gold: Number(d.medals.gold), silver: Number(d.medals.silver), bronze: Number(d.medals.bronze),
+      }, logo);
     });
+    return () => { open = false; };
   }, [d]);
   return (
     <Modal title="Share card" onClose={onClose}>
@@ -191,6 +196,7 @@ export default function Profile({ handle }: { handle: string }) {
           )}
           <button className="small" onClick={() => setDialog("share")}>Share card</button>
         </div>
+        <img src="/logo.png" alt="" />
       </section>
 
       <div className="stack" style={{ gap: "1.25rem" }}>
