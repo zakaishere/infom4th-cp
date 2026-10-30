@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { post } from "../api";
 import { useData, useToast } from "../app";
-import { CodeEditor, ErrorBox, LANGUAGE_NAMES, Loading, Markdown, Modal, TEMPLATES, VERDICTS, Verdict, when } from "../ui";
+import { CodeEditor, ErrorBox, LANGUAGE_NAMES, Loading, Markdown, Modal, TEMPLATES, VERDICTS, Verdict, timeOf, when } from "../ui";
 
 export type ProblemDetail = {
   id: string; title: string; statement_md: string; input_format_md: string; output_format_md: string;
@@ -128,7 +128,7 @@ export function SubmissionTable({ rows, labels, onOpen, showAuthor }: { rows: Su
           {rows.map((s, i) => (
             <tr key={s.id} onClick={() => onOpen(s.id)} style={{ cursor: "pointer" }} title="Open details">
               <td className="small muted">{rows.length - i}</td>
-              <td className="small">{new Date(s.submitted_at).toLocaleTimeString()}</td>
+              <td className="small">{timeOf(s.submitted_at)}</td>
               {showAuthor && <td className="small">@{s.submitted_by_handle}</td>}
               {labels && <td><strong>{s.problem_slot != null ? labels[s.problem_slot] ?? s.problem_slot : "—"}</strong></td>}
               <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>

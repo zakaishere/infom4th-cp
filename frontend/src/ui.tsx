@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { displayTimeZone, serverNow } from "./api";
 
 export const VERDICTS: Record<string, { label: string; short: string; tone: string }> = {
   ACCEPTED: { label: "Accepted", short: "AC", tone: "ok" },
@@ -43,12 +44,41 @@ export function clock(ms: number) {
 
 export function when(value?: string | null) {
   if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return new Date(value).toLocaleString(undefined, { timeZone: displayTimeZone(), year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" });
+}
+
+/** Time of day in the platform's time zone, so a submission shows the same time on every screen. */
+export function timeOf(value: string) {
+  return new Date(value).toLocaleTimeString(undefined, { timeZone: displayTimeZone(), hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+}
+
+function zoneParts(ms: number) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: displayTimeZone(), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(ms);
+  const part = (type: string) => parts.find((p) => p.type === type)!.value;
+  return { year: part("year"), month: part("month"), day: part("day"), hour: part("hour"), minute: part("minute"), second: part("second") };
+}
+
+/** Value for a datetime-local input, read in the platform's time zone instead of the laptop's. */
+export function toZoneInput(ms: number) {
+  const p = zoneParts(ms);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+
+/** The instant a datetime-local value means in the platform's time zone. Returns NaN when it is empty or invalid. */
+export function fromZoneInput(value: string) {
+  const wall = new Date(value + "Z").getTime();
+  if (Number.isNaN(wall)) return NaN;
+  const offsetAt = (ms: number) => {
+    const p = zoneParts(ms);
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
+  };
+  // A second pass gets the right answer when daylight saving changes between the two instants.
+  return wall - offsetAt(wall - offsetAt(wall));
 }
 
 export function ago(value?: string | null) {
   if (!value) return "never";
-  const seconds = Math.round((Date.now() - new Date(value).getTime()) / 1000);
+  const seconds = Math.round((serverNow() - new Date(value).getTime()) / 1000);
   if (seconds < 60) return seconds + "s ago";
   if (seconds < 3600) return Math.round(seconds / 60) + "m ago";
   return Math.round(seconds / 3600) + "h ago";

@@ -225,7 +225,7 @@ public class CompetitionService {
         var r=db.one("SELECT * FROM contest_runs WHERE id=? FOR UPDATE",run);access.competition(actor,(UUID)r.get("competition_id"),false);
         String action=Api.text(body,"action",32),reason=Api.text(body,"reason",2000);
         // The run clock is immutable except for these audited organizer actions (see V11).
-        if(List.of("start-now","end-now","extend").contains(action))db.jdbc.queryForList("SELECT set_config('cp.run_clock_change','on',true)");
+        if(List.of("start-now","end-now","extend","end-rehearsal").contains(action))db.jdbc.queryForList("SELECT set_config('cp.run_clock_change','on',true)");
         switch(action) {
             case "pause" -> db.jdbc.update("UPDATE contest_runs SET submissions_paused=true WHERE id=?",run);
             case "resume" -> db.jdbc.update("UPDATE contest_runs SET submissions_paused=false WHERE id=?",run);
@@ -247,7 +247,7 @@ public class CompetitionService {
             }
             case "end-rehearsal" -> {
                 Api.require("REHEARSAL".equals(r.get("kind")),HttpStatus.CONFLICT,"Only rehearsals may be ended early");
-                db.jdbc.update("UPDATE contest_runs SET status='FINISHED' WHERE id=?",run);
+                db.jdbc.update("UPDATE contest_runs SET ends_at=least(ends_at,greatest(now(),starts_at+interval '1 second')),status='FINISHED' WHERE id=?",run);
             }
             case "release-standings" -> {
                 Api.require(!Instant.now().isBefore(Api.time(r.get("ends_at"))) || "FINISHED".equals(r.get("status")),HttpStatus.CONFLICT,"Contest has not ended");
@@ -255,6 +255,8 @@ public class CompetitionService {
             }
             default -> throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST,"Unknown action");
         }
+        // Open arenas reload the run at once instead of showing the old clock until their next refresh.
+        db.jdbc.update("INSERT INTO run_events(run_id,kind) VALUES (?,'RUN_UPDATED')",run);
         db.audit(actor.id(),"RUN_"+action.toUpperCase(Locale.ROOT),"run",run,reason);
     }
     @Transactional

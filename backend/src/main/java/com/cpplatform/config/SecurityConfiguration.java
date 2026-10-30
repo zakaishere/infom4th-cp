@@ -30,7 +30,10 @@ public class SecurityConfiguration {
                 .cors(c->c.configurationSource(source))
                 .sessionManagement(s->s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(a->a
+                    // Error pages keep the real status; denying them turned every failure into 401.
+                    .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                     .requestMatchers("/actuator/health","/actuator/health/**").permitAll()
+                    .requestMatchers("/api/time").permitAll()
                     .requestMatchers("/api/auth/register","/api/auth/login","/api/auth/refresh","/api/auth/forgot-password","/api/auth/reset-password").permitAll()
                     .requestMatchers("/internal/judge/**").hasRole("WORKER")
                     .requestMatchers("/api/**").authenticated().anyRequest().denyAll())

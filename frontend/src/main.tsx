@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./refresh.css";
 import "./practice.css";
-import { AuthProvider, ToastProvider, navigate, useAuth, useRoute, useTheme } from "./app";
-import { logout } from "./api";
+import { AuthProvider, ToastProvider, keepServerClockSynced, navigate, useAuth, useRoute, useTheme } from "./app";
+import { logout, syncServerClock } from "./api";
 import { Loading } from "./ui";
 import AuthPage from "./pages/Auth";
 import Home from "./pages/Home";
@@ -76,12 +76,16 @@ function Shell() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ToastProvider>
-      <AuthProvider>
-        <Shell />
-      </AuthProvider>
-    </ToastProvider>
-  </StrictMode>,
-);
+// Timers must not flash a wrong state from the laptop's clock, but a slow network must not block the page.
+Promise.race([syncServerClock(), new Promise((done) => setTimeout(done, 2000))]).finally(() => {
+  keepServerClockSynced();
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <ToastProvider>
+        <AuthProvider>
+          <Shell />
+        </AuthProvider>
+      </ToastProvider>
+    </StrictMode>,
+  );
+});

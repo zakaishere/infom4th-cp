@@ -12,10 +12,16 @@ import java.time.Instant;
 public class CompetitionController {
     private final Database db;private final CompetitionService contests;private final SubmissionService submissions;
     private final Permissions access;private final StandingsService standings;private final PracticeService practice;
-    public CompetitionController(Database db,CompetitionService contests,SubmissionService submissions,Permissions access,StandingsService standings,PracticeService practice) {
+    private final String timeZone;
+    public CompetitionController(Database db,CompetitionService contests,SubmissionService submissions,Permissions access,StandingsService standings,PracticeService practice,
+                                 @org.springframework.beans.factory.annotation.Value("${cp.display-timezone:UTC}") String timeZone) {
+        this.timeZone=java.time.ZoneId.of(timeZone).getId();
         this.practice=practice;
         this.db=db;this.contests=contests;this.submissions=submissions;this.access=access;this.standings=standings;
     }
+    /** The clock every browser follows, so contest timing never depends on a laptop's own clock or time zone. */
+    @GetMapping("/api/time")
+    Object time(){return Map.of("serverTime",System.currentTimeMillis(),"timeZone",timeZone);}
     @PostMapping("/api/manage/competitions") @ResponseStatus(HttpStatus.CREATED)
     Object create(Authentication auth,@RequestBody Map<String,Object> body){return Map.of("competitionId",contests.create(Actor.of(auth),body));}
     @PatchMapping("/api/manage/competitions/{id}")
@@ -52,7 +58,8 @@ public class CompetitionController {
     Object schedule(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body) {
         // startNow: open the contest immediately; it ends after its configured duration.
         boolean now=Boolean.TRUE.equals(body.get("startNow"));
-        UUID run=contests.schedule(Actor.of(auth),id,now?java.time.Instant.now().plusSeconds(1):Api.instant(body.get("startsAt")),Api.optional(body,"visibility","PUBLIC",16));
+        // The placeholder start is far enough ahead that the scheduler cannot open the run before start-now does.
+        UUID run=contests.schedule(Actor.of(auth),id,now?java.time.Instant.now().plusSeconds(60):Api.instant(body.get("startsAt")),Api.optional(body,"visibility","PUBLIC",16));
         if(now)contests.control(Actor.of(auth),run,Map.of("action","start-now","reason",Api.optional(body,"reason","Started immediately",2000)));
         return Map.of("runId",run);
     }

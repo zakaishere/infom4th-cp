@@ -9,7 +9,6 @@ export type RunDetail = {
   run: { id: string; competition_id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean };
   configuration: { title?: string; description_md: string; rules_md: string; mode: string; duration_seconds: number; scoring_system?: string; wrong_attempt_penalty_seconds?: number; freeze_before_end_seconds?: number; max_team_size?: number };
   problems?: { slot: number; label: string; title: string; time_limit_ms: number; memory_limit_mb: number; points?: number | null }[];
-  serverTime: string;
 };
 
 export default function Lobby({ runId }: { runId: string }) {
@@ -17,7 +16,7 @@ export default function Lobby({ runId }: { runId: string }) {
   const mine = useData<{ run_id: string; entry_id: string; entry_name: string; members: string | null }[]>("/api/me/runs", 15000);
   const { organizer } = useAuth();
   const teams = useData<{ id: string; name: string; captain_id: string }[]>("/api/teams");
-  const now = useServerClock(detail.data?.serverTime);
+  const now = useServerClock();
   const [team, setTeam] = useState("");
   const { busy, run } = useAction();
   if (detail.loading) return <Loading />;

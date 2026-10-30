@@ -75,6 +75,7 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-noreply@localhost}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-UTC}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "${API_BIND:-127.0.0.1}:${SERVER_PORT:-8081}:8081"

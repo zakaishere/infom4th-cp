@@ -22,7 +22,7 @@ export function ProblemList() {
             : "The wizard walks you through statement, tests, a reference solution, validation and approval. Open a problem for advanced editing."}</p></div>
         <div className="row">
           <button className="ghost" onClick={() => setShowDeleted(!showDeleted)}>{showDeleted ? "← Back to problems" : "🗑 Show deleted"}</button>
-          {!showDeleted && <button className="primary" onClick={() => navigate("/admin/problems/new")}>+ New problem</button>}
+          {!showDeleted && <><button onClick={() => navigate("/admin/problems/import")}>Bulk import</button><button className="primary" onClick={() => navigate("/admin/problems/new")}>+ New problem</button></>}
         </div>
       </div>
       <input placeholder="Filter by title" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 320 }} />
@@ -172,7 +172,7 @@ function TestsForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSave
   const update = (i: number, change: Partial<(typeof tests)[number]>) => setTests(tests.map((t, j) => (i === j ? { ...t, ...change } : t)));
   return (
     <div className="stack">
-      <div className="notice small">Tests replace the whole suite (1–200 tests, 4 MiB total). Mark at least one sample (shown in the statement) and keep at least one hidden test.</div>
+      <div className="notice small">Tests replace the whole suite (1-200 tests, 16 MiB total). Mark at least one sample (shown in the statement) and keep at least one hidden test.</div>
       {tests.map((t, i) => (
         <div key={i} className="card stack">
           <div className="row-between"><strong>Test {i + 1}</strong>

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { get, post } from "../../api";
+import { displayTimeZone, get, post, serverNow } from "../../api";
 import { navigate, useData } from "../../app";
 import { ProgressLog, StepNav, Steps, slugify, type LogLine } from "../../components/Wizard";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SCORING_INFO } from "../../components/Standings";
-import { Badge, Empty, Field, Loading, when } from "../../ui";
+import { Badge, Empty, Field, Loading, fromZoneInput, toZoneInput, when } from "../../ui";
 
 type Lab = { version_id: string; title: string; slug: string; status: string };
 type Draft = {
@@ -15,11 +15,12 @@ type Draft = {
 };
 const KEY = "cp.contest-wizard";
 const RULES = "- Standard ICPC scoring: most problems solved, then least total time.\n- Each rejected attempt before acceptance adds the penalty below.\n- Ask questions about statements through Clarifications.\n- Do not share code during the contest.";
+/** The next full hour in the platform's time zone, as a datetime-local value. */
 function nextHour() {
-  const d = new Date(Date.now() + 60 * 60 * 1000); d.setMinutes(0, 0, 0);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return toZoneInput(serverNow() + 60 * 60 * 1000).slice(0, 14) + "00";
 }
+/** ISO instant of the chosen start, read in the platform's time zone. */
+const startIso = (value: string) => new Date(fromZoneInput(value)).toISOString();
 const EMPTY: Draft = {
   title: "", slug: "", mode: "INDIVIDUAL", maxTeamSize: 3, hours: 3, minutes: 0, freezeMinutes: 60, penaltyMinutes: 20,
   penalizeCompilationErrors: false, languages: ["CPP", "C", "JAVA", "PYTHON"], description: "", rules: RULES,
@@ -32,7 +33,7 @@ const label = (i: number) => String.fromCharCode(65 + i);
 export default function ContestWizard() {
   const lab = useData<Lab[]>("/api/lab/problems");
   const [d, setD] = useState<Draft>(() => {
-    try { return { ...EMPTY, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") }; } catch { return EMPTY; }
+    try { return { ...EMPTY, startsAt: nextHour(), ...JSON.parse(localStorage.getItem(KEY) ?? "{}") }; } catch { return { ...EMPTY, startsAt: nextHour() }; }
   });
   const [step, setStep] = useState(0);
   const [log, setLog] = useState<LogLine[]>([]);
@@ -101,7 +102,7 @@ export default function ContestWizard() {
         throw new Error("not ready");
       }
       if (startNow) await run("Starting the contest now", () => post("/api/manage/competitions/" + id + "/schedule", { startNow: true, visibility: d.visibility, reason: "Started from the contest wizard" }));
-      else await run(`Scheduling for ${when(new Date(d.startsAt).toISOString())}`, () => post("/api/manage/competitions/" + id + "/schedule", { startsAt: new Date(d.startsAt).toISOString(), visibility: d.visibility }));
+      else await run(`Scheduling for ${when(startIso(d.startsAt))}`, () => post("/api/manage/competitions/" + id + "/schedule", { startsAt: startIso(d.startsAt), visibility: d.visibility }));
       finishDraft(id!);
     } catch { /* details are in the log; the contest page can finish the remaining steps */ } finally { setBusy(false); }
   }
@@ -188,19 +189,19 @@ export default function ContestWizard() {
         {step === 3 && (
           <div className="stack">
             <div className="grid grid-2">
-              <Field label="Start time (your local time)"><input type="datetime-local" value={d.startsAt} onChange={(e) => set({ startsAt: e.target.value })} /></Field>
+              <Field label={`Start time (${displayTimeZone()})`}><input type="datetime-local" value={d.startsAt} onChange={(e) => set({ startsAt: e.target.value })} /></Field>
               <Field label="Who can see and join"><select value={d.visibility} onChange={(e) => set({ visibility: e.target.value })}>
                 <option value="PUBLIC">Public — listed, anyone can register</option><option value="UNLISTED">Unlisted — link only</option><option value="PRIVATE">Private — only added participants</option></select></Field>
             </div>
             <div className="card-flat small">
               <strong>{d.title || "Untitled"}</strong> · {SCORING_INFO[d.scoring].name} scoring · {d.mode === "TEAM" ? "teams" : "individual"} · {d.hours}h {d.minutes}m · {d.problems.length} problems ({d.problems.map((_, i) => label(i)).join(", ")}) ·
-              {" "}{handles.length} pre-registered · starts {d.startsAt ? when(new Date(d.startsAt).toISOString()) : "—"} · ends {d.startsAt ? when(new Date(new Date(d.startsAt).getTime() + duration * 1000).toISOString()) : "—"}
+              {" "}{handles.length} pre-registered · starts {!Number.isNaN(fromZoneInput(d.startsAt)) ? when(startIso(d.startsAt)) : "—"} · ends {!Number.isNaN(fromZoneInput(d.startsAt)) ? when(new Date(fromZoneInput(d.startsAt) + duration * 1000).toISOString()) : "—"}
             </div>
             {issues.length > 0 && <div className="notice warn"><ul className="small" style={{ margin: 0 }}>{issues.map((i) => <li key={i}>{i}</li>)}</ul></div>}
-            {new Date(d.startsAt).getTime() < Date.now() + 60_000 && <div className="notice warn small">To schedule, pick a start time in the future — or use “Create & start now”.</div>}
+            {!(fromZoneInput(d.startsAt) >= serverNow() + 60_000) && <div className="notice warn small">To schedule, pick a start time in the future — or use “Create & start now”.</div>}
             <div className="row">
               <button className="primary" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>▶ Create & start now</button>
-              <button className="primary" disabled={busy || issues.length > 0 || new Date(d.startsAt).getTime() < Date.now() + 60_000} onClick={() => finish(true)}>Create & schedule</button>
+              <button className="primary" disabled={busy || issues.length > 0 || !(fromZoneInput(d.startsAt) >= serverNow() + 60_000)} onClick={() => finish(true)}>Create & schedule</button>
               <button disabled={busy || issues.length > 0} onClick={() => finish(false)}>Save as draft</button>
               {created && <a className="btn ghost" href={"#/admin/contests/" + created}>Open contest page</a>}
             </div>

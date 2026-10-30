@@ -2,6 +2,7 @@ import { navigate, useAuth, useData } from "../../app";
 import JudgingSettings from "./JudgingSettings";
 import Dashboard from "./Dashboard";
 import ProblemWizard from "./ProblemWizard";
+import ProblemImport from "./ProblemImport";
 import ContestWizard from "./ContestWizard";
 import { ContestDetail, ContestList } from "./Contests";
 import { ProblemEditor, ProblemList } from "./Problems";
@@ -41,6 +42,7 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "contests" && parts[1]) page = <ContestDetail id={parts[1]} />;
   else if (current === "contests") page = <ContestList />;
   else if (current === "problems" && parts[1] === "new") page = <ProblemWizard />;
+  else if (current === "problems" && parts[1] === "import") page = <ProblemImport />;
   else if (current === "problems" && parts[1]) page = <ProblemEditor versionId={parts[1]} />;
   else if (current === "problems") page = <ProblemList />;
   else if (current === "analytics" && organizer) page = <Analytics />;

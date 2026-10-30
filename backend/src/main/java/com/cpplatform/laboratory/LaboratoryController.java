@@ -14,6 +14,14 @@ public class LaboratoryController {
     public LaboratoryController(LaboratoryService lab,Database db,Permissions access){this.lab=lab;this.db=db;this.access=access;}
     @PostMapping @ResponseStatus(HttpStatus.CREATED)
     Object create(Authentication auth,@RequestBody Map<String,Object> body){return Map.of("versionId",lab.create(Actor.of(auth),body));}
+    /** One complete draft per transaction; a bank is uploaded as a sequence of these requests. */
+    @PostMapping("/import")
+    Object importProblem(Authentication auth,@RequestBody Map<String,Object> body){return lab.importProblem(Actor.of(auth),body);}
+    @GetMapping("/{version}/status")
+    Object status(Authentication auth,@PathVariable UUID version) {
+        access.problemRead(Actor.of(auth),version);
+        return db.one("SELECT v.id,v.status,(SELECT r.status FROM problem_validation_results r WHERE r.problem_version_id=v.id ORDER BY r.created_at DESC LIMIT 1) AS validation_status FROM problem_versions v WHERE v.id=?",version);
+    }
     /** deleted=true lists the deleted problems instead (to restore them). */
     @GetMapping
     Object list(Authentication auth,@RequestParam(defaultValue="false") boolean deleted) {
