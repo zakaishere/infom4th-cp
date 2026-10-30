@@ -1,15 +1,16 @@
 import { navigate, useData, useRoute } from "../app";
+import { Avatar, TierChip } from "../components/Avatar";
 import { Empty, ErrorBox, Loading, when } from "../ui";
 
 type Totals = { rank: number; score: number; solved: number; easy: number; medium: number; hard: number; last_solved_at: string };
-type Player = Totals & { handle: string; display_name: string };
+type Player = Totals & { handle: string; display_name: string; tier: string };
 type Team = Totals & { id: string; name: string; members: string | null };
 type Data = {
   players: Player[]; teams: Team[]; playerCount: number; teamCount: number;
-  me: Player | null; myTeams: Team[]; values: { EASY: number; MEDIUM: number; HARD: number };
+  me: Player | null; myTeams: Team[]; values: { EASY: number; MEDIUM: number; HARD: number }; tiers: { name: string; from: number }[];
 };
 /** One row of either board, so both share the same podium and table. */
-type Line = { key: string; title: string; subtitle?: string | null; mine: boolean; totals: Totals };
+type Line = { key: string; title: string; subtitle?: string | null; mine: boolean; rival?: boolean; href: string; avatar: string; tier?: string; totals: Totals };
 
 const sigma = (n: number) => "Σ " + n.toLocaleString();
 
@@ -20,7 +21,7 @@ function Podium({ lines }: { lines: Line[] }) {
       {order.map((line, i) => line ? (
         <div key={line.key} className={"place rise " + cls[i]}>
           <div className="medal">{line.totals.rank}</div>
-          <div className="name" title={line.title}>{line.title}</div>
+          <a href={line.href} className="podium-person"><Avatar handle={line.avatar} size={44} tier={line.tier} /><div className="name" title={line.title}>{line.title}</div></a>
           {line.subtitle && <div className="small muted sigma-subtitle" title={line.subtitle}>{line.subtitle}</div>}
           <div className="score">{sigma(line.totals.score)}</div>
           <div className="small muted">{line.totals.solved} solved</div>
@@ -41,11 +42,20 @@ function Board({ lines, who }: { lines: Line[]; who: string }) {
           </tr>
         </thead>
         <tbody>
-          {lines.map(({ key, title, subtitle, mine, totals: t }) => (
-            <tr key={key} className={[mine ? "me" : "", t.rank <= 3 ? "r" + t.rank : ""].join(" ")}>
+          {lines.map(({ key, title, subtitle, mine, rival, href, avatar, tier, totals: t }) => (
+            <tr key={key} className={[mine ? "me" : "", rival ? "rival" : "", t.rank <= 3 ? "r" + t.rank : ""].join(" ")}>
               <td className="rank">{t.rank}</td>
-              <td className="who"><strong>{title}</strong>{mine && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
-                {subtitle && <div className="small muted">{subtitle}</div>}</td>
+              <td className="who">
+                <div className="row" style={{ gap: "0.65rem", flexWrap: "nowrap" }}>
+                  <Avatar handle={avatar} size={34} tier={tier} />
+                  <div style={{ minWidth: 0 }}>
+                    <strong><a href={href}>{title}</a></strong>{mine && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
+                    {rival && <span className="tag rival-tag" style={{ marginLeft: 6 }}>★ rival</span>}
+                    {tier && <span style={{ marginLeft: 8 }}><TierChip tier={tier} /></span>}
+                    {subtitle && <div className="small muted">{subtitle}</div>}
+                  </div>
+                </div>
+              </td>
               <td className="right total sigma-total">{sigma(t.score)}</td>
               <td className="right mono">{t.solved}</td>
               <td className="right mono sigma-easy">{t.easy}</td>
@@ -76,10 +86,11 @@ export default function Leaderboard() {
   const tab = parts[1] === "teams" ? "teams" : "players";
   const board = useData<Data>("/api/leaderboard", 30000);
   const d = board.data;
+  const rivals = useData<string[]>("/api/me/rivals/handles");
   const myTeamIds = new Set((d?.myTeams ?? []).map((t) => t.id));
   const lines: Line[] = !d ? [] : tab === "players"
-    ? d.players.map((p) => ({ key: p.handle, title: p.display_name, subtitle: "@" + p.handle, mine: p.handle === d.me?.handle, totals: p }))
-    : d.teams.map((t) => ({ key: t.id, title: t.name, subtitle: t.members, mine: myTeamIds.has(t.id), totals: t }));
+    ? d.players.map((p) => ({ key: p.handle, title: p.display_name, subtitle: "@" + p.handle, mine: p.handle === d.me?.handle, rival: rivals.data?.includes(p.handle), href: "#/u/" + p.handle, avatar: p.handle, tier: p.tier, totals: p }))
+    : d.teams.map((t) => ({ key: t.id, title: t.name, subtitle: t.members, mine: myTeamIds.has(t.id), href: "#/team/" + t.id, avatar: "team:" + t.id, totals: t }));
   const above = (rank: number) => (tab === "players" ? d?.players : d?.teams)?.[rank - 2];
   return (
     <main className="page">
@@ -123,6 +134,10 @@ export default function Leaderboard() {
               <li>Example runs, rehearsals and private contests do not count. Staff accounts are not ranked because they can read the tests.</li>
               <li>Equal scores: whoever got there first ranks higher.</li>
             </ul>
+            <strong className="small">Player tiers</strong>
+            <div className="tier-list">
+              {d.tiers.map((t) => <span key={t.name} className="row small" style={{ gap: "0.35rem" }}><TierChip tier={t.name} /><span className="muted">from Σ {t.from.toLocaleString()}</span></span>)}
+            </div>
           </details>
         </div>
       )}

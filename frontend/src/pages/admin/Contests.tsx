@@ -67,6 +67,7 @@ export function ContestList() {
 
 type Run = { id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean; final_standings_released_at: string | null };
 type Detail = Competition & {
+  rated: boolean;
   version: { id: string; sealed_at: string | null; duration_seconds: number; mode: string; description_md: string; rules_md: string; freeze_before_end_seconds: number; wrong_attempt_penalty_seconds: number };
   problems: { slot: number; label: string; problem_version_id: string }[];
   runs: Run[];
@@ -122,6 +123,13 @@ export function ContestDetail({ id }: { id: string }) {
 
         <section className="card stack accent">
           <h3>Launch</h3>
+          <label className="row small" title="Unrated contests still appear on profiles and pay Sigma, but do not change anyone's rating.">
+            <input type="checkbox" checked={c.rated} disabled={busy} onChange={(e) => {
+              const rated = e.target.checked;
+              run(async () => { await post("/api/manage/competitions/" + id + "/rated", { rated, reason: "Changed from the contest page" }); refresh(); }, rated ? "This contest now counts for rating" : "This contest no longer counts for rating");
+            }} />
+            Counts for player rating
+          </label>
           {readiness.data && (readiness.data.ready
             ? <div className="notice ok small">Ready to go: problems are approved and validated, and judges are online for every language.</div>
             : <div className="notice warn"><strong>Fix these first</strong><ul className="small">{readiness.data.errors.map((e) => <li key={e}>{e}</li>)}</ul></div>)}
