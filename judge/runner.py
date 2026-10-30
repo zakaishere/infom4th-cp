@@ -300,16 +300,23 @@ class DockerRunner:
         source.write_text(job["source_code"], encoding="utf-8")
         os.chown(source, 10001, 10001)
         cases = []
+        compile_seconds = tests_seconds = 0.0
+
+        def timings():
+            return {"compileMs": int(compile_seconds*1000), "testsMs": int(tests_seconds*1000),
+                    "totalMs": int((time.monotonic()-started)*1000)}
         try:
             if compile_command:
                 name = self._create(folder, self.images[language], self.max_memory_mb, True)
                 try:
+                    phase = time.monotonic()
                     compiled = self._execute(name, compile_command, b"", COMPILE_SECONDS, 65536, 64*1024*1024, cancelled)
+                    compile_seconds = time.monotonic()-phase
                 finally:
                     self._remove(name)
                 if compiled.timeout or compiled.overflow or compiled.oom or compiled.exit_code:
                     return {"verdict": "COMPILATION_ERROR", "cases": [], "executionTimeMs": compiled.cpu_ms,
-                            "peakMemoryKb": compiled.memory_kb,
+                            "peakMemoryKb": compiled.memory_kb, "timings": timings(),
                             "compilerOutput": (compiled.errors + compiled.output).decode("utf-8", errors="replace")[:16000]}
             # One read-only sandbox runs every test; it is reset between tests and replaced
             # whenever it was killed (timeout, output overflow, out of memory).
@@ -324,9 +331,11 @@ class DockerRunner:
                     if name is None:
                         name = self._create(folder, self.images[language], memory, False)
                         overhead = self._overhead(name)
+                    phase = time.monotonic()
                     result = self._execute(name, run_command, test["input_data"].encode("utf-8"),
                                            2*effective_limit_ms(language, int(job["time_limit_ms"]))/1000 + 1,
                                            int(job["output_limit_kb"])*1024, cancelled=cancelled)
+                    tests_seconds += time.monotonic()-phase
                     result.cpu_ms = max(0, result.cpu_ms - overhead)
                     if result.timeout or result.overflow or result.oom or not self._reset(name):
                         self._remove(name)
@@ -341,7 +350,7 @@ class DockerRunner:
             cpu = max((case["executionTimeMs"] for case in cases), default=0)
             # The first failing test decides the verdict.
             return {"verdict": failures[0] if failures else "ACCEPTED", "cases": cases,
-                    "executionTimeMs": cpu, "peakMemoryKb": peak}
+                    "executionTimeMs": cpu, "peakMemoryKb": peak, "timings": timings()}
         finally:
             shutil.rmtree(folder)
 

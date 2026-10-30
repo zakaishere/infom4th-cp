@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, post } from "../api";
 import { navigate, useAction, useAuth, useData, useServerClock, useToast } from "../app";
+import { verdictShown } from "../lib/latency";
 import { ProblemStatement, SubmissionModal, SubmissionTable, SubmitPanel, pending, type ProblemDetail, type SubmissionRow } from "../components/Problem";
 import Standings, { SCORING_INFO, firstSolves, totalOf, useBoard, type Board } from "../components/Standings";
 import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, timeOf, when } from "../ui";
@@ -86,6 +87,7 @@ export default function Arena({ runId }: { runId: string }) {
   const seen = useRef<Record<string, string | null>>({});
   useEffect(() => {
     for (const s of submissions.data ?? []) {
+      if (s.verdict) verdictShown(s.id);
       const before = seen.current[s.id];
       if (before === null && s.verdict) {
         const who = isTeam && s.submitted_by_handle && s.submitted_by_handle !== me?.handle ? "@" + s.submitted_by_handle + " — " : "";

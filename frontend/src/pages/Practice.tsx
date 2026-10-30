@@ -3,6 +3,7 @@ import { get, post } from "../api";
 import { navigate, useData, useToast } from "../app";
 import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey, readDraft, uuid,
   type ProblemDetail, type SubmissionDetail, type SubmissionRow } from "../components/Problem";
+import { submissionAccepted, verdictShown } from "../lib/latency";
 import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Ring, TEMPLATES, VERDICTS } from "../ui";
 
 export type PracticeProblem = {
@@ -196,7 +197,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
         const detail = await get<SubmissionDetail>("/api/submissions/" + outcomeId);
         if (cancelled) return;
         setOutcome((o) => (o && o.id === outcomeId ? { ...o, detail } : o));
-        if (detail.judging[0]?.verdict) { reloadHistory(); reloadProblem(); }
+        if (detail.judging[0]?.verdict) { verdictShown(outcomeId); reloadHistory(); reloadProblem(); }
       } catch { /* transient; retried */ }
     };
     tick();
@@ -207,9 +208,11 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
   const send = useCallback(async (kind: "run" | "submit") => {
     if (busy || !source.trim()) return;
     setBusy(kind);
+    const clicked = performance.now();
     try {
       const r = await post<{ submissionId: string }>("/api/practice/" + versionId + "/submissions",
         kind === "run" ? { language, sourceCode: source, mode: "samples" } : { language, sourceCode: source }, keys.current[kind]);
+      submissionAccepted(r.submissionId, clicked);
       keys.current[kind] = uuid();
       setOutcome({ kind, id: r.submissionId });
       reloadHistory();
