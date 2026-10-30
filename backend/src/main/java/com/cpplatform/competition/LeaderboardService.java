@@ -39,6 +39,11 @@ public class LeaderboardService {
             +"JOIN LATERAL (SELECT jr.verdict FROM judging_jobs j JOIN judging_results jr ON jr.job_id=j.id WHERE j.submission_id=s.id AND j.status='COMPLETED' ORDER BY j.generation DESC LIMIT 1) latest ON latest.verdict='ACCEPTED' "
             // Staff can read hidden tests, so their solves would not be a fair score.
             +"WHERE NOT EXISTS(SELECT 1 FROM user_roles ur WHERE ur.user_id=s.submitted_by AND ur.role_code IN ('SUPER_ADMIN','ADMIN','MODERATOR')) AND "+COUNTED;
+    /** Everyone listed on the board, solved or not. Attempts in a private contest or rehearsal do not list anyone. */
+    private static final String SUBMITTERS="SELECT DISTINCT s.submitted_by FROM submissions s JOIN users u ON u.id=s.submitted_by AND u.status='ACTIVE' "
+            +"LEFT JOIN contest_runs r ON r.id=s.run_id LEFT JOIN competitions c ON c.id=r.competition_id "
+            +"WHERE NOT EXISTS(SELECT 1 FROM user_roles ur WHERE ur.user_id=s.submitted_by AND ur.role_code IN ('SUPER_ADMIN','ADMIN','MODERATOR')) AND ("
+            +"(s.context='PRACTICE' AND NOT s.samples_only) OR (s.context='CONTEST' AND r.kind='OFFICIAL' AND c.published_at IS NOT NULL AND c.visibility='PUBLIC'))";
 
     private record Cached(long until,Board board,Map<UUID,Map<String,Object>> players,Map<UUID,Map<String,Object>> teams) {}
     private volatile Cached cached;
@@ -82,7 +87,9 @@ public class LeaderboardService {
         var teamNames=new HashMap<UUID,Map<String,Object>>();
         for(var t:db.jdbc.queryForList("SELECT t.id,t.name,(SELECT string_agg(u.handle,', ' ORDER BY u.handle) FROM team_members m JOIN users u ON u.id=m.user_id WHERE m.team_id=t.id) AS members FROM teams t"))teamNames.put((UUID)t.get("id"),t);
         var players=new LinkedHashMap<UUID,Map<String,Object>>();
-        for(Row row:board.players()) {
+        // Players on Σ 0 share a place, so they read best in name order.
+        Comparator<Row> byName=Comparator.comparing(r->((String)names.get(r.key()).get("handle")).toLowerCase(Locale.ROOT));
+        for(Row row:board.players().stream().sorted(Comparator.comparingInt(Row::rank).thenComparing(byName)).toList()) {
             var out=row(row);out.put("handle",names.get(row.key()).get("handle"));out.put("display_name",names.get(row.key()).get("display_name"));out.put("tier",tier(row.score()));
             players.put(row.key(),out);
         }
@@ -105,11 +112,11 @@ public class LeaderboardService {
     public Board compute() {
         var solves=db.jdbc.queryForList(ACCEPTED).stream().map(s->new Solve((UUID)s.get("user_id"),(UUID)s.get("problem_id"),(String)s.get("difficulty"),Api.time(s.get("submitted_at")),(UUID)s.get("team_id"))).toList();
         var members=db.jdbc.queryForList("SELECT user_id,team_id,joined_at FROM team_members").stream().map(m->new Membership((UUID)m.get("user_id"),(UUID)m.get("team_id"),Api.time(m.get("joined_at")))).toList();
-        return calculate(solves,members,Instant.now());
+        return calculate(solves,members,new HashSet<>(db.jdbc.queryForList(SUBMITTERS,UUID.class)),Instant.now());
     }
 
     /** Rarity is measured among players who have solved anything, so it needs no list of idle accounts. */
-    public static Board calculate(List<Solve> solves,List<Membership> members,Instant now) {
+    public static Board calculate(List<Solve> solves,List<Membership> members,Set<UUID> submitters,Instant now) {
         Map<UUID,Set<UUID>> solvers=new HashMap<>();Map<UUID,String> difficulty=new HashMap<>();Set<UUID> everyone=new HashSet<>();
         for(Solve s:solves) {
             solvers.computeIfAbsent(s.problem(),k->new HashSet<>()).add(s.user());everyone.add(s.user());
@@ -127,6 +134,8 @@ public class LeaderboardService {
             // Joining a team never carries points earned before joining.
             for(Membership m:byUser.getOrDefault(s.user(),List.of()))if(!s.at().isBefore(m.joinedAt()))credit(teams,m.team(),s);
         }
+        // Submitting is enough to be listed, on Σ 0 until the first solve that counts.
+        for(UUID user:submitters)players.computeIfAbsent(user,k->new HashMap<>());
         return new Board(rank(players,value,difficulty),rank(teams,value,difficulty),now);
     }
 
@@ -143,16 +152,18 @@ public class LeaderboardService {
     private static List<Row> rank(Map<UUID,Map<UUID,Instant>> board,Map<UUID,Long> value,Map<UUID,String> difficulty) {
         List<Row> rows=new ArrayList<>();
         for(var entry:board.entrySet()) {
-            long score=0;int[] count=new int[3];Instant last=Instant.MIN;
+            long score=0;int[] count=new int[3];Instant last=null;
             for(var solved:entry.getValue().entrySet()) {
                 score+=value.get(solved.getKey());count[DIFFICULTIES.indexOf(difficulty.get(solved.getKey()))]++;
-                if(solved.getValue().isAfter(last))last=solved.getValue();
+                if(last==null || solved.getValue().isAfter(last))last=solved.getValue();
             }
             rows.add(new Row(entry.getKey(),0,score,entry.getValue().size(),count[0],count[1],count[2],last));
         }
-        rows.sort(Comparator.comparingLong(Row::score).reversed().thenComparing(Row::lastSolvedAt).thenComparing(Row::key));
+        rows.sort(Comparator.comparingLong(Row::score).reversed().thenComparing(Row::lastSolvedAt,Comparator.nullsLast(Comparator.naturalOrder())).thenComparing(Row::key));
         List<Row> ranked=new ArrayList<>();
-        for(Row r:rows)ranked.add(new Row(r.key(),ranked.size()+1,r.score(),r.solved(),r.easy(),r.medium(),r.hard(),r.lastSolvedAt()));
+        // Nobody on Σ 0 reached it first, so they all share one place.
+        int firstZero=(int)rows.stream().filter(r->r.score()>0).count()+1;
+        for(Row r:rows)ranked.add(new Row(r.key(),r.score()>0?ranked.size()+1:firstZero,r.score(),r.solved(),r.easy(),r.medium(),r.hard(),r.lastSolvedAt()));
         return ranked;
     }
 }

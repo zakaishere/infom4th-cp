@@ -6,7 +6,7 @@ export type Card = {
 };
 
 /** Draws the card in the browser, so sharing a profile needs no server work and no public page. */
-export function drawCard(canvas: HTMLCanvasElement, c: Card) {
+export function drawCard(canvas: HTMLCanvasElement, c: Card, logo: HTMLImageElement | null) {
   const W = 1200, H = 630, ctx = canvas.getContext("2d")!;
   canvas.width = W; canvas.height = H;
   const font = getComputedStyle(document.body).fontFamily || "sans-serif";
@@ -24,7 +24,7 @@ export function drawCard(canvas: HTMLCanvasElement, c: Card) {
   if (c.tier) { ctx.strokeStyle = TIER_HEX[c.tier]; ctx.lineWidth = 8; ctx.strokeRect(X - 4, Y - 4, S + 8, S + 8); }
 
   ctx.fillStyle = "#fff"; ctx.font = `700 60px ${font}`;
-  ctx.fillText(fit(ctx, c.name, 880), 280, 130);
+  ctx.fillText(fit(ctx, c.name, 670), 280, 130);
   ctx.fillStyle = "#cfeaf1"; ctx.font = `400 34px ${font}`;
   ctx.fillText("@" + c.handle + (c.tier ? "  ·  " + c.tier : ""), 280, 185);
 
@@ -44,7 +44,26 @@ export function drawCard(canvas: HTMLCanvasElement, c: Card) {
     ctx.fillStyle = medal; ctx.beginPath(); ctx.arc(x, 470, 20, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#fff"; ctx.font = `700 34px ${font}`; ctx.fillText(String(count), x + 32, 482);
   });
-  ctx.fillStyle = "#fff"; ctx.font = `700 34px ${font}`; ctx.fillText("INFOM4TH ARENA", 70, 580);
+  // The club's mark sits top right; without the image the wordmark still names the club.
+  if (logo) ctx.drawImage(logo, 970, 40, 190, 190);
+  const textX = 70;
+  ctx.textBaseline = "middle"; ctx.font = `700 42px ${font}`;
+  ctx.fillStyle = "#fff"; ctx.fillText("INFO", textX, 564);
+  const m4th = textX + ctx.measureText("INFO").width;
+  ctx.fillStyle = "#35c7e8"; ctx.fillText("M4TH", m4th, 564);
+  const arena = m4th + ctx.measureText("M4TH").width + 16;
+  ctx.fillStyle = "#cfeaf1"; ctx.font = `700 20px ${font}`; ctx.fillText("ARENA", arena, 566);
+  ctx.textBaseline = "alphabetic";
+}
+
+/** Resolves to null if the logo cannot load, so the card can always be drawn. */
+export function loadLogo() {
+  return new Promise<HTMLImageElement | null>((done) => {
+    const image = new Image();
+    image.onload = () => done(image);
+    image.onerror = () => done(null);
+    image.src = "/logo.png";
+  });
 }
 
 function fit(ctx: CanvasRenderingContext2D, text: string, width: number) {

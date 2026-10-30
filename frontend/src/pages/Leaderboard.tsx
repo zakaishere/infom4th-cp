@@ -2,7 +2,7 @@ import { navigate, useData, useRoute } from "../app";
 import { Avatar, TierChip } from "../components/Avatar";
 import { Empty, ErrorBox, Loading, when } from "../ui";
 
-type Totals = { rank: number; score: number; solved: number; easy: number; medium: number; hard: number; last_solved_at: string };
+type Totals = { rank: number; score: number; solved: number; easy: number; medium: number; hard: number; last_solved_at: string | null };
 type Player = Totals & { handle: string; display_name: string; tier: string };
 type Team = Totals & { id: string; name: string; members: string | null };
 type Data = {
@@ -43,7 +43,7 @@ function Board({ lines, who }: { lines: Line[]; who: string }) {
         </thead>
         <tbody>
           {lines.map(({ key, title, subtitle, mine, rival, href, avatar, tier, totals: t }) => (
-            <tr key={key} className={[mine ? "me" : "", rival ? "rival" : "", t.rank <= 3 ? "r" + t.rank : ""].join(" ")}>
+            <tr key={key} className={[mine ? "me" : "", rival ? "rival" : "", t.rank <= 3 && t.score > 0 ? "r" + t.rank : ""].join(" ")}>
               <td className="rank">{t.rank}</td>
               <td className="who">
                 <div className="row" style={{ gap: "0.65rem", flexWrap: "nowrap" }}>
@@ -120,7 +120,7 @@ export default function Leaderboard() {
           {tab === "teams" && d.myTeams.map((t) => <MyPlace key={t.id} label="Your team" name={t.name} totals={t} count={d.teamCount} next={above(t.rank)} />)}
           {lines.length === 0 ? <Empty>{tab === "players" ? "Nobody is on the board yet. Solve a practice problem and take first place." : "No team is on the board yet. Team members earn Sigma for their team by solving problems."}</Empty> : (
             <>
-              <Podium lines={lines.slice(0, 3)} />
+              {lines[0].totals.score > 0 && <Podium lines={lines.filter((l) => l.totals.score > 0).slice(0, 3)} />}
               <Board lines={lines} who={tab === "players" ? "Player" : "Team"} />
             </>
           )}
@@ -130,6 +130,7 @@ export default function Leaderboard() {
               <li>Each problem pays once: Easy {d.values.EASY}, Medium {d.values.MEDIUM}, Hard {d.values.HARD}.</li>
               <li>Rare problems pay up to 50% more. The bonus shrinks as more players solve them, so every score can move.</li>
               <li>Practice solves count, and so do solves from public contests once their results are final.</li>
+              <li>Submit once and you are on the board at Σ 0, even before your first accepted solution.</li>
               <li>A team earns from its team contests and from what members solve after joining. Each problem still pays the team once.</li>
               <li>Example runs, rehearsals and private contests do not count. Staff accounts are not ranked because they can read the tests.</li>
               <li>Equal scores: whoever got there first ranks higher.</li>
