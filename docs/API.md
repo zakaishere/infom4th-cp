@@ -104,6 +104,7 @@ the lifecycle scheduler. Accepted submissions continue judging after contest end
 | GET | /api/practice | Explicitly published practice |
 | GET | /api/practice/{versionId} | Statement and samples |
 | POST | /api/practice/{versionId}/submissions | Same submission body/header |
+| GET | /api/leaderboard | Global Sigma boards: top 100 players and teams, the caller's places, cached 30 seconds |
 
 Submission returns 202 and submissionId. Repeat the same idempotency key and body
 to recover a lost response. Reusing a key with changed content returns 409.

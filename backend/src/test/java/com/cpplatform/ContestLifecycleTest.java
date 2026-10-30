@@ -153,6 +153,52 @@ class ContestLifecycleTest {
         assertEquals(403,http("GET","/api/admin/analytics/latency",entrant.token,null).statusCode());
     }
 
+    void accept(UUID submission,UUID worker) {
+        UUID job=db.id("SELECT id FROM judging_jobs WHERE submission_id=?",submission);
+        var claimed=judge.claim(job,worker,0).orElseThrow();
+        var cases=((List<?>)claimed.get("tests")).stream().map(t->Map.of("id",((Map<?,?>)t).get("id"),"verdict","ACCEPTED","executionTimeMs",10,"peakMemoryKb",1024)).toList();
+        judge.complete(job,worker,Api.uuid(claimed.get("leaseToken")),Map.of("verdict","ACCEPTED","cases",cases,"executionTimeMs",10,"peakMemoryKb",1024));
+    }
+    long sigma(LeaderboardService leaderboard,User user) {
+        return leaderboard.compute().players().stream().filter(r->r.key().equals(user.actor.id())).mapToLong(LeaderboardService.Row::score).sum();
+    }
+
+    @Test void leaderboardCountsOnlyPublicResultsAndNeverStaffOrExampleRuns() throws Exception {
+        var leaderboard=context.getBean(LeaderboardService.class);
+        User owner=user(true),entrant=user(false),sampler=user(false);UUID contest=contest(owner,600);
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(entrant.actor,contest,null);contests.register(owner.actor,contest,null);
+        control(owner,run,"start-now");
+        accept(submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        accept(submissions.submit(owner.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        assertEquals(0,sigma(leaderboard,entrant),"a live contest must not reveal results");
+        control(owner,run,"end-now");
+        assertEquals(0,sigma(leaderboard,entrant),"a frozen scoreboard must not be revealed");
+        control(owner,run,"release-standings");
+        assertTrue(sigma(leaderboard,entrant)>0);
+        assertEquals(0,sigma(leaderboard,owner),"staff can read the tests");
+
+        UUID version=db.id("SELECT cp.problem_version_id FROM competition_problems cp JOIN contest_runs r ON r.competition_version_id=cp.competition_version_id WHERE r.id=?",run);
+        lab.publishPractice(owner.actor,version);
+        UUID internal=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='internal' ORDER BY registered_at DESC LIMIT 1");
+        accept(submissions.submit(sampler.actor,null,null,version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}","mode","samples")),internal);
+        assertEquals(0,sigma(leaderboard,sampler),"running the examples is not a solve");
+        accept(submissions.submit(sampler.actor,null,null,version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),internal);
+        assertTrue(sigma(leaderboard,sampler)>0);
+        db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=(SELECT problem_id FROM problem_versions WHERE id=?)",version);
+        assertEquals(0,sigma(leaderboard,sampler),"a hidden practice problem stops paying");
+
+        var response=http("GET","/api/leaderboard",entrant.token,null);
+        assertEquals(200,response.statusCode(),response.body());
+        var body=JSON.readTree(response.body());
+        assertTrue(body.get("me").get("rank").asInt()>=1);
+        assertTrue(body.get("me").get("score").asLong()>0);
+        assertFalse(response.body().contains("@example.test"));
+        assertFalse(response.body().contains(entrant.actor.id().toString()));
+        assertEquals(401,http("GET","/api/leaderboard",null,null).statusCode());
+    }
+
     @Test void adminsCanSeeTeamsAndWhatTheyPlayed() throws Exception {
         User owner=user(true),captain=user(false),member=user(false),idle=user(false);
         var created=JSON.readTree(http("POST","/api/teams",captain.token,"{\"name\":\"Team "+UUID.randomUUID()+"\"}").body());

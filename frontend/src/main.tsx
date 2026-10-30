@@ -12,6 +12,7 @@ import Lobby from "./pages/Lobby";
 import Arena from "./pages/Arena";
 import { PracticeList, PracticeProblem } from "./pages/Practice";
 import Teams from "./pages/Teams";
+import Leaderboard from "./pages/Leaderboard";
 import Admin from "./pages/admin/Admin";
 import { ChangePassword } from "./components/Account";
 
@@ -34,6 +35,7 @@ function Shell() {
   else if (parts[0] === "practice" && parts[1]) page = <PracticeProblem versionId={parts[1]} />;
   else if (parts[0] === "practice") page = <PracticeList />;
   else if (parts[0] === "teams") page = <Teams />;
+  else if (parts[0] === "leaderboard") page = <Leaderboard />;
   else if (parts[0] === "contests") page = <Home />;
   else if (staff && parts.length === 0) page = <Admin parts={[]} />;
   else if (parts[0] === "admin" && (organizer || setter)) page = <Admin parts={parts.slice(1)} />;
@@ -52,11 +54,13 @@ function Shell() {
               {link("/admin", "Control room")}
               {link("/contests", "Contests")}
               {link("/practice", "Practice")}
+              {link("/leaderboard", "Leaderboard")}
             </>
           ) : (
             <>
               {link("/", "Contests")}
               {link("/practice", "Practice")}
+              {link("/leaderboard", "Leaderboard")}
               {link("/teams", "Teams")}
             </>
           )}
