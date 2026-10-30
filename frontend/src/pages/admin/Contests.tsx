@@ -17,7 +17,7 @@ const CONTROL_TEXT: Record<string, { title: string; description?: string }> = {
   extend: { title: "Add 10 minutes", description: "The end time moves 10 minutes later for everyone." },
   "end-now": { title: "End the contest now", description: "Submissions stop immediately and the contest is marked finished. This cannot be undone." },
   "end-rehearsal": { title: "End rehearsal" },
-  "release-standings": { title: "Release final standings", description: "Unfreezes the public scoreboard so everyone sees the final results." },
+  "release-standings": { title: "Release final standings", description: "Unfreezes the public scoreboard so everyone sees the final results. Public contests then count for Sigma, ratings and profiles." },
 };
 
 /** Where the contest is in its life, so organizers always know the next step. */
@@ -94,7 +94,7 @@ export function ContestDetail({ id }: { id: string }) {
   const refresh = () => { d.reload(); readiness.reload(); };
   // Once the official run starts, the live monitor is what organizers need first.
   const started = ["RUNNING", "FINISHED"].includes(c.status) || (official ? official.status !== "PENDING" : false);
-  const monitor = active ? <RunMonitor key={active} run={c.runs.find((r) => r.id === active)!} problems={c.problems} onChanged={refresh} /> : null;
+  const monitor = active ? <RunMonitor key={active} run={c.runs.find((r) => r.id === active)!} problems={c.problems} onChanged={refresh} holdsResults={c.visibility === "PUBLIC" && c.version.freeze_before_end_seconds > 0} /> : null;
   const setup = (
     <>
       <div className="grid grid-2" style={{ alignItems: "start" }}>
@@ -243,7 +243,7 @@ function SettingsForm({ d, onSaved }: { d: Detail; onSaved: () => void }) {
 type JurySubmission = { id: string; entry_name: string; handle: string; problem_slot: number; language_code: string; submitted_at: string; status: string; verdict: string | null; execution_time_ms: number | null; passed_tests: number | null; total_tests: number | null; generation: number };
 type Clarification = { id: string; question: string; answer: string | null; is_public: boolean; created_at: string };
 
-function RunMonitor({ run: r, problems, onChanged }: { run: Run; problems: { slot: number; label: string }[]; onChanged: () => void }) {
+function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; problems: { slot: number; label: string }[]; onChanged: () => void; holdsResults: boolean }) {
   const [tab, setTab] = useState<"submissions" | "standings" | "clarifications" | "announce">("submissions");
   const subs = useData<JurySubmission[]>("/api/manage/runs/" + r.id + "/submissions", 3000);
   const clar = useData<Clarification[]>("/api/runs/" + r.id + "/clarifications", 5000);
@@ -279,6 +279,12 @@ function RunMonitor({ run: r, problems, onChanged }: { run: Run; problems: { slo
         <a className="btn" href={"#/arena/" + r.id}>Open arena</a>
       </div>
       <div className="stack" style={{ padding: "0 1.25rem 1.25rem" }}>
+      {holdsResults && r.kind === "OFFICIAL" && phase.phase === "ended" && !r.final_standings_released_at && (
+        <div className="notice warn row-between">
+          <span><strong>These results are not counting yet.</strong> Contestants still see the frozen scoreboard, and this contest adds nothing to Sigma, ratings, medals or profiles until you release it.</span>
+          <button className="primary small" onClick={() => setControl("release-standings")}>Release final standings</button>
+        </div>
+      )}
       <div className="row small">{Object.entries(counts).map(([k, v]) => <Badge key={k} tone={k === "ACCEPTED" ? "ok" : k === "WAITING" || k === "RUNNING" ? "info" : "neutral"}>{k.replace(/_/g, " ")}: {v}</Badge>)}</div>
       <div className="tabs">
         <button className={tab === "submissions" ? "active" : ""} onClick={() => setTab("submissions")}>Submissions</button>
