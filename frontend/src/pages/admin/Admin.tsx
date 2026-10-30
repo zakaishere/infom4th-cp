@@ -7,6 +7,7 @@ import ContestWizard from "./ContestWizard";
 import { ContestDetail, ContestList } from "./Contests";
 import { ProblemEditor, ProblemList } from "./Problems";
 import { Audit, Languages, UserDetail, Users } from "./Platform";
+import { TeamDetail, Teams } from "./Teams";
 import PracticeSet from "./PracticeSet";
 import Analytics from "./Analytics";
 
@@ -32,6 +33,7 @@ export default function Admin({ parts }: { parts: string[] }) {
       superAdmin && { key: "judging", label: "Judges & capacity", icon: "⚙" },
       superAdmin && { key: "languages", label: "Languages", icon: "{}" },
       superAdmin && { key: "users", label: "Users", icon: "☺" },
+      superAdmin && { key: "teams", label: "Teams", icon: "⚐" },
       superAdmin && { key: "audit", label: "Audit log", icon: "≡" },
     ] },
   ];
@@ -51,6 +53,8 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "languages" && superAdmin) page = <Languages />;
   else if (current === "users" && superAdmin && parts[1] && parts[1] !== "import") page = <UserDetail key={parts[1]} id={parts[1]} />;
   else if (current === "users" && superAdmin) page = <Users key={parts[1] ?? ""} importOpen={parts[1] === "import"} />;
+  else if (current === "teams" && superAdmin && parts[1]) page = <TeamDetail key={parts[1]} id={parts[1]} />;
+  else if (current === "teams" && superAdmin) page = <Teams />;
   else if (current === "audit" && superAdmin) page = <Audit />;
   else page = <div className="empty">Choose a section.</div>;
   return (
