@@ -12,7 +12,8 @@ import java.util.*;
 @RestController
 public class AnalyticsController {
     private final AnalyticsService analytics;
-    public AnalyticsController(AnalyticsService analytics){this.analytics=analytics;}
+    private final ApiMetrics apiMetrics;
+    public AnalyticsController(AnalyticsService analytics,ApiMetrics apiMetrics){this.analytics=analytics;this.apiMetrics=apiMetrics;}
     private static Actor admin(Authentication authentication) {
         Actor actor=Actor.of(authentication);Api.require(actor.superAdmin(),HttpStatus.FORBIDDEN,"Super administrator permission required");return actor;
     }
@@ -24,6 +25,11 @@ public class AnalyticsController {
         int span=minutes!=null?minutes:hours!=null?hours*60:1440;
         Api.require(span>=5 && span<=20160,HttpStatus.BAD_REQUEST,"minutes must be 5-20160");
         return analytics.timeseries(span);
+    }
+    @GetMapping("/api/admin/analytics/api")
+    Object api(Authentication auth,@RequestParam(defaultValue="10") int minutes) {
+        admin(auth);Api.require(minutes>=1 && minutes<=ApiMetrics.WINDOW_MINUTES,HttpStatus.BAD_REQUEST,"minutes must be 1-"+ApiMetrics.WINDOW_MINUTES);
+        return apiMetrics.summary(minutes);
     }
     @GetMapping("/api/admin/analytics/daily")
     Object daily(Authentication auth,@RequestParam(defaultValue="30") int days) {

@@ -159,6 +159,9 @@ class ContestLifecycleTest {
         assertTrue(((Number)((Map<?,?>)latency.get("failures")).get("total")).longValue()>=0);
         assertTrue(row.containsKey("last_error_code"));
         assertEquals(200,http("GET","/api/admin/analytics/latency",owner.token,null).statusCode());
+        assertEquals(200,http("GET","/api/admin/analytics/api?minutes=10",owner.token,null).statusCode());
+        var health=(Map<?,?>)analytics.overview().get("health");
+        assertNotNull(health);assertTrue(List.of("ok","warn","bad").contains(health.get("level")));
         assertEquals(403,http("GET","/api/admin/analytics/submissions",entrant.token,null).statusCode());
         assertEquals(403,http("GET","/api/admin/analytics/latency",entrant.token,null).statusCode());
     }

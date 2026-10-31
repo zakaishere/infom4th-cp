@@ -26,7 +26,14 @@ function TimeChart({ rows, value, area, format = n, max, title, names }: {
   const values = rows.map((r) => Number(r[value] ?? 0));
   const top = max ?? Math.max(1, ...values, ...(area ? rows.map((r) => Number(r[area] ?? 0)) : []));
   const t0 = new Date(rows[0].at).getTime(), t1 = Math.max(t0 + 1, new Date(rows[rows.length - 1].at).getTime());
-  const x = (i: number) => L + ((new Date(rows[i].at).getTime() - t0) / (t1 - t0)) * (W - L - 4);
+  const xt = (t: number) => L + ((t - t0) / (t1 - t0)) * (W - L - 4);
+  const x = (i: number) => xt(new Date(rows[i].at).getTime());
+  // A range with fewer samples than its bucket size leaves holes. A missing API sample means the
+  // server said nothing at all; drawing straight through it would look like calm instead of an outage.
+  const times = rows.map((r) => new Date(r.at).getTime());
+  const gaps = times.slice(1).map((t, i) => t - times[i]).filter((g) => g > 0).sort((a, b) => a - b);
+  const typical = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  const holes = typical > 0 ? times.slice(1).map((t, i) => ({ from: times[i], to: t })).filter((h) => h.to - h.from > typical * 2.2) : [];
   const y = (v: number) => T + (1 - Math.min(1, v / top)) * (H - T - B);
   const path = (key: string) => rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(Number(r[key] ?? 0)).toFixed(1)).join(" ");
   const areaPath = area ? path(area) + ` L${x(rows.length - 1)} ${H - B} L${x(0)} ${H - B} Z` : "";
@@ -55,6 +62,13 @@ function TimeChart({ rows, value, area, format = n, max, title, names }: {
             </g>
           ))}
           {[t0, (t0 + t1) / 2, t1].map((t, i) => <text key={i} x={L + ((t - t0) / (t1 - t0)) * (W - L - 4)} y={H - 6} className="chart-axis" textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"}>{tick(t)}</text>)}
+          {holes.map((h, i) => {
+            const width = Math.max(1, xt(h.to) - xt(h.from));
+            return <g key={"gap" + i}>
+              <rect x={xt(h.from)} y={T} width={width} height={H - T - B} className="chart-gap" />
+              {width > 46 && <text x={xt(h.from) + width / 2} y={T + 12} textAnchor="middle" className="chart-gap-label">no data</text>}
+            </g>;
+          })}
           {area && <path d={areaPath} className="chart-area" />}
           <path d={path(value)} className="chart-line" />
           {h && <>
@@ -193,6 +207,56 @@ function Live() {
         <Bars title="Where submissions come from (7 days)" rows={o.data.contexts} />
       </div>
       <span className="small muted">Refreshes every 10 seconds · generated {when(o.data.generatedAt)}</span>
+    </div>
+  );
+}
+
+function ApiCalls() {
+  const [minutes, setMinutes] = useState(10);
+  const a = useData<any>("/api/admin/analytics/api?minutes=" + minutes, 5000);
+  const buckets = a.data?.buckets ?? [];
+  const now = a.data?.now;
+  return (
+    <div className="stack" style={{ gap: "1.25rem" }}>
+      <div className="row">
+        {[[1, "1 min"], [5, "5 min"], [10, "10 min"], [15, "15 min"]].map(([m, l]) =>
+          <button key={m} className={"small" + (minutes === m ? " primary" : "")} onClick={() => setMinutes(m as number)}>{l}</button>)}
+      </div>
+      {a.error && <ErrorBox error={a.error} />}
+      {!a.data ? <Loading /> : (
+        <>
+          <span className="small muted">Counted in the API process over the last {a.data.windowMinutes} minutes, {a.data.bucketSeconds} s per point. Includes rejected requests that never reach the database. Refreshes every 5 seconds.</span>
+          <div className="stat-tiles">
+            <Stat label="Requests" value={n(now?.requests)} hint={`peak ${n(a.data.peakRps)}/s in this window`} />
+            <Stat label="4xx rejected" value={n(now?.clientErrors)} hint="429 admission, 401 auth, 403 permission" tone={now?.clientErrors > 0 ? "warn" : "ok"} />
+            <Stat label="5xx errors" value={n(now?.serverErrors)} hint="the API itself failed" tone={now?.serverErrors > 0 ? "bad" : "ok"} />
+            <Stat label="Average response" value={ms(now?.avgMs)} hint={`slowest ${ms(now?.maxMs)}`} />
+          </div>
+          <TimeChart title="Requests per second" rows={buckets} value="rps" format={(v) => Number(v).toFixed(2)} />
+          <div className="grid grid-2">
+            <TimeChart title="Rejected requests (4xx)" rows={buckets} value="clientErrors" />
+            <TimeChart title="Server errors (5xx)" rows={buckets} value="serverErrors" />
+          </div>
+          <section className="card stack">
+            <h3 style={{ margin: 0 }}>Endpoints in this window</h3>
+            {!a.data.endpoints?.length ? <span className="small muted">No requests recorded yet.</span> : (
+              <div className="table-wrap"><table>
+                <thead><tr><th>Endpoint</th><th>Requests</th><th>4xx</th><th>5xx</th><th>Average</th><th>Slowest</th></tr></thead>
+                <tbody>{a.data.endpoints.map((e: any) => (
+                  <tr key={e.path}>
+                    <td className="small mono">{e.path}</td>
+                    <td className="small">{n(e.requests)}</td>
+                    <td className="small" style={{ color: e.clientErrors ? "var(--warn)" : undefined }}>{n(e.clientErrors)}</td>
+                    <td className="small" style={{ color: e.serverErrors ? "var(--bad)" : undefined }}>{n(e.serverErrors)}</td>
+                    <td className="small mono">{ms(e.avgMs)}</td>
+                    <td className="small mono">{ms(e.maxMs)}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -505,16 +569,25 @@ function Capacity() {
 
 export default function Analytics() {
   const { superAdmin } = useAuth();
-  const tabs = superAdmin ? [["live", "Live"], ["history", "History"], ["daily", "Daily reports"], ["submissions", "Submissions"], ["capacity", "Capacity"], ["contests", "Contests"]] : [["contests", "Contests"]];
+  const health = useData<any>(superAdmin ? "/api/admin/analytics/overview" : null, 30000);
+  const state = health.data?.health;
+  const tabs = superAdmin ? [["live", "Live"], ["history", "History"], ["api", "API"], ["daily", "Daily reports"], ["submissions", "Submissions"], ["capacity", "Capacity"], ["contests", "Contests"]] : [["contests", "Contests"]];
   const [tab, setTab] = useState(tabs[0][0]);
   return (
     <div className="stack">
       <div className="page-head" style={{ marginBottom: 0 }}>
         <div><div className="eyebrow">Control room</div><h1>Analytics</h1><p>Server resources, judging performance, platform activity and contest statistics.</p></div>
       </div>
+      {state && state.level !== "ok" && (
+        <div className={"notice " + (state.level === "bad" ? "bad" : "warn")}>
+          <strong>{state.level === "bad" ? "The platform is not healthy." : "Worth watching."}</strong>
+          <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>{(state.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
+        </div>
+      )}
       <div className="tabs">{tabs.map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
       {tab === "live" && <Live />}
       {tab === "history" && <History />}
+      {tab === "api" && <ApiCalls />}
       {tab === "daily" && <Daily />}
       {tab === "submissions" && <Submissions />}
       {tab === "capacity" && <Capacity />}

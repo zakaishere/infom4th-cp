@@ -116,7 +116,39 @@ public class AnalyticsService {
                 "(SELECT count(*) FROM competitions) AS competitions,(SELECT count(*) FROM competitions WHERE status='RUNNING') AS running_competitions,"+
                 "(SELECT count(*) FROM contest_runs WHERE status='RUNNING') AS running_runs,(SELECT count(*) FROM teams) AS teams"));
         result.put("today",day(LocalDate.now(ZoneOffset.UTC)));
+        result.put("health",health());
         return result;
+    }
+
+    /**
+     * One derived verdict for the banner, from data already stored: is the platform alive, is the
+     * queue growing, and did anything die in the last hour. Charts need a human watching; this does not.
+     */
+    public Map<String,Object> health() {
+        var row=db.jdbc.queryForMap("SELECT "+
+                "(SELECT coalesce(extract(epoch FROM now()-max(sampled_at))::int,999999) FROM metric_samples) AS sample_age,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.status='FAILED' AND j.completed_at>now()-interval '1 hour' AND s.context<>'BENCHMARK') AS dropped,"+
+                "(SELECT coalesce(max(extract(epoch FROM now()-created_at))::int,0) FROM judging_jobs WHERE status IN ('QUEUED','RETRY')) AS oldest_wait,"+
+                "(SELECT coalesce(max(extract(epoch FROM now()-created_at))::int,0) FROM judge_outbox WHERE published_at IS NULL) AS outbox_age,"+
+                "(SELECT count(*) FROM (SELECT queued_jobs,lag(queued_jobs) OVER (ORDER BY sampled_at) AS previous FROM "+
+                "(SELECT sampled_at,queued_jobs FROM metric_samples ORDER BY sampled_at DESC LIMIT 3) t) x WHERE previous IS NOT NULL AND queued_jobs>previous) AS rising");
+        long sampleAge=((Number)row.get("sample_age")).longValue(),dropped=((Number)row.get("dropped")).longValue();
+        long oldestWait=((Number)row.get("oldest_wait")).longValue(),outboxAge=((Number)row.get("outbox_age")).longValue();
+        long rising=((Number)row.get("rising")).longValue();
+        List<String> reasons=new ArrayList<>();
+        if(sampleAge>120) reasons.add("No server sample for "+(sampleAge>600000?"a long time":sampleAge+" s")+": the API may be down.");
+        if(dropped>0) reasons.add(dropped+" job(s) used every attempt in the last hour.");
+        if(oldestWait>300) reasons.add("The oldest waiting job has queued for "+(oldestWait/60)+" min.");
+        if(rising>=2) reasons.add("The judge queue grew in each of the last samples.");
+        if(outboxAge>30) reasons.add("A judge message waited "+outboxAge+" s to be published.");
+        String level=!reasons.isEmpty()&&(sampleAge>120||dropped>0||oldestWait>300)?"bad":!reasons.isEmpty()?"warn":"ok";
+        Map<String,Object> out=new LinkedHashMap<>();
+        out.put("level",level);
+        out.put("reasons",reasons);
+        out.put("sampleAgeSeconds",sampleAge);
+        out.put("droppedLastHour",dropped);
+        out.put("oldestWaitSeconds",oldestWait);
+        return out;
     }
 
     /** Bucket size in seconds: about 240 points, never finer than 5 seconds, so short contest windows stay readable. */
