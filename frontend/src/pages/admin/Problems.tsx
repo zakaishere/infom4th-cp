@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { post, put, patch } from "../../api";
 import { navigate, useAction, useData } from "../../app";
 import { Badge, CodeEditor, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, when } from "../../ui";
+import { LanguagePicker } from "../../components/LanguagePicker";
 
 const STATUS_TONE: Record<string, string> = { DRAFT: "neutral", IN_TESTING: "info", READY_FOR_REVIEW: "warn", APPROVED: "ok", PUBLISHED: "ok", ARCHIVED: "neutral" };
 
@@ -151,10 +152,7 @@ function StatementForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; on
             <option>EASY</option><option>MEDIUM</option><option>HARD</option></select></Field>
         </div>
         <Field label="Languages">
-          <div className="chips">{["CPP", "C", "JAVA", "PYTHON"].map((l) => (
-            <label key={l} className="check small"><input type="checkbox" disabled={sealed} checked={f.languages.includes(l)}
-              onChange={(e) => setF({ ...f, languages: e.target.checked ? [...f.languages, l] : f.languages.filter((x) => x !== l) })} />{LANGUAGE_NAMES[l]}</label>
-          ))}</div>
+          <LanguagePicker disabled={sealed} value={f.languages} onChange={(languages) => setF({ ...f, languages })} />
         </Field>
         {!sealed && <div><button className="primary" disabled={busy}>Save draft</button></div>}
       </form>
