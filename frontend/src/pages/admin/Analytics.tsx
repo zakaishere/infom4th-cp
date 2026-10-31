@@ -327,7 +327,7 @@ function Contests() {
 type TimedRow = {
   id: string; submitted_at: string; kind: string; language_code: string; handle: string; problem: string; contest: string | null; label: string | null; samples_only: boolean;
   status: string | null; verdict: string | null; passed_tests: number | null; total_tests: number | null; execution_time_ms: number | null; peak_memory_kb: number | null;
-  generation: number | null; attempt_count: number | null; worker: string | null; wait_ms: number | null; judge_ms: number | null; server_ms: number | null;
+  generation: number | null; attempt_count: number | null; last_error_code: string | null; worker: string | null; wait_ms: number | null; judge_ms: number | null; server_ms: number | null;
   compile_ms: number | null; tests_ms: number | null; sandbox_ms: number | null; accepted_ms: number | null; verdict_ms: number | null;
 };
 const KINDS = ["Contest", "Practice", "Practice examples", "Problem testing"];
@@ -343,12 +343,15 @@ function LatencyTable({ title, first, rows, name }: { title: string; first: stri
       <h3 style={{ margin: 0 }}>{title}</h3>
       {!rows?.length ? <span className="small muted">No finished submissions in this range.</span> : (
         <div className="table-wrap"><table>
-          <thead><tr><th>{first}</th><th>Count</th><th>Accepted by server</th><th>Wait for judge</th><th>Judging</th><th>Verdict on screen</th><th>Compile</th><th>Tests</th><th>Sandbox</th></tr></thead>
+          <thead><tr><th>{first}</th><th>Count</th><th>Accepted by server</th><th>Wait for judge</th><th>Judging</th><th>Verdict on screen</th><th>Compile</th><th>Tests</th><th>Sandbox</th><th>Retries</th></tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={name(r)}>
               <td className="small"><strong>{name(r)}</strong></td><td className="small">{n(r.count)}</td>
               {["accepted_ms", "wait_ms", "judge_ms", "verdict_ms"].map((c) => <td key={c} className="small mono">{ms(r["avg_" + c])}<div className="muted">p95 {ms(r["p95_" + c])}</div></td>)}
               <td className="small mono">{ms(r.avg_compile_ms)}</td><td className="small mono">{ms(r.avg_tests_ms)}</td><td className="small mono">{ms(r.avg_sandbox_ms)}</td>
+              <td className="small mono" title={`${r.avg_attempts ?? 1} attempts per job on average, worst ${r.worst_attempts ?? 1}`}>
+                {r.retried ? <strong>{n(r.retried)}</strong> : "0"}{r.retried ? <div className="muted">of {n(r.count)}</div> : null}
+              </td>
             </tr>
           ))}</tbody>
         </table></div>
@@ -380,6 +383,28 @@ function Submissions() {
       <LatencyTable title="Average latency by type" first="Type" rows={stats.data?.byKind} name={(r) => r.kind} />
       <LatencyTable title="Average latency by language" first="Language" rows={stats.data?.byLanguage} name={(r) => LANGUAGE_NAMES[r.language_code] ?? r.language_code} />
       <section className="card stack">
+        <h3 style={{ margin: 0 }}>Jobs the platform dropped</h3>
+        {stats.data?.failures && Number(stats.data.failures.total) > 0 ? (
+          <>
+            <div className="small muted">
+              {n(stats.data.failures.total)} job(s) used every attempt without producing a verdict. Time is from submission to giving up, retries included.
+            </div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Reason</th><th>Count</th><th>Average</th><th>p95</th><th>Worst</th></tr></thead>
+              <tbody>{(stats.data.failureCodes ?? []).map((f: any) => (
+                <tr key={f.code}>
+                  <td className="small mono"><strong>{f.code}</strong></td>
+                  <td className="small">{n(f.count)}</td>
+                  <td className="small mono">{ms(f.avg_server_ms)}</td>
+                  <td className="small mono">{ms(f.p95_server_ms)}</td>
+                  <td className="small mono">{ms(f.max_server_ms)}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          </>
+        ) : <span className="small muted">No job has exhausted its attempts in this range.</span>}
+      </section>
+      <section className="card stack">
         <div className="row-between"><h3 style={{ margin: 0 }}>Recent submissions</h3>
           <div className="row" style={{ alignItems: "center" }}>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="User, problem or contest" style={{ width: 200 }} />
@@ -397,7 +422,7 @@ function Submissions() {
                 <td className="small">@{s.handle}</td>
                 <td className="small">{s.label ? <strong>{s.label} </strong> : null}{s.problem}<div className="muted">{s.contest ?? s.kind}</div></td>
                 <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>
-                <td className="small"><Verdict status={s.status ?? undefined} verdict={s.verdict} />{s.total_tests ? <div className="muted mono">{s.passed_tests}/{s.total_tests} tests</div> : null}{(s.generation ?? 1) > 1 ? <div className="muted">rejudge</div> : null}</td>
+                <td className="small"><Verdict status={s.status ?? undefined} verdict={s.verdict} />{s.total_tests ? <div className="muted mono">{s.passed_tests}/{s.total_tests} tests</div> : null}{(s.generation ?? 1) > 1 ? <div className="muted">rejudge</div> : null}{(s.attempt_count ?? 0) > 1 ? <div className="muted">×{s.attempt_count} attempts</div> : null}{s.status === "FAILED" && s.last_error_code ? <div className="muted mono">{s.last_error_code}</div> : null}</td>
                 <td className="small mono">{ms(s.accepted_ms)}</td><td className="small mono">{ms(s.wait_ms)}</td>
                 <td className="small mono" title={s.compile_ms != null ? `Compile ${ms(s.compile_ms)}, tests ${ms(s.tests_ms)}, sandbox ${ms(s.sandbox_ms)}` : undefined}>{ms(s.judge_ms)}</td>
                 <td className="small mono"><strong>{ms(s.verdict_ms)}</strong></td>

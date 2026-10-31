@@ -140,7 +140,7 @@ public class AnalyticsService {
     private static final String TIMED="SELECT s.id,s.submitted_at,s.context,s.samples_only,s.language_code,s.submitted_by,u.handle,pv.title AS problem,c.title AS contest,r.kind AS run_kind,cp.label,"+
             "CASE WHEN s.context='CONTEST' THEN 'Contest' WHEN s.context='LABORATORY' THEN 'Problem testing' WHEN s.context='BENCHMARK' THEN 'Benchmark' WHEN s.samples_only THEN 'Practice examples' ELSE 'Practice' END AS kind,"+
             "CASE WHEN s.context='CONTEST' OR (SELECT b.lane FROM benchmark_runs b WHERE b.id=s.benchmark_id)='official' THEN 'official' ELSE 'internal' END AS lane,"+
-            "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.worker,l.compile_ms,l.tests_ms,"+
+            "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.last_error_code,l.worker,l.compile_ms,l.tests_ms,"+
             "round(extract(epoch FROM coalesce(l.first_started_at,now())-l.created_at)*1000) AS wait_ms,"+
             "round(extract(epoch FROM l.completed_at-coalesce(l.last_started_at,l.first_started_at))*1000) AS judge_ms,"+
             "round(extract(epoch FROM l.completed_at-l.created_at)*1000) AS server_ms,"+
@@ -149,7 +149,7 @@ public class AnalyticsService {
             "FROM submissions s JOIN users u ON u.id=s.submitted_by JOIN problem_versions pv ON pv.id=s.problem_version_id "+
             "LEFT JOIN contest_runs r ON r.id=s.run_id LEFT JOIN competitions c ON c.id=r.competition_id "+
             "LEFT JOIN competition_problems cp ON cp.competition_version_id=s.competition_version_id AND cp.slot=s.problem_slot "+
-            "LEFT JOIN LATERAL (SELECT j.status,j.generation,j.attempt_count,j.created_at,j.first_started_at,j.last_started_at,j.completed_at,w.name AS worker,res.verdict,res.passed_tests,res.total_tests,res.execution_time_ms,res.peak_memory_kb,res.compile_ms,res.tests_ms,res.judge_total_ms "+
+            "LEFT JOIN LATERAL (SELECT j.status,j.generation,j.attempt_count,j.last_error_code,j.created_at,j.first_started_at,j.last_started_at,j.completed_at,w.name AS worker,res.verdict,res.passed_tests,res.total_tests,res.execution_time_ms,res.peak_memory_kb,res.compile_ms,res.tests_ms,res.judge_total_ms "+
             "FROM judging_jobs j LEFT JOIN judging_results res ON res.job_id=j.id LEFT JOIN judge_workers w ON w.id=j.worker_id WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) l ON true "+
             "LEFT JOIN submission_client_timings t ON t.submission_id=s.id ";
 
@@ -166,19 +166,32 @@ public class AnalyticsService {
                 ",round((percentile_cont(0.95) WITHIN GROUP (ORDER BY "+column+"))::numeric) AS p95_"+column+",max("+column+") AS max_"+column;
     }
 
-    /** Latency by kind of submission and by language, and what each judge lane has available. */
+    /** Latency by kind of submission and by language, lane capacity, and how jobs die. */
     public Map<String,Object> latency(int hours) {
         String window="FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d WHERE d.status='COMPLETED' ";
+        // A job that needed more than one claim means infrastructure dropped it; the extra claims are the cost.
         String columns="count(*) AS count,"+spread("wait_ms")+","+spread("judge_ms")+","+spread("server_ms")+","+spread("accepted_ms")+","+spread("verdict_ms")+
-                ",round(avg(compile_ms)) AS avg_compile_ms,round(avg(tests_ms)) AS avg_tests_ms,round(avg(sandbox_ms)) AS avg_sandbox_ms,round(avg(total_tests),1) AS avg_tests ";
+                ",round(avg(compile_ms)) AS avg_compile_ms,round(avg(tests_ms)) AS avg_tests_ms,round(avg(sandbox_ms)) AS avg_sandbox_ms,round(avg(total_tests),1) AS avg_tests,"+
+                "round(avg(attempt_count),2) AS avg_attempts,count(*) FILTER (WHERE attempt_count>1) AS retried,max(attempt_count) AS worst_attempts ";
         var result=new LinkedHashMap<String,Object>();
         result.put("hours",hours);
         result.put("byKind",db.jdbc.queryForList("SELECT kind,"+columns+window+"GROUP BY kind ORDER BY count(*) DESC",hours));
         result.put("byLanguage",db.jdbc.queryForList("SELECT language_code,"+columns+window+"GROUP BY language_code ORDER BY count(*) DESC",hours));
         // Examples only run a few tests, so they would make capacity look better than it is.
-        result.put("lanes",db.jdbc.queryForList("SELECT w.lane,w.workers,w.slots,w.cpus,w.memory_mb,m.count,m.avg_judge_ms,m.p95_judge_ms FROM "+
-                "(SELECT lane,count(*) AS workers,sum(coalesce(reported_target,desired_concurrency,default_concurrency)) AS slots,max(detected_cpus) AS cpus,max(detected_memory_mb) AS memory_mb FROM judge_workers WHERE "+ONLINE+" AND NOT drain_requested GROUP BY lane) w "+
-                "LEFT JOIN (SELECT lane,count(*) AS count,round(avg(judge_ms)) AS avg_judge_ms,round((percentile_cont(0.95) WITHIN GROUP (ORDER BY judge_ms))::numeric) AS p95_judge_ms "+window+"AND NOT samples_only GROUP BY lane) m ON m.lane=w.lane ORDER BY w.lane",hours));
+        // Both lanes are always listed, including a lane with no online worker: that is the outage case.
+        result.put("lanes",db.jdbc.queryForList("SELECT l.lane,coalesce(w.workers,0) AS workers,coalesce(w.slots,0) AS slots,w.cpus,w.memory_mb,"+
+                "coalesce(m.count,0) AS count,m.avg_judge_ms,m.p95_judge_ms,m.avg_attempts,m.retried,m.worst_attempts,coalesce(q.unpublished,0) AS unpublished,q.oldest_unpublished_ms "+
+                "FROM (VALUES ('official'),('internal')) l(lane) "+
+                "LEFT JOIN (SELECT lane,count(*) AS workers,sum(coalesce(reported_target,desired_concurrency,default_concurrency)) AS slots,max(detected_cpus) AS cpus,max(detected_memory_mb) AS memory_mb FROM judge_workers WHERE "+ONLINE+" AND NOT drain_requested GROUP BY lane) w ON w.lane=l.lane "+
+                "LEFT JOIN (SELECT lane,count(*) AS count,round(avg(judge_ms)) AS avg_judge_ms,round((percentile_cont(0.95) WITHIN GROUP (ORDER BY judge_ms))::numeric) AS p95_judge_ms,"+
+                "round(avg(attempt_count),2) AS avg_attempts,count(*) FILTER (WHERE attempt_count>1) AS retried,max(attempt_count) AS worst_attempts "+
+                window+"AND NOT samples_only GROUP BY lane) m ON m.lane=l.lane "+
+                "LEFT JOIN (SELECT lane,count(*) AS unpublished,round(max(extract(epoch FROM now()-created_at))*1000) AS oldest_unpublished_ms FROM judge_outbox WHERE published_at IS NULL GROUP BY lane) q ON q.lane=l.lane "+
+                "ORDER BY l.lane",hours));
+        // Jobs that ran out of attempts. They are excluded from the averages above, which is why the block is separate.
+        String failed="FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d WHERE d.status='FAILED' ";
+        result.put("failures",db.jdbc.queryForMap("SELECT count(*) AS total,"+spread("server_ms")+" "+failed,hours));
+        result.put("failureCodes",db.jdbc.queryForList("SELECT coalesce(last_error_code,'UNKNOWN') AS code,count(*) AS count,"+spread("server_ms")+" "+failed+"GROUP BY 1 ORDER BY count(*) DESC",hours));
         result.put("limits",db.jdbc.queryForMap("SELECT pending_submissions_per_user,submissions_per_minute,max_queued_submissions FROM judging_settings"));
         result.put("hostBudgetMb",db.jdbc.queryForObject("SELECT min(host_memory_budget_mb) FROM judge_workers WHERE "+ONLINE,Integer.class));
         result.put("slotMemoryMb",db.jdbc.queryForObject("SELECT max(slot_memory_mb) FROM judge_workers WHERE "+ONLINE,Integer.class));
