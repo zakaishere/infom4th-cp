@@ -65,7 +65,6 @@ export function DocsPanel({ language, onClose }: { language: string; onClose: ()
       </div>
       <div className="docs-body">
         {failed && <div className="notice bad small">The reference could not load. Check your connection and open it again.</div>}
-        {sheets && !suggested && tab === null && <div className="notice small">There is no sheet for this language yet, so here is another one.</div>}
         {sheets && sections.length === 0 && <div className="empty">Nothing matches “{query}”.</div>}
         {sections.map((section) => (
           <section key={section.title}>

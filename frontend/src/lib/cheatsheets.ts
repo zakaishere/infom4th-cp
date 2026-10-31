@@ -125,7 +125,232 @@ export const SHEETS: Record<string, { name: string; sections: Section[] }> = {
       ] },
     ],
   },
+  c: {
+    name: "C",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Read and print", code: "int n; long long x; double d; char s[1005];\nscanf(\"%d %lld %lf %1004s\", &n, &x, &d, s);\nprintf(\"%d %lld %.6f %s\\n\", n, x, d, s);", note: "Read a double with %lf and print it with %f. A string needs no &." },
+        { title: "Read until the input ends", code: "int x;\nwhile (scanf(\"%d\", &x) == 1) {\n    // use x\n}" },
+        { title: "Read a whole line", code: "char line[1005];\nfgets(line, sizeof line, stdin);\nline[strcspn(line, \"\\n\")] = '\\0';", note: "After scanf, the rest of the previous line is still waiting to be read." },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "64-bit integers", code: "long long total = 0;\nlong long big = 1000000000LL * 1000000000LL;", note: "From <limits.h>: INT_MAX, LLONG_MAX." },
+        { title: "Math", code: "#include <math.h>\nsqrt(x); pow(a, b); floor(x); ceil(x); fabs(x);\n#include <stdlib.h>\nabs(a); llabs(a);", note: "This judge compiles C without -lm, so math functions on variables may fail with a compilation error. Prefer integer arithmetic, or use C++." },
+      ] },
+      { title: "Arrays and memory", entries: [
+        { title: "Arrays", code: "int a[100005];            // global: starts at zero\nint grid[1005][1005];\nmemset(a, 0, sizeof a);    // from <string.h>", note: "Put big arrays outside main: a large local array can overflow the stack." },
+        { title: "Allocate", code: "int *a = malloc(n * sizeof *a);\nint *b = calloc(n, sizeof *b);   // starts at zero\nfree(a);" },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "strlen(s); strcmp(a, b);     // 0 when equal\nstrcpy(to, from); strcat(to, from);\nstrchr(s, 'x'); strstr(s, \"ab\");", note: "Compare with strcmp: == compares addresses. strlen in a loop condition is slow." },
+        { title: "Characters", code: "#include <ctype.h>\nisdigit(c); isalpha(c); isspace(c);\ntoupper(c); tolower(c);\nint digit = c - '0';" },
+        { title: "Convert", code: "int n = atoi(s);\nlong long m = atoll(s);\nchar out[32];\nsprintf(out, \"%d\", n);" },
+      ] },
+      { title: "Sort and search", entries: [
+        { title: "qsort", code: "int cmp(const void *x, const void *y) {\n    int a = *(const int *)x, b = *(const int *)y;\n    return (a > b) - (a < b);\n}\n\nqsort(a, n, sizeof a[0], cmp);", note: "Don't return a - b: it can overflow." },
+        { title: "bsearch", code: "int *found = bsearch(&key, a, n, sizeof a[0], cmp);   // NULL if missing" },
+      ] },
+      { title: "struct and bits", entries: [
+        { title: "struct", code: "typedef struct {\n    int weight, value;\n} Item;\n\nItem items[1005];\nitems[0].weight = 3;" },
+        { title: "Bits", code: "x & y; x | y; x ^ y; ~x;\nx << k; x >> k;\n(x >> k) & 1;             // bit k\n__builtin_popcountll(x);  // number of 1 bits", note: "Write 1LL << k when k can reach 31 or more." },
+      ] },
+    ],
+  },
+  javascript: {
+    name: "JavaScript",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Read everything", code: "const data = require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/);\nlet pos = 0;\nconst n = Number(data[pos++]);" },
+        { title: "Read by lines", code: "const lines = require('fs').readFileSync(0, 'utf8').split('\\n');\nconst [a, b] = lines[0].trim().split(' ').map(Number);" },
+        { title: "Print", code: "console.log(x);\nconst out = [];\nout.push(x);\nconsole.log(out.join('\\n'));\nconsole.log(value.toFixed(6));", note: "Collect big output and print it once: many console.log calls are slow." },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "Size of numbers", code: "Number.MAX_SAFE_INTEGER;    // about 9e15\nconst big = 1000000000n * 1000000000n;\nBigInt(5) + 2n;\nNumber(big);", note: "Numbers lose precision past 9e15. Use BigInt, and don't mix it with Number." },
+        { title: "Math", code: "Math.floor(a / b);   // integer division\na % b;               // can be negative\nMath.abs(x); Math.min(a, b); Math.max(a, b);\nMath.sqrt(x); Math.pow(a, b);\nMath.max(...arr);", note: "Math.max(...arr) can crash on very long arrays, so loop instead." },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "s.length; s[i]; s.slice(a, b);\ns.split(' '); s.trim(); s.indexOf('x'); s.includes('x');\ns.toUpperCase(); s.toLowerCase(); s.repeat(3);\ns.charCodeAt(i); String.fromCharCode(97);", note: "Strings can't change. Use an array of characters, then join it." },
+        { title: "Convert", code: "Number(s); parseInt(s, 10); String(n);\narr.join(' ');" },
+      ] },
+      { title: "Arrays", entries: [
+        { title: "Create", code: "const a = new Array(n).fill(0);\nconst grid = Array.from({ length: n }, () => new Array(m).fill(0));", note: "Don't use new Array(n).fill([]): every slot would be the same array." },
+        { title: "Use", code: "a.push(x); a.pop(); a.length;\na.shift(); a.unshift(x);\na.slice(i, j); a.reverse(); a.includes(x); a.indexOf(x);\na.map(f); a.filter(f); a.reduce((s, x) => s + x, 0);", note: "shift and unshift are slow on long arrays. Use an index as the front of a queue." },
+        { title: "Sort", code: "a.sort((x, y) => x - y);    // numbers\na.sort((x, y) => y - x);    // descending\na.sort((p, q) => p[0] - q[0]);", note: "Without a function, sort compares as text, so 10 comes before 9." },
+      ] },
+      { title: "Map and Set", entries: [
+        { title: "Map", code: "const m = new Map();\nm.set(k, v); m.get(k); m.has(k); m.delete(k); m.size;\nm.set(k, (m.get(k) ?? 0) + 1);\nfor (const [k, v] of m) { }", note: "Keeps insertion order, not sorted order. There is no built-in heap or sorted map." },
+        { title: "Set", code: "const s = new Set();\ns.add(x); s.has(x); s.delete(x); s.size;\nfor (const x of s) { }\nconst unique = [...new Set(a)];" },
+      ] },
+    ],
+  },
+  go: {
+    name: "Go",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Fast input and output", code: "in := bufio.NewReader(os.Stdin)\nout := bufio.NewWriter(os.Stdout)\ndefer out.Flush()\n\nvar n int\nfmt.Fscan(in, &n)\nfmt.Fprintln(out, n)", note: "Imports: bufio, fmt, os. Without Flush you lose the output." },
+        { title: "Read until the input ends", code: "var x int\nfor {\n    if _, err := fmt.Fscan(in, &x); err != nil {\n        break\n    }\n}" },
+        { title: "Print", code: "fmt.Fprintf(out, \"%d %s %.6f\\n\", n, s, value)" },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "Types", code: "var a int        // 64-bit on this judge\nvar b int64 = 1000000000 * 1000000000\nfloat64(a); int(d); int64(a)\nmath.MaxInt64", note: "Types never convert by themselves, so int + int64 is a compilation error. An unused import or variable is also an error." },
+        { title: "Math", code: "math.Sqrt(x); math.Pow(a, b); math.Abs(x)\nmath.Floor(x); math.Ceil(x)\nmath.Inf(1)", note: "These all use float64." },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "len(s); s[i]; s[a:b]\nstrings.Split(s, \" \"); strings.Fields(s)\nstrings.TrimSpace(s); strings.Contains(s, \"x\")\nstrings.Join(parts, \" \"); strings.Repeat(\"a\", 3)\nfor i, r := range s { }", note: "s[i] is a byte, and range gives runes." },
+        { title: "Convert", code: "n, _ := strconv.Atoi(s)\nt := strconv.Itoa(n)\nbytes := []byte(s); text := string(bytes)" },
+        { title: "Build strings", code: "var sb strings.Builder\nsb.WriteString(\"abc\")\nsb.WriteByte('d')\nsb.String()" },
+      ] },
+      { title: "Slices", entries: [
+        { title: "Create", code: "a := make([]int, n)\ngrid := make([][]int, n)\nfor i := range grid {\n    grid[i] = make([]int, m)\n}" },
+        { title: "Use", code: "a = append(a, x)\na = a[:len(a)-1]       // remove last\na = a[1:]              // remove first\nlen(a)\nb := make([]int, len(a))\ncopy(b, a)", note: "b := a shares the same data: use copy for a real copy." },
+        { title: "Sort and search", code: "sort.Ints(a); sort.Strings(words)\nsort.Slice(p, func(i, j int) bool {\n    return p[i].x < p[j].x\n})\ni := sort.SearchInts(a, x)   // first >= x" },
+      ] },
+      { title: "map and struct", entries: [
+        { title: "map", code: "m := make(map[string]int)\nm[k]++\nv, ok := m[k]\ndelete(m, k)\nlen(m)\nfor k, v := range m { }", note: "Loop order is random. Go has no set type: use map[int]bool." },
+        { title: "struct", code: "type Item struct {\n    weight, value int\n}\n\nitems := []Item{{1, 2}, {3, 4}}\nitems[0].weight = 5" },
+        { title: "Heap", code: "import \"container/heap\"", note: "You implement Len, Less, Swap, Push and Pop on your own type, then call heap.Push and heap.Pop." },
+      ] },
+    ],
+  },
+  rust: {
+    name: "Rust",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Read everything", code: "use std::io::{self, Read};\n\nlet mut input = String::new();\nio::stdin().read_to_string(&mut input).unwrap();\nlet mut it = input.split_ascii_whitespace();\nlet n: usize = it.next().unwrap().parse().unwrap();" },
+        { title: "Fast output", code: "use std::io::{self, Write};\n\nlet stdout = io::stdout();\nlet mut out = io::BufWriter::new(stdout.lock());\nwriteln!(out, \"{}\", x).unwrap();", note: "println! flushes often, so it is slow for big output." },
+        { title: "Formatting", code: "println!(\"{} {}\", a, b);\nprintln!(\"{:.6}\", value);\nprintln!(\"{:?}\", list);   // debug view" },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "Types", code: "let a: i64 = 1_000_000_000 * 1_000_000_000;\nlet index = a as usize;\nlet d = a as f64;\ni64::MAX; i32::MAX;", note: "Indexes must be usize. Numbers don't convert by themselves, so use as." },
+        { title: "Math", code: "x.abs(); a.min(b); a.max(b); a.pow(3);\nd.sqrt(); d.floor(); d.ceil(); d.powi(2);\na.rem_euclid(m);    // never negative" },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "let mut s = String::new();\ns.push('a'); s.push_str(\"bc\");\ns.len(); s.trim();\ns.split(' '); s.split_whitespace();\nlet chars: Vec<char> = s.chars().collect();\nlet bytes = s.as_bytes();", note: "You can't write s[i]. Use a Vec<char> or as_bytes for positions." },
+        { title: "Convert", code: "let n: i32 = s.parse().unwrap();\nlet t = n.to_string();\nlet digit = c.to_digit(10).unwrap();\nlet text: String = chars.iter().collect();" },
+      ] },
+      { title: "Vec", entries: [
+        { title: "Create", code: "let mut v = vec![0; n];\nlet mut grid = vec![vec![0; m]; n];\nlet mut w: Vec<i64> = Vec::new();" },
+        { title: "Use", code: "v.push(x); v.pop(); v.len(); v.is_empty();\nv.iter().sum::<i64>();\nv.iter().max(); v.iter().min();\nfor x in &v { }\nfor (i, x) in v.iter().enumerate() { }" },
+        { title: "Sort and search", code: "v.sort(); v.sort_unstable();\nv.sort_by(|a, b| b.cmp(a));        // descending\nv.sort_by_key(|p| p.0);\nv.dedup();                         // after sorting\nv.binary_search(&x);               // Ok(i) or Err(i)\nv.partition_point(|&y| y < x);     // first >= x\nv.reverse();" },
+      ] },
+      { title: "Collections", entries: [
+        { title: "Maps", code: "use std::collections::{HashMap, BTreeMap};\nlet mut m = HashMap::new();\n*m.entry(k).or_insert(0) += 1;\nm.get(&k); m.contains_key(&k); m.remove(&k);\nfor (k, v) in &m { }", note: "BTreeMap has the same basics and keeps keys sorted." },
+        { title: "Sets", code: "use std::collections::{HashSet, BTreeSet};\nlet mut s = HashSet::new();\ns.insert(x); s.contains(&x); s.remove(&x);" },
+        { title: "Queue and heap", code: "use std::collections::{VecDeque, BinaryHeap};\nuse std::cmp::Reverse;\nlet mut q = VecDeque::new();\nq.push_back(x); q.pop_front();\nlet mut h = BinaryHeap::new();    // largest first\nh.push(x); h.pop(); h.peek();\nh.push(Reverse(x));               // smallest first" },
+      ] },
+    ],
+  },
+  kotlin: {
+    name: "Kotlin",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Read", code: "val n = readln().trim().toInt()\nval values = readln().trim().split(\" \").map { it.toInt() }\nval (a, b) = readln().trim().split(\" \").map { it.toLong() }" },
+        { title: "Read everything", code: "val data = System.`in`.bufferedReader().readText().trim().split(Regex(\"\\\\s+\"))\nvar pos = 0\nval n = data[pos++].toInt()" },
+        { title: "Print", code: "println(x)\nval sb = StringBuilder()\nsb.append(x).append('\\n')\nprint(sb)\nprintln(\"%.6f\".format(value))", note: "Collect big output in a StringBuilder: many println calls are slow." },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "Types", code: "val total: Long = 1_000_000_000L * 1_000_000_000L\nx.toLong(); x.toInt(); x.toDouble()\nInt.MAX_VALUE; Long.MAX_VALUE", note: "Int + Long gives a Long, and a Long won't fit an Int variable without toInt()." },
+        { title: "Math", code: "maxOf(a, b); minOf(a, b)\nimport kotlin.math.*\nabs(x); sqrt(d); floor(d); ceil(d); d.pow(2)\na.mod(m)     // never negative" },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "s.length; s[i]; s.substring(a, b)\ns.split(\" \"); s.trim(); s.indexOf(\"x\"); s.contains(\"x\")\ns.uppercase(); s.lowercase(); s.reversed()\ns.toCharArray(); s == t", note: "== compares content in Kotlin." },
+        { title: "Convert", code: "s.toInt(); s.toLong(); n.toString()\nc.digitToInt(); c.isDigit(); c.isLetter()\nlist.joinToString(\" \")" },
+      ] },
+      { title: "Lists and arrays", entries: [
+        { title: "Create", code: "val a = IntArray(n)\nval b = LongArray(n) { -1L }\nval grid = Array(n) { IntArray(m) }\nval list = mutableListOf<Int>()" },
+        { title: "Use", code: "list.add(x); list[i]; list.size; list.isEmpty()\nlist.removeAt(list.size - 1)\nlist.sum(); a.sum(); list.maxOrNull(); list.minOrNull()\nfor (i in 0 until n) { }\nfor (i in n - 1 downTo 0) { }\nfor ((i, x) in list.withIndex()) { }" },
+        { title: "Sort", code: "a.sort()\nlist.sort(); list.sortDescending()\nlist.sortBy { it.first }\nval sorted = list.sorted()\nlist.binarySearch(x)     // negative if missing" },
+      ] },
+      { title: "Collections", entries: [
+        { title: "Map", code: "val m = HashMap<String, Int>()\nm[k] = (m[k] ?: 0) + 1\nm.getOrDefault(k, 0); k in m; m.remove(k)\nfor ((k, v) in m) { }\nval sortedMap = java.util.TreeMap<Int, Int>()" },
+        { title: "Set", code: "val s = HashSet<Int>()\ns.add(x); x in s; s.remove(x)\nval t = java.util.TreeSet<Int>()\nt.first(); t.floor(x); t.ceiling(x)" },
+        { title: "Queue and heap", code: "val q = ArrayDeque<Int>()\nq.addLast(x); q.removeFirst(); q.first()\nval h = java.util.PriorityQueue<Int>()\nval maxH = java.util.PriorityQueue<Int>(compareByDescending { it })\nh.add(x); h.peek(); h.poll()" },
+      ] },
+    ],
+  },
+  csharp: {
+    name: "C#",
+    sections: [
+      { title: "Program shape", entries: [
+        { title: "Starting point", code: "using System;\nusing System.Collections.Generic;\nusing System.Linq;\n\nclass Program {\n    static void Main() {\n    }\n}", note: "This judge compiles with Mono, so newer C# features may not be available." },
+      ] },
+      { title: "Input and output", entries: [
+        { title: "Read", code: "int n = int.Parse(Console.ReadLine());\nint[] a = Console.ReadLine().Split(' ').Select(int.Parse).ToArray();\nstring[] data = Console.In.ReadToEnd().Split((char[])null, StringSplitOptions.RemoveEmptyEntries);" },
+        { title: "Print", code: "Console.WriteLine(x);\nConsole.WriteLine(string.Join(\" \", a));\nConsole.WriteLine(value.ToString(\"F6\", System.Globalization.CultureInfo.InvariantCulture));" },
+        { title: "Fast output", code: "var sb = new System.Text.StringBuilder();\nsb.Append(x).Append('\\n');\nConsole.Write(sb);", note: "Collect big output and write it once." },
+      ] },
+      { title: "Numbers and strings", entries: [
+        { title: "Numbers", code: "long total = 1000000000L * 1000000000L;\nint.MaxValue; long.MaxValue;\nMath.Max(a, b); Math.Min(a, b); Math.Abs(x);\nMath.Sqrt(x); Math.Pow(a, b); Math.Floor(x); Math.Ceiling(x);" },
+        { title: "Strings", code: "s.Length; s[i]; s.Substring(start, length);\ns.Split(' '); s.Trim(); s.IndexOf(\"x\"); s.Contains(\"x\");\ns.ToUpper(); s.ToLower(); s == t;\nchar[] c = s.ToCharArray(); new string(c);", note: "Strings can't change, so adding to one in a loop is slow. Use StringBuilder." },
+        { title: "Convert", code: "int.Parse(s); long.Parse(s); n.ToString();\nint digit = c - '0';\nchar.IsDigit(c); char.IsLetter(c);" },
+      ] },
+      { title: "Arrays and lists", entries: [
+        { title: "Create", code: "int[] a = new int[n];\nint[,] grid = new int[n, m];\ngrid[0, 1] = 5;\nvar list = new List<int>();" },
+        { title: "Use", code: "list.Add(x); list[i]; list.Count;\nlist.RemoveAt(list.Count - 1);\nlist.Contains(x); list.Sum(); list.Max(); list.Min();\nforeach (var x in list) { }" },
+        { title: "Sort and search", code: "Array.Sort(a); Array.Reverse(a);\nlist.Sort();\nlist.Sort((x, y) => y.CompareTo(x));   // descending\nArray.BinarySearch(a, x);              // negative if missing\nlist.BinarySearch(x);" },
+      ] },
+      { title: "Collections", entries: [
+        { title: "Dictionary", code: "var m = new Dictionary<string, int>();\nm[k] = 1; m.ContainsKey(k); m.Remove(k);\nint v;\nif (m.TryGetValue(k, out v)) { }\nforeach (var e in m) { var key = e.Key; var value = e.Value; }", note: "m[k] throws an error for a missing key. SortedDictionary keeps keys sorted." },
+        { title: "Set", code: "var s = new HashSet<int>();\ns.Add(x); s.Contains(x); s.Remove(x);\nvar t = new SortedSet<int>();\nt.Min; t.Max;" },
+        { title: "Queue and stack", code: "var q = new Queue<int>();\nq.Enqueue(x); q.Dequeue(); q.Peek(); q.Count;\nvar st = new Stack<int>();\nst.Push(x); st.Pop(); st.Peek();", note: "Mono has no PriorityQueue. A SortedSet of (value, id) pairs works like a heap." },
+      ] },
+    ],
+  },
+  ruby: {
+    name: "Ruby",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Read", code: "n = gets.to_i\na, b = gets.split.map(&:to_i)\nvalues = gets.split.map(&:to_i)\ndata = STDIN.read.split.map(&:to_i)" },
+        { title: "Print", code: "puts x\nputs values.join(\" \")\nprintf(\"%.6f\\n\", value)\nputs format(\"%.6f\", value)", note: "Join big output into one string: many puts calls are slow." },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "Math", code: "a / b          # rounds down for integers\na % b; a ** b; a.pow(b, m)\na.abs; [a, b].max; [a, b].min\na.gcd(b); Math.sqrt(x); Integer.sqrt(n)\nx.floor; x.ceil; x.round(6)", note: "Integers never overflow, but very big ones are slow." },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "s.length; s[i]; s[a, count]; s.reverse\ns.split; s.strip; s.chomp; s.sub(\"a\", \"b\"); s.gsub(\"a\", \"b\")\ns.include?(\"x\"); s.index(\"x\"); s.upcase; s.downcase\ns.chars; s << \"more\"", note: "index returns nil when nothing is found." },
+        { title: "Convert", code: "s.to_i; s.to_f; n.to_s\nc.ord; 97.chr\narr.join(\" \")" },
+      ] },
+      { title: "Arrays", entries: [
+        { title: "Create", code: "a = Array.new(n, 0)\ngrid = Array.new(n) { Array.new(m, 0) }", note: "Don't write Array.new(n, []): every slot would be the same array." },
+        { title: "Use", code: "a.push(x); a << x; a.pop; a.shift; a.unshift(x)\na.size; a.first; a.last; a[-1]; a[i, count]\na.sum; a.max; a.min; a.include?(x); a.uniq; a.reverse\na.map { |x| x * 2 }; a.select { |x| x > 0 }" },
+        { title: "Sort and search", code: "a.sort; a.sort!\na.sort_by { |x| [x[1], -x[0]] }\na.sort { |x, y| y <=> x }\na.bsearch { |x| x >= target }   # on a sorted array" },
+        { title: "Loops", code: "n.times { |i| }\n(0...n).each { |i| }\n(n - 1).downto(0) { |i| }\na.each_with_index { |x, i| }" },
+      ] },
+      { title: "Hash and Set", entries: [
+        { title: "Hash", code: "h = Hash.new(0)\nh[k] += 1\nh.key?(k); h.delete(k); h.keys; h.values; h.size\nh.each { |k, v| }" },
+        { title: "Set", code: "require \"set\"\ns = Set.new\ns.add(x); s.include?(x); s.delete(x)", note: "Ruby has no built-in heap. For a queue, keep an index instead of calling shift on very long arrays if it gets slow." },
+      ] },
+    ],
+  },
+  php: {
+    name: "PHP",
+    sections: [
+      { title: "Input and output", entries: [
+        { title: "Read", code: "$n = (int) trim(fgets(STDIN));\n$values = array_map('intval', explode(' ', trim(fgets(STDIN))));\nfscanf(STDIN, \"%d %d\", $a, $b);\n$data = preg_split('/\\s+/', trim(stream_get_contents(STDIN)));" },
+        { title: "Print", code: "echo $x, \"\\n\";\necho implode(' ', $values), \"\\n\";\nprintf(\"%.6f\\n\", $value);", note: "Remember the opening <?php at the top of the file." },
+      ] },
+      { title: "Numbers", entries: [
+        { title: "Math", code: "intdiv($a, $b);    // integer division\n$a % $b; $a ** $b;\nabs($x); max($a, $b); min($a, $b); max($values);\nsqrt($x); floor($x); ceil($x); round($x, 6);\nPHP_INT_MAX;", note: "/ can return a decimal. An integer that overflows silently becomes a float." },
+      ] },
+      { title: "Strings", entries: [
+        { title: "Basics", code: "strlen($s); $s[$i]; substr($s, $start, $length);\nexplode(' ', $s); implode(' ', $parts); trim($s);\nstrpos($s, 'x'); str_replace('a', 'b', $s);\nstrtoupper($s); strtolower($s); strrev($s); str_repeat('a', 3);\nstr_split($s);", note: "strpos returns false when missing and 0 at the start, so compare with === false." },
+        { title: "Convert", code: "(int) $s; (float) $s; (string) $n; intval($s);\nord($c); chr(97);\nctype_digit($s); ctype_alpha($s);" },
+      ] },
+      { title: "Arrays", entries: [
+        { title: "Create", code: "$a = array_fill(0, $n, 0);\n$grid = array_fill(0, $n, array_fill(0, $m, 0));\n$list = [];" },
+        { title: "Use", code: "$a[] = $x; array_pop($a); array_shift($a); array_unshift($a, $x);\ncount($a); array_sum($a); in_array($x, $a); array_reverse($a);\narray_slice($a, $i, $length); array_unique($a);\narray_map(fn($x) => $x * 2, $a);\nforeach ($a as $i => $x) { }", note: "array_shift and in_array are slow on long arrays." },
+        { title: "Sort", code: "sort($a); rsort($a);\nusort($a, fn($x, $y) => $x[0] <=> $y[0]);\nasort($m); ksort($m);    // keep keys" },
+        { title: "As a map or set", code: "$m = [];\n$m[$k] = ($m[$k] ?? 0) + 1;\nisset($m[$k]); unset($m[$k]);\nforeach ($m as $k => $v) { }", note: "isset on keys is much faster than in_array." },
+      ] },
+      { title: "Queue and heap", entries: [
+        { title: "Built-in structures", code: "$q = new SplQueue();\n$q->enqueue($x); $q->dequeue(); $q->isEmpty();\n$h = new SplMinHeap();    // or SplMaxHeap\n$h->insert($x); $h->extract(); $h->top();" },
+      ] },
+    ],
+  },
 };
 
 /** Which sheet opens first for a judge language. */
-export const SHEET_OF: Record<string, string> = { CPP: "cpp", CPP20: "cpp", C: "cpp", JAVA: "java", KOTLIN: "java", PYTHON: "python", PYPY: "python" };
+export const SHEET_OF: Record<string, string> = {
+  CPP: "cpp", CPP20: "cpp", C: "c", JAVA: "java", PYTHON: "python", PYPY: "python", JAVASCRIPT: "javascript",
+  GO: "go", RUST: "rust", KOTLIN: "kotlin", CSHARP: "csharp", RUBY: "ruby", PHP: "php",
+};
