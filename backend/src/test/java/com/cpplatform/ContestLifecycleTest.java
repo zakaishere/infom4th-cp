@@ -148,7 +148,20 @@ class ContestLifecycleTest {
         var latency=analytics.latency(1);
         assertTrue(((List<?>)latency.get("byKind")).stream().anyMatch(k->"Contest".equals(((Map<?,?>)k).get("kind"))));
         assertTrue(((List<?>)latency.get("lanes")).stream().anyMatch(l->"official".equals(((Map<?,?>)l).get("lane")) && ((Map<?,?>)l).get("avg_judge_ms")!=null));
+        var contestKind=((List<?>)latency.get("byKind")).stream().map(k->(Map<?,?>)k).filter(k->"Contest".equals(k.get("kind"))).findFirst().orElseThrow();
+        assertEquals(1,((Number)contestKind.get("avg_attempts")).intValue());
+        assertEquals(0,((Number)contestKind.get("retried")).intValue());
+        // Both lanes are always listed, even one with no online worker.
+        assertEquals(2,((List<?>)latency.get("lanes")).size());
+        // Other tests in this class share the database, so only the shape is asserted here.
+        assertNotNull(latency.get("failures"));
+        assertNotNull(latency.get("failureCodes"));
+        assertTrue(((Number)((Map<?,?>)latency.get("failures")).get("total")).longValue()>=0);
+        assertTrue(row.containsKey("last_error_code"));
         assertEquals(200,http("GET","/api/admin/analytics/latency",owner.token,null).statusCode());
+        assertEquals(200,http("GET","/api/admin/analytics/api?minutes=10",owner.token,null).statusCode());
+        var health=(Map<?,?>)analytics.overview().get("health");
+        assertNotNull(health);assertTrue(List.of("ok","warn","bad").contains(health.get("level")));
         assertEquals(403,http("GET","/api/admin/analytics/submissions",entrant.token,null).statusCode());
         assertEquals(403,http("GET","/api/admin/analytics/latency",entrant.token,null).statusCode());
     }

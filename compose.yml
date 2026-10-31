@@ -44,8 +44,11 @@ services:
     ports:
       - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      # Queue depth and unacked messages, so a stalled worker is visible instead of silent.
+      - "127.0.0.1:${RABBITMQ_PROMETHEUS_PORT:-15692}:15692"
     volumes:
       - cp_rabbitmq:/var/lib/rabbitmq
+      - ./deploy/rabbitmq-enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     networks: [judging]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
