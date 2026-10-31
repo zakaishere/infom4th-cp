@@ -5,7 +5,8 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting,
   StreamLanguage, type LanguageSupport } from "@codemirror/language";
-import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, closeCompletion, moveCompletionSelection, startCompletion } from "@codemirror/autocomplete";
+import { completionsFor } from "../lib/completions";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { cpp } from "@codemirror/lang-cpp";
@@ -44,7 +45,10 @@ const theme = EditorView.theme({
   ".cm-selectionMatch": { backgroundColor: "rgba(53, 199, 232, 0.14)" },
   ".cm-foldGutter span": { color: "#4f7f8f" },
   ".cm-tooltip": { backgroundColor: "#0c3547", border: "1px solid #1d6f86", color: "#d9eef3" },
-  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "#1d6f86" },
+  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "#1d6f86", color: "#ffffff" },
+  ".cm-tooltip-autocomplete ul": { fontFamily: "var(--font-mono)" },
+  ".cm-completionDetail": { color: "#9fc6d1", fontStyle: "normal", marginLeft: "0.75em" },
+  ".cm-completionMatchedText": { color: "#35c7e8", textDecoration: "none", fontWeight: "700" },
   ".cm-panels": { backgroundColor: "#071d27", color: "#d9eef3" },
   ".cm-panels input, .cm-panels button": { width: "auto", padding: "2px 6px" },
 }, { dark: true });
@@ -59,6 +63,8 @@ export function CodeEditor({ value, onChange, onSubmit, onRun, readOnly, languag
   // Latest callbacks without recreating the editor.
   const callbacks = useRef({ onChange, onSubmit, onRun });
   callbacks.current = { onChange, onSubmit, onRun };
+  const suggestions = useRef(completionsFor(language));
+  useEffect(() => { suggestions.current = completionsFor(language); }, [language]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -70,13 +76,22 @@ export function CodeEditor({ value, onChange, onSubmit, onRun, readOnly, languag
           lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(),
           drawSelection(), dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(),
           syntaxHighlighting(oneDarkHighlightStyle, { fallback: true }), bracketMatching(), closeBrackets(),
-          autocompletion({ activateOnTyping: false }), rectangularSelection(), crosshairCursor(), highlightActiveLine(),
+          autocompletion({ activateOnTyping: true, defaultKeymap: false, interactionDelay: 0, override: [(context) => suggestions.current(context)] }),
+          rectangularSelection(), crosshairCursor(), highlightActiveLine(),
           highlightSelectionMatches(), indentUnit.of("    "), EditorState.tabSize.of(4), theme,
           Prec.highest(keymap.of([
             { key: "Mod-Enter", run: () => { callbacks.current.onSubmit?.(); return true; } },
             { key: "Mod-'", run: () => { callbacks.current.onRun?.(); return true; } },
           ])),
-          keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab]),
+          // Tab takes a suggestion; Enter always starts a new line, so typing fast never inserts one by accident.
+          Prec.high(keymap.of([
+            { key: "Tab", run: acceptCompletion },
+            { key: "ArrowDown", run: moveCompletionSelection(true) },
+            { key: "ArrowUp", run: moveCompletionSelection(false) },
+            { key: "Escape", run: closeCompletion },
+            { key: "Ctrl-Space", run: startCompletion },
+          ])),
+          keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
           languageSlot.current.of(languageSupport(language)),
           readOnlySlot.current.of(EditorState.readOnly.of(Boolean(readOnly))),
           EditorView.updateListener.of((u) => { if (u.docChanged) callbacks.current.onChange?.(u.state.doc.toString()); }),

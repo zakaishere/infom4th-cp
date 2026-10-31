@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { post } from "../api";
 import { useData, useToast } from "../app";
 import { submissionAccepted } from "../lib/latency";
+import { DocsPanel } from "./DocsPanel";
 import { CodeEditor, ErrorBox, LANGUAGE_NAMES, Loading, Markdown, Modal, TEMPLATES, VERDICTS, Verdict, timeOf, when } from "../ui";
 
 export type ProblemDetail = {
@@ -73,6 +74,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
   });
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
+  const [docs, setDocs] = useState(false);
   // One key per attempt; it is reused if the network fails so the server never duplicates a submission.
   const [attemptKey, setAttemptKey] = useState(uuid);
   useEffect(() => {
@@ -108,6 +110,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
             {languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l] ?? l}</option>)}
           </select>
           <button className="ghost small" onClick={() => { if (confirm("Replace your code with the template?")) setSource(TEMPLATES[language] ?? ""); }}>Reset</button>
+          <button className="small" onClick={() => setDocs((open) => !open)} aria-expanded={docs}>Reference</button>
         </div>
         <button className="primary" disabled={disabled || busy || !source.trim() || languages.length === 0} onClick={submit} title="Ctrl+Enter">
           {busy ? "Submitting…" : "Submit ▸"}
@@ -116,7 +119,8 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
       {disabled && disabledReason && <div className="notice warn small">{disabledReason}</div>}
       {languages.length === 0 && <div className="notice warn small">No language is currently enabled for this problem.</div>}
       <CodeEditor value={source} onChange={setSource} onSubmit={submit} language={language} />
-      <div className="small muted">Read from standard input, write to standard output. Java classes must be named Main. Drafts are saved in this browser.</div>
+      <div className="small muted">Read from standard input, write to standard output. Java classes must be named Main. Drafts are saved in this browser. Press Tab to accept a suggestion.</div>
+      {docs && <DocsPanel language={language} onClose={() => setDocs(false)} />}
     </div>
   );
 }
