@@ -34,7 +34,8 @@ first start builds the language images (15–30 min); see [docs/DEPLOY_VPS.md](d
   infrastructure retries, delayed redispatch, abandoned-job recovery and rejudging.
 - Separate official/internal worker capacity. Contestant execution never occurs
   inside the backend process, and the backend never receives a Docker socket.
-- Bounded output, per-test containers, compile once, UID 10001 contestant processes,
+- Bounded output, compile once, one reused sandbox per submission (cleaned between tests,
+  replaced if a test is killed), UID 10001 contestant processes,
   CPU/memory/PID/file limits, network denial, read-only root, cgroup-v2 accounting,
   deadline termination and container cleanup.
 - Live judging capacity: SUPER_ADMIN global official/internal concurrency limits,

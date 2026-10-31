@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from runner import DockerRunner, Execution, InfrastructureError, effective_limit_ms, matches, verdict
+from runner import DockerRunner, Execution, InfrastructureError, LANGUAGES, effective_limit_ms, matches, verdict
 
 class ComparisonTests(unittest.TestCase):
     def test_exact_comparison_preserves_whitespace(self):
@@ -71,11 +71,29 @@ class PipelineTests(unittest.TestCase):
         result=self.runner.judge(self.job())
         self.assertEqual(result["verdict"],"ACCEPTED")
         self.assertEqual([call[1] for call in self.calls],[b"",b"2 3",b"3 4"])
-        # Compile sandbox, then one run sandbox reused (and reset) for both tests.
+        # Compile sandbox, then one run sandbox reused for both tests and reset between them only.
         self.assertEqual(len(self.removed),2)
-        self.assertEqual(len(self.resets),2)
+        self.assertEqual(len(self.resets),1)
         self.assertEqual(list(self.runner.root.iterdir()),[])
         self.assertNotIn("expected_output",str(result))
+
+    def test_no_reset_when_the_sandbox_is_about_to_be_deleted(self):
+        self.results=[Execution(0,b"",b""),Execution(0,b"wrong",b"",3,100)]
+        self.assertEqual(self.runner.judge(self.job())["verdict"],"WRONG_ANSWER")
+        self.assertEqual(self.resets,[])
+
+    def test_tests_that_continue_after_a_failure_still_get_a_reset(self):
+        self.results=[Execution(0,b"",b""),Execution(0,b"wrong",b"",3,100),Execution(0,b"7",b"",4,100)]
+        job=self.job()
+        job["run_all_tests"]=True
+        self.runner.judge(job)
+        self.assertEqual(len(self.resets),1)
+
+    def test_a_failed_reset_replaces_the_sandbox(self):
+        self.runner._reset=lambda name: False
+        self.results=[Execution(0,b"",b""),Execution(0,b"5",b""),Execution(0,b"7",b"")]
+        self.assertEqual(self.runner.judge(self.job())["verdict"],"ACCEPTED")
+        self.assertEqual(len(self.removed),3)
 
     def test_python_interpreter_is_the_executed_command(self):
         self.results=[Execution(0,b"5",b""),Execution(0,b"7",b"")]
@@ -130,6 +148,58 @@ class PipelineTests(unittest.TestCase):
         lost.set()
         with self.assertRaises(InfrastructureError):
             self.runner.judge(self.job(),lost)
+
+class CounterTests(unittest.TestCase):
+    STAT="usage_usec 5000\nuser_usec 1\nsystem_usec 1\n"
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder=Path(self.temp.name)/"sandbox"
+        self.folder.mkdir()
+        (self.folder/"cpu.stat").write_text(self.STAT)
+        (self.folder/"memory.peak").write_text("2048\n")
+        (self.folder/"memory.events").write_text("low 0\noom 2\noom_kill 1\n")
+        self.runner=object.__new__(DockerRunner)
+        self.execs=[]
+        def control(args,timeout=10):
+            self.execs.append(args)
+            return self.STAT+"4096\nlow 0\noom 0\noom_kill 0\n"
+        self.runner.control=control
+
+    def test_reads_the_files_without_docker_when_the_folder_is_known(self):
+        self.runner.cgroups={"box":self.folder}
+        self.assertEqual(self.runner._metrics("box"),(5,2,1))
+        self.assertEqual(self.execs,[])
+
+    def test_falls_back_to_docker_exec_without_a_folder(self):
+        self.runner.cgroups={"box":None}
+        self.assertEqual(self.runner._metrics("box"),(5,4,0))
+        self.assertEqual(len(self.execs),1)
+
+    def test_falls_back_when_the_files_disappear(self):
+        self.runner.cgroups={"box":self.folder}
+        (self.folder/"memory.peak").unlink()
+        self.assertEqual(self.runner._metrics("box"),(5,4,0))
+        self.assertEqual(len(self.execs),1)
+
+    def test_finds_either_cgroup_layout_and_rejects_anything_else(self):
+        container="a"*64
+        for layout in (Path("system.slice")/f"docker-{container}.scope",Path("docker")/container):
+            with tempfile.TemporaryDirectory() as root, patch("runner.CGROUP_ROOT",Path(root)):
+                folder=Path(root)/layout
+                self.assertIsNone(DockerRunner._find_cgroup(container))
+                folder.mkdir(parents=True)
+                (folder/"cpu.stat").write_text(self.STAT)
+                self.assertEqual(DockerRunner._find_cgroup(container),folder)
+                self.assertIsNone(DockerRunner._find_cgroup("../"+container))
+                self.assertIsNone(DockerRunner._find_cgroup(""))
+
+class CompilerFlagTests(unittest.TestCase):
+    def test_only_the_compilers_get_the_fast_start_flag(self):
+        for language in ("JAVA","KOTLIN"):
+            _,compile_command,run_command=LANGUAGES[language]
+            self.assertIn("-J-XX:TieredStopAtLevel=1",compile_command)
+            self.assertFalse([part for part in run_command if "TieredStopAtLevel" in part])
 
 if __name__=="__main__":
     unittest.main()

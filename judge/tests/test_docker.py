@@ -1,6 +1,8 @@
 """Opt-in tests against real Linux Docker; never substitute these with fake verdicts."""
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -50,6 +52,26 @@ class DockerSandboxTests(unittest.TestCase):
         job["run_all_tests"]=True
         result=self.runner.judge(job)
         self.assertEqual([c["verdict"] for c in result["cases"]],["ACCEPTED","ACCEPTED"])
+    def test_counters_read_directly_agree_with_inside_the_sandbox(self):
+        folder=Path(tempfile.mkdtemp(prefix="job-",dir=self.runner.root))
+        name=self.runner._create(folder,self.runner.images["PYTHON"],64,False)
+        try:
+            direct=self.runner.cgroups.get(name)
+            self.assertIsNotNone(direct,"the host cgroup tree should be mounted in compose.yml")
+            result=self.runner._execute(name,["python","-c","print(sum(range(3000000)))"],b"",20,1024)
+            self.assertGreater(result.cpu_ms,0,"a real program must show CPU use")
+            self.assertGreater(result.memory_kb,0)
+            cpu,peak,oom=self.runner._metrics(name)
+            self.runner.cgroups[name]=None
+            inside_cpu,inside_peak,inside_oom=self.runner._metrics(name)
+            # The second read is a docker exec, which itself adds a little CPU and memory.
+            self.assertLessEqual(cpu,inside_cpu)
+            self.assertLess(inside_cpu-cpu,1000)
+            self.assertLessEqual(peak,inside_peak)
+            self.assertEqual(oom,inside_oom)
+        finally:
+            self.runner._remove(name)
+            shutil.rmtree(folder,ignore_errors=True)
     def test_programs_keep_the_strict_open_file_limit(self):
         source="fs=[]\ntry:\n    for i in range(200): fs.append(open('/dev/null'))\n    print('opened all')\nexcept OSError:\n    print('limited')\n"
         self.assertEqual(self.runner.judge(self.job(source,output="limited"))["verdict"],"ACCEPTED")

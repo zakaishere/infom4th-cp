@@ -140,6 +140,8 @@ services:
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - ${JUDGE_HOST_WORK_ROOT:-/var/lib/cp-judge}:/judge/work
+      # Read-only: reading a sandbox's CPU and memory counters here avoids two docker execs per test.
+      - /sys/fs/cgroup:/host/cgroup:ro
     networks: [judging]
     depends_on:
       backend:
@@ -162,6 +164,7 @@ services:
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - ${JUDGE_HOST_WORK_ROOT:-/var/lib/cp-judge}:/judge/work
+      - /sys/fs/cgroup:/host/cgroup:ro
     networks: [judging]
     depends_on:
       backend:
