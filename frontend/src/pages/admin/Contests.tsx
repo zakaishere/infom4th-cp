@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { del, patch, post, serverNow } from "../../api";
-import { navigate, useAction, useData, useServerClock, useToast } from "../../app";
+import { navigate, useAction, useData, useRoute, useServerClock, useToast } from "../../app";
+import { FullscreenPanel, type FullscreenData } from "../../components/FullscreenLog";
 import { SubmissionModal } from "../../components/Problem";
 import Standings from "../../components/Standings";
 import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, LiveDot, Loading, ReasonDialog, Verdict, clock, timeOf, when } from "../../ui";
@@ -244,7 +245,12 @@ type JurySubmission = { id: string; entry_name: string; handle: string; problem_
 type Clarification = { id: string; question: string; answer: string | null; is_public: boolean; created_at: string };
 
 function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; problems: { slot: number; label: string }[]; onChanged: () => void; holdsResults: boolean }) {
-  const [tab, setTab] = useState<"submissions" | "standings" | "clarifications" | "announce">("submissions");
+  const route = useRoute();
+  const [tab, setTab] = useState<"submissions" | "standings" | "clarifications" | "announce" | "fullscreen">(route.query.get("tab") === "fullscreen" ? "fullscreen" : "submissions");
+  useEffect(() => { if (route.query.get("tab") === "fullscreen") setTab("fullscreen"); }, [route.query.get("tab")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fullscreenLog = useData<FullscreenData>("/api/manage/runs/" + r.id + "/fullscreen", 5000);
+  const awayNow = (fullscreenLog.data?.people ?? []).filter((p) => p.away_now).length;
+  const fullscreenCount = fullscreenLog.data?.total ?? 0;
   const subs = useData<JurySubmission[]>("/api/manage/runs/" + r.id + "/submissions", 3000);
   const clar = useData<Clarification[]>("/api/runs/" + r.id + "/clarifications", 5000);
   const now = useServerClock();
@@ -291,7 +297,9 @@ function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; p
         <button className={tab === "standings" ? "active" : ""} onClick={() => setTab("standings")}>Jury standings</button>
         <button className={tab === "clarifications" ? "active" : ""} onClick={() => setTab("clarifications")}>Clarifications{open_ ? ` (${open_} open)` : ""}</button>
         <button className={tab === "announce" ? "active" : ""} onClick={() => setTab("announce")}>Announce</button>
+        <button className={(tab === "fullscreen" ? "active " : "") + (awayNow ? "fullscreen-tab-alert" : "")} onClick={() => setTab("fullscreen")}>Full screen log{fullscreenCount ? ` (${fullscreenCount})` : ""}{awayNow ? ` · ${awayNow} away` : ""}</button>
       </div>
+      {tab === "fullscreen" && <><ErrorBox error={fullscreenLog.error} /><FullscreenPanel runId={r.id} ended={phase.phase === "ended"} data={fullscreenLog.data} /></>}
       {tab === "submissions" && (
         <>
           <input placeholder="Filter by entrant, handle or problem" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 360 }} />

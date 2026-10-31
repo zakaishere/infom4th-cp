@@ -155,6 +155,18 @@ requested immutable imageId. Read image IDs from /api/admin/judge. Validation sn
 Existing contests keep those snapshots during later global runtime rollouts.
 New job claims must match the problem snapshot pin, worker lane, memory budget and available worker slots.
 
+## Full screen log
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| POST | /api/runs/{runId}/fullscreen-events | Entrant's browser: id, action (left or returned), kind, reason, agoMs for a delayed report |
+| GET | /api/manage/runs/{runId}/fullscreen | Jury: totals per person and the newest 500 events |
+| GET | /api/manage/runs/{runId}/fullscreen/report.xlsx | Jury: Excel workbook with People and Events sheets |
+| GET | /api/manage/fullscreen/alerts?after= | Warnings from running contests this person helps run |
+
+These are reported by the browser, so a determined contestant can block them: treat them
+as a reason to look closer and never as proof. Time away stops counting at the contest end.
+
 ## Benchmark (SUPER_ADMIN)
 
 | Method | Route | Behavior |

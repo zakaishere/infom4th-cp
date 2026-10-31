@@ -11,8 +11,9 @@ import { TeamDetail, Teams } from "./Teams";
 import PracticeSet from "./PracticeSet";
 import Analytics from "./Analytics";
 import Benchmark from "./Benchmark";
+import { FullscreenAlertBanner, useFullscreenAlerts } from "../../components/FullscreenLog";
 
-type Item = { key: string; label: string; icon: string; count?: number };
+type Item = { key: string; label: string; icon: string; count?: number; alert?: boolean };
 
 export default function Admin({ parts }: { parts: string[] }) {
   const { superAdmin, organizer, setter } = useAuth();
@@ -20,10 +21,12 @@ export default function Admin({ parts }: { parts: string[] }) {
   const problems = useData<{ status: string }[]>(setter ? "/api/lab/problems" : null, 30000);
   const live = (contests.data ?? []).filter((c) => c.status === "RUNNING").length;
   const review = (problems.data ?? []).filter((p) => p.status === "READY_FOR_REVIEW").length;
+  const alerts = useFullscreenAlerts(organizer);
+  const warning = (alerts.data?.count ?? 0) > 0;
   const groups: { title: string; items: (Item | false)[] }[] = [
     { title: "Run", items: [
       { key: "overview", label: "Overview", icon: "◉" },
-      organizer && { key: "contests", label: "Contests", icon: "⚑", count: live || undefined },
+      organizer && { key: "contests", label: "Contests", icon: "⚑", count: warning ? alerts.data?.count : live || undefined, alert: warning },
       organizer && { key: "analytics", label: "Analytics", icon: "▤" },
     ] },
     { title: "Build", items: [
@@ -70,7 +73,7 @@ export default function Admin({ parts }: { parts: string[] }) {
             <div key={g.title} style={{ display: "contents" }}>
               <div className="group">{g.title}</div>
               {items.map((s) => (
-                <a key={s.key} href={"#/admin/" + s.key} className={current === s.key ? "active" : ""}>
+                <a key={s.key} href={"#/admin/" + s.key} className={(current === s.key ? "active " : "") + (s.alert ? "nav-alert" : "")}>
                   <span className="ico">{s.icon}</span>{s.label}{s.count ? <span className="count">{s.count}</span> : null}
                 </a>
               ))}
@@ -84,7 +87,10 @@ export default function Admin({ parts }: { parts: string[] }) {
           {superAdmin && <button className="small" onClick={() => navigate("/admin/users/import")}>+ Import users</button>}
         </div>
       </nav>
-      <main className="admin-main">{page}</main>
+      <main className="admin-main">
+        {alerts.data && warning && <FullscreenAlertBanner alert={alerts.data} onDismiss={alerts.dismiss} />}
+        {page}
+      </main>
     </div>
   );
 }

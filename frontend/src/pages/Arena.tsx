@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, post } from "../api";
 import { navigate, useAction, useAuth, useData, useServerClock, useToast } from "../app";
 import { verdictShown } from "../lib/latency";
-import { ProblemStatement, SubmissionModal, SubmissionTable, SubmitPanel, pending, type ProblemDetail, type SubmissionRow } from "../components/Problem";
+import { markFullscreenEntered, reportFullscreen, sendFullscreenReports, wasFullscreenEntered } from "../lib/fullscreenLog";
+import { ProblemStatement, SubmissionModal, SubmissionTable, SubmitPanel, pending, uuid, type ProblemDetail, type SubmissionRow } from "../components/Problem";
 import Standings, { SCORING_INFO, firstSolves, totalOf, useBoard, type Board } from "../components/Standings";
 import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, timeOf, when } from "../ui";
 import type { RunDetail } from "./Lobby";
@@ -14,19 +15,47 @@ type MyRun = { run_id: string; entry_id: string; entry_name: string; team_id: st
 type Status = { solved: boolean; attempts: number; pending: boolean; lastVerdict: string | null };
 
 /** Fullscreen is a client-side deterrent only; it is not proctoring or anti-cheat. */
-function useFullscreen(required: boolean) {
+function useFullscreen(required: boolean, runId: string) {
   const [active, setActive] = useState(() => Boolean(document.fullscreenElement));
   const [exits, setExits] = useState(0);
   const [denied, setDenied] = useState(false);
   useEffect(() => {
+    if (!required) return;
+    void sendFullscreenReports(runId);
     const change = () => {
       const now = Boolean(document.fullscreenElement);
       setActive(now);
-      if (!now && required) setExits((n) => n + 1);
+      if (now) {
+        markFullscreenEntered(runId);
+        reportFullscreen(runId, uuid(), "returned", "LEFT_FULLSCREEN");
+      } else {
+        setExits((n) => n + 1);
+        reportFullscreen(runId, uuid(), "left", "LEFT_FULLSCREEN");
+      }
     };
+    // A reload or closed tab drops full screen without any event, so notice it on the way back in.
+    if (document.fullscreenElement) {
+      markFullscreenEntered(runId);
+      reportFullscreen(runId, uuid(), "returned", "LEFT_FULLSCREEN");
+    } else if (wasFullscreenEntered(runId)) {
+      setExits((n) => n + 1);
+      reportFullscreen(runId, uuid(), "left", "LEFT_FULLSCREEN", "PAGE_RELOAD");
+    }
+    // Clicking another window or a second monitor can leave full screen untouched.
+    const blur = () => { if (document.fullscreenElement) reportFullscreen(runId, uuid(), "left", "LOST_FOCUS", "OTHER_WINDOW"); };
+    const focus = () => reportFullscreen(runId, uuid(), "returned", "LOST_FOCUS", "OTHER_WINDOW");
     document.addEventListener("fullscreenchange", change);
-    return () => document.removeEventListener("fullscreenchange", change);
-  }, [required]);
+    window.addEventListener("blur", blur);
+    window.addEventListener("focus", focus);
+    return () => {
+      document.removeEventListener("fullscreenchange", change);
+      window.removeEventListener("blur", blur);
+      window.removeEventListener("focus", focus);
+    };
+  }, [required, runId]);
+  useEffect(() => {
+    if (required && denied) reportFullscreen(runId, uuid(), "left", "FULLSCREEN_REFUSED", "BROWSER_REFUSED");
+  }, [required, denied, runId]);
   // If the browser refuses full screen (embedded frame, policy), never lock a contestant out.
   const enter = useCallback(() => {
     const request = document.documentElement.requestFullscreen?.();
@@ -54,7 +83,8 @@ export default function Arena({ runId }: { runId: string }) {
   const entry = mine.data?.find((m) => m.run_id === runId);
   const isTeam = detail.data?.configuration.mode === "TEAM";
   const scoring = (detail.data?.configuration.scoring_system ?? "ICPC") as keyof typeof SCORING_INFO;
-  const fullscreen = useFullscreen(phase === "live" && Boolean(entry));
+  const mustStayFullscreen = phase === "live" && Boolean(entry);
+  const fullscreen = useFullscreen(mustStayFullscreen, runId);
 
   // Problems are withheld until the start; refetch the run as soon as the clock passes it.
   const reloadRun = detail.reload;
@@ -139,7 +169,12 @@ export default function Arena({ runId }: { runId: string }) {
   const remaining = end - now;
   const problemList = detail.data.problems ?? [];
   const solvedCount = Object.values(status).filter((s) => s.solved).length;
-  const exit = () => { fullscreen.leave(); navigate(organizer && !entry ? "/admin" : "/run/" + runId); };
+  const exit = () => {
+    // Reported first: leaving the arena takes the full screen listener away with it.
+    if (mustStayFullscreen && fullscreen.active) reportFullscreen(runId, uuid(), "left", "LEFT_FULLSCREEN", "EXIT_BUTTON");
+    fullscreen.leave();
+    navigate(organizer && !entry ? "/admin" : "/run/" + runId);
+  };
 
   return (
     <div className="arena">
@@ -266,6 +301,7 @@ export default function Arena({ runId }: { runId: string }) {
           <div className="card stack" style={{ alignItems: "center" }}>
             <h2>Full screen required</h2>
             <p>The arena runs in full screen during the contest.{fullscreen.exits > 0 && <> You left full screen <strong>{fullscreen.exits}</strong> time{fullscreen.exits > 1 ? "s" : ""}.</>} Your code and drafts are safe.</p>
+            <p className="small" style={{ color: "#a9c4cc", margin: 0 }}>Organizers can see when you leave this screen and for how long. Something like a misclick is fine: just come straight back.</p>
             <button className="primary" onClick={fullscreen.enter}>Return to full screen</button>
             <span className="small" style={{ color: "#a9c4cc" }}>Time remaining {clock(remaining)}</span>
           </div>
