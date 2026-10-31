@@ -197,20 +197,29 @@ function Live() {
   );
 }
 
+const HISTORY_RANGES: [number, string][] = [[10, "10 min"], [60, "1 hour"], [360, "6 hours"], [1440, "24 hours"], [10080, "7 days"], [20160, "14 days"]];
+
 function History() {
-  const [hours, setHours] = useState(24);
-  const t = useData<any>("/api/admin/analytics/timeseries?hours=" + hours, 60000);
+  const [minutes, setMinutes] = useState(1440);
+  // Short contest windows need fresh points; long history does not.
+  const t = useData<any>("/api/admin/analytics/timeseries?minutes=" + minutes, minutes <= 60 ? 10000 : 60000);
+  const bucket = t.data ? (t.data.bucketSeconds < 60 ? t.data.bucketSeconds + " s" : Math.round(t.data.bucketSeconds / 60) + " min") : "";
+  const rate = (v: Num) => Number(v).toFixed(2);
   return (
     <div className="stack" style={{ gap: "1.25rem" }}>
       <div className="row">
-        {[[1, "1 hour"], [6, "6 hours"], [24, "24 hours"], [72, "3 days"], [168, "7 days"], [336, "14 days"]].map(([h, l]) =>
-          <button key={h} className={"small" + (hours === h ? " primary" : "")} onClick={() => setHours(h as number)}>{l}</button>)}
+        {HISTORY_RANGES.map(([m, l]) =>
+          <button key={m} className={"small" + (minutes === m ? " primary" : "")} onClick={() => setMinutes(m)}>{l}</button>)}
       </div>
       {t.error && <ErrorBox error={t.error} />}
       {!t.data ? <Loading /> : (
         <>
-          <span className="small muted">Server load is sampled every minute and kept 14 days; each point is {t.data.bucketMinutes} min.</span>
-          <TimeChart title="Submissions" rows={t.data.activity} value="submissions" area="accepted" names={["Submitted", "Accepted"]} />
+          <span className="small muted">Pipeline numbers are counted per bucket, {bucket} each. Host metrics are sampled every minute, so short ranges show one point per sample.</span>
+          <TimeChart title="Arrivals vs claims per minute" rows={t.data.activity} value="arrivals_per_min" area="claims_per_min" names={["Arrived", "Claimed"]} format={rate} />
+          <div className="grid grid-2">
+            <TimeChart title="Judge queue backlog" rows={t.data.activity} value="backlog" />
+            <TimeChart title="Retries vs dropped jobs per minute" rows={t.data.activity} value="retries_per_min" area="dropped_per_min" names={["Retried", "Dropped"]} format={rate} />
+          </div>
           <div className="grid grid-2">
             <TimeChart title="Server CPU" rows={t.data.server} value="system_cpu" format={pct} max={1} />
             <TimeChart title="Memory used" rows={t.data.server} value="memory_used_mb" format={mb} max={Math.max(1, ...t.data.server.map((r: any) => Number(r.memory_total_mb ?? 0)))} />

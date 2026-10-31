@@ -280,7 +280,7 @@ class BackendWorkflowTest {
         analytics.closeDays();analytics.closeDays();
         assertEquals(db.jdbc.queryForObject("SELECT count(DISTINCT day) FROM daily_reports",Integer.class),db.jdbc.queryForObject("SELECT count(*) FROM daily_reports",Integer.class));
         assertTrue(((Number)analytics.day(java.time.LocalDate.now(java.time.ZoneOffset.UTC)).get("submissions")).longValue()>=1);
-        assertTrue(((List<?>)analytics.timeseries(24).get("activity")).size()>=240);
+        assertTrue(((List<?>)analytics.timeseries(24*60).get("activity")).size()>=240);
         var stats=analytics.run(p.owner.actor,run);
         assertEquals(1L,((Map<?,?>)stats.get("totals")).get("accepted"));
         assertEquals(1L,((Map<?,?>)((List<?>)stats.get("problems")).get(0)).get("solved"));

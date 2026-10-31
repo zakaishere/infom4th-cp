@@ -119,21 +119,51 @@ public class AnalyticsService {
         return result;
     }
 
-    /** Server samples and submission activity in about 240 buckets covering the last {@code hours}. */
-    public Map<String,Object> timeseries(int hours) {
-        int bucket=Math.max(1,hours*60/240);
-        var serverRows=db.jdbc.queryForList("SELECT date_bin(make_interval(mins=>?),sampled_at,timestamptz '2000-01-01') AS at,"+
+    /** Bucket size in seconds: about 240 points, never finer than 5 seconds, so short contest windows stay readable. */
+    private static int bucketSeconds(int minutes) {
+        int ideal = Math.max(1, minutes * 60 / 240);
+        int chosen = 5;
+        for (int step : new int[]{5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200}) {
+            if (step > ideal) break;
+            chosen = step;
+        }
+        return chosen;
+    }
+
+    /** Server samples and pipeline activity in about 240 buckets covering the last {@code minutes}. */
+    public Map<String,Object> timeseries(int minutes) {
+        int bucket=bucketSeconds(minutes);
+        var serverRows=db.jdbc.queryForList("SELECT date_bin(make_interval(secs=>?),sampled_at,timestamptz '2000-01-01') AS at,"+
                 "round(avg(system_cpu)::numeric,3) AS system_cpu,round(max(system_cpu)::numeric,3) AS peak_cpu,round(avg(process_cpu)::numeric,3) AS process_cpu,"+
                 "round(avg(memory_used_mb)) AS memory_used_mb,max(memory_total_mb) AS memory_total_mb,round(avg(heap_used_mb)) AS heap_used_mb,max(heap_max_mb) AS heap_max_mb,"+
                 "round(avg(load_average)::numeric,2) AS load_average,max(db_connections) AS db_connections,max(threads) AS threads,"+
                 "max(queued_jobs) AS queued_jobs,max(running_jobs) AS running_jobs,min(workers_online) AS workers_online,max(judge_slots) AS judge_slots "+
-                "FROM metric_samples WHERE sampled_at>now()-make_interval(hours=>?) GROUP BY 1 ORDER BY 1",bucket,hours);
-        var activity=db.jdbc.queryForList("WITH b AS (SELECT generate_series(date_bin(make_interval(mins=>?),now()-make_interval(hours=>?),timestamptz '2000-01-01'),now(),make_interval(mins=>?)) AS at) "+
-                "SELECT b.at,(SELECT count(*) FROM submissions s WHERE s.submitted_at>=b.at AND s.submitted_at<b.at+make_interval(mins=>?)) AS submissions,"+
-                "(SELECT count(*) FROM judging_results r WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(mins=>?) AND r.verdict='ACCEPTED') AS accepted,"+
-                "(SELECT count(*) FROM judging_results r WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(mins=>?)) AS judged "+
-                "FROM b ORDER BY b.at",bucket,hours,bucket,bucket,bucket,bucket);
-        return Map.of("bucketMinutes",bucket,"hours",hours,"server",serverRows,"activity",activity);
+                "FROM metric_samples WHERE sampled_at>now()-make_interval(mins=>?) GROUP BY 1 ORDER BY 1",bucket,minutes);
+        // Counts per bucket. Rates are derived below so a 10 s bucket and a 42 min bucket are comparable.
+        var activity=db.jdbc.queryForList("WITH b AS (SELECT generate_series(date_bin(make_interval(secs=>?),now()-make_interval(mins=>?),timestamptz '2000-01-01'),now(),make_interval(secs=>?)) AS at) "+
+                "SELECT b.at,"+
+                "(SELECT count(*) FROM submissions s WHERE s.submitted_at>=b.at AND s.submitted_at<b.at+make_interval(secs=>?) AND s.context<>'BENCHMARK') AS arrivals,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.first_started_at>=b.at AND j.first_started_at<b.at+make_interval(secs=>?) AND s.context<>'BENCHMARK') AS claims,"+
+                "(SELECT count(*) FROM judging_results r JOIN judging_jobs j ON j.id=r.job_id JOIN submissions s ON s.id=j.submission_id WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(secs=>?) AND s.context<>'BENCHMARK') AS verdicts,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.first_started_at>=b.at AND j.first_started_at<b.at+make_interval(secs=>?) AND j.attempt_count>1 AND s.context<>'BENCHMARK') AS retries,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.completed_at>=b.at AND j.completed_at<b.at+make_interval(secs=>?) AND j.status='FAILED' AND s.context<>'BENCHMARK') AS dropped,"+
+                "(SELECT max(queued_jobs) FROM metric_samples m WHERE m.sampled_at>=b.at AND m.sampled_at<b.at+make_interval(secs=>?)) AS backlog "+
+                "FROM b ORDER BY b.at",bucket,minutes,bucket,bucket,bucket,bucket,bucket,bucket,bucket);
+        // The server sample is one point per minute, so finer buckets are empty. Carry the last backlog forward.
+        Integer lastBacklog=null;
+        for(var row:activity) {
+            Object backlog=row.get("backlog");
+            if(backlog==null) { if(lastBacklog!=null) row.put("backlog",lastBacklog); }
+            else lastBacklog=((Number)backlog).intValue();
+            for(String count:List.of("arrivals","claims","verdicts","retries","dropped"))
+                row.put(count+"_per_min",rate(row.get(count),bucket));
+        }
+        return Map.of("bucketSeconds",bucket,"minutes",minutes,"server",serverRows,"activity",activity);
+    }
+
+    private static double rate(Object count,int bucketSeconds) {
+        if(count==null) return 0;
+        return Math.round(((Number)count).doubleValue()*6000.0/bucketSeconds)/100.0;
     }
 
     // One row per submission with its latest judging. Times are milliseconds; a rejudge is timed from when it was requested.

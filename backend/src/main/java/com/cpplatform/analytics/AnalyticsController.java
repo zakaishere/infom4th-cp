@@ -19,8 +19,11 @@ public class AnalyticsController {
     @GetMapping("/api/admin/analytics/overview")
     Object overview(Authentication auth){admin(auth);return analytics.overview();}
     @GetMapping("/api/admin/analytics/timeseries")
-    Object timeseries(Authentication auth,@RequestParam(defaultValue="24") int hours) {
-        admin(auth);Api.require(hours>=1 && hours<=336,HttpStatus.BAD_REQUEST,"hours must be 1-336");return analytics.timeseries(hours);
+    Object timeseries(Authentication auth,@RequestParam(required=false) Integer hours,@RequestParam(required=false) Integer minutes) {
+        admin(auth);
+        int span=minutes!=null?minutes:hours!=null?hours*60:1440;
+        Api.require(span>=5 && span<=20160,HttpStatus.BAD_REQUEST,"minutes must be 5-20160");
+        return analytics.timeseries(span);
     }
     @GetMapping("/api/admin/analytics/daily")
     Object daily(Authentication auth,@RequestParam(defaultValue="30") int days) {
