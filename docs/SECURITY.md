@@ -20,8 +20,11 @@ Docker seccomp/AppArmor policies must remain enabled. The worker enforces wall
 deadlines and output limits externally and kills/removes the complete container.
 Output is never interpreted as status, exit or resource-control markers.
 
-Resource reporting reads cgroup-v2 cpu.stat, memory.peak and memory.events via a
-trusted Docker control channel. The host kernel must expose memory.peak; workers
+Resource reporting reads cgroup-v2 cpu.stat, memory.peak and memory.events through a
+read-only mount of the host's cgroup tree in the trusted worker, or through a trusted
+Docker control channel when that is unavailable. Contestant containers never get this
+mount. It shows the worker every container's resource counters on that host, which adds
+little to the Docker socket it already holds. The host kernel must expose memory.peak; workers
 fail verification if these accounting interfaces are unavailable. Peak memory is the whole case-container peak,
 not a fabricated copy of its configured limit. If the kernel kills the container
 before accounting can be read, the trusted Docker OOM flag determines MLE and

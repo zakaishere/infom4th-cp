@@ -1,8 +1,10 @@
 """Linux-only Docker sandbox. Contestant output is data, never a control protocol."""
 from __future__ import annotations
 import json
+import logging
 import math
 import os
+import re
 import selectors
 import shutil
 import subprocess
@@ -17,7 +19,8 @@ LANGUAGES = {
     "CPP": ("main.cpp", ["g++", "-O2", "-std=c++17", "/work/main.cpp", "-o", "/work/program"], ["/work/program"]),
     "CPP20": ("main.cpp", ["g++", "-O2", "-std=c++20", "/work/main.cpp", "-o", "/work/program"], ["/work/program"]),
     "C": ("main.c", ["gcc", "-O2", "-std=c17", "/work/main.c", "-o", "/work/program"], ["/work/program"]),
-    "JAVA": ("Main.java", ["javac", "-J-Xmx512m", "/work/Main.java"],
+    # TieredStopAtLevel=1 makes a compiler that only lives for seconds start faster. Programs keep the full JIT.
+    "JAVA": ("Main.java", ["javac", "-J-Xmx512m", "-J-XX:TieredStopAtLevel=1", "/work/Main.java"],
              ["java", "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1", "-XX:MaxRAMPercentage=60", "-XX:ReservedCodeCacheSize=32m", "-Xss512k", "-cp", "/work", "Main"]),
     "PYTHON": ("main.py", None, ["python", "-I", "-B", "/work/main.py"]),
     "PYPY": ("main.py", None, ["pypy3", "-I", "-B", "/work/main.py"]),
@@ -25,7 +28,7 @@ LANGUAGES = {
     # The image pre-builds the standard library cache; each compile copies it into the job folder.
     "GO": ("main.go", ["sh", "-c", "cp -r /opt/gocache /work/.gocache && GOCACHE=/work/.gocache GOPATH=/tmp/go go build -p 1 -o /work/program /work/main.go"], ["/work/program"]),
     "RUST": ("main.rs", ["rustc", "-O", "--edition", "2021", "-o", "/work/program", "/work/main.rs"], ["/work/program"]),
-    "KOTLIN": ("Main.kt", ["kotlinc", "/work/Main.kt", "-include-runtime", "-d", "/work/main.jar"],
+    "KOTLIN": ("Main.kt", ["kotlinc", "-J-XX:TieredStopAtLevel=1", "/work/Main.kt", "-include-runtime", "-d", "/work/main.jar"],
                ["java", "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1", "-XX:MaxRAMPercentage=60", "-Xss64m", "-jar", "/work/main.jar"]),
     "CSHARP": ("Main.cs", ["mcs", "-optimize+", "-out:/work/main.exe", "/work/Main.cs"], ["mono", "/work/main.exe"]),
     "RUBY": ("main.rb", None, ["ruby", "/work/main.rb"]),
@@ -43,7 +46,11 @@ def effective_limit_ms(language: str, limit_ms: int) -> int:
 
 # Wall-clock compile budget; Kotlin and Go need ~20 s on a small, busy VPS.
 COMPILE_SECONDS = int(os.getenv("JUDGE_COMPILE_SECONDS", "60"))
-VERDICTS = {"ACCEPTED", "WRONG_ANSWER", "TIME_LIMIT_EXCEEDED", "MEMORY_LIMIT_EXCEEDED",
+# The host's cgroup tree, mounted read-only (see compose.yml). Reading a sandbox's counters here
+# costs nothing; without it they are read through docker exec, which costs ~0.1 s each time.
+CGROUP_ROOT = Path(os.getenv("JUDGE_CGROUP_ROOT", "/host/cgroup"))
+LOG = logging.getLogger("cp.judge")
+VERDICTS ={"ACCEPTED", "WRONG_ANSWER", "TIME_LIMIT_EXCEEDED", "MEMORY_LIMIT_EXCEEDED",
             "RUNTIME_ERROR", "COMPILATION_ERROR", "OUTPUT_LIMIT_EXCEEDED", "JUDGE_ERROR"}
 
 class InfrastructureError(RuntimeError):
@@ -95,6 +102,8 @@ class DockerRunner:
         self.max_memory_mb = max_memory_mb
         self.max_job_seconds = max_job_seconds
         self.active: set[str] = set()
+        self.cgroups: dict[str, Path | None] = {}
+        self.direct_reads: bool | None = None
         self.lock = threading.Lock()
         # Identifies this installation's worker on a shared Docker host. Leftover cleanup only
         # ever touches sandboxes carrying exactly this owner label (see remove_leftovers).
@@ -125,7 +134,7 @@ class DockerRunner:
         name = "cp-judge-" + uuid.uuid4().hex
         host_folder = self.host_root / folder.name
         try:
-            self.control(["run", "-d", "--init", "--name", name, "--label", "cp.judge.sandbox=true",
+            container = self.control(["run", "-d", "--init", "--name", name, "--label", "cp.judge.sandbox=true",
                       "--label", f"cp.judge.owner={self.owner}",
                       "--network", "none", "--cgroupns", "private", "--read-only", "--cap-drop", "ALL",
                       "--security-opt", "no-new-privileges:true", "--pids-limit", "128",
@@ -147,9 +156,25 @@ class DockerRunner:
         # PID 1 is Docker's init (it reaps zombies) running a trusted root sleep with no
         # capabilities. Every compiler/program runs as UID 10001 and cannot kill the keeper
         # or change read-only cgroups.
+        cgroup = self._find_cgroup(container)
         with self.lock:
             self.active.add(name)
+            self.cgroups[name] = cgroup
+            report = self.direct_reads != (cgroup is not None)
+            self.direct_reads = cgroup is not None
+        if report:
+            LOG.info("Sandbox counters are read %s", "directly from the host cgroup tree" if cgroup else "through docker exec (slower)")
         return name
+
+    @staticmethod
+    def _find_cgroup(container: str) -> Path | None:
+        """The sandbox's folder under either of Docker's cgroup layouts, or None to fall back to docker exec."""
+        if not re.fullmatch(r"[0-9a-f]{64}", container):
+            return None
+        for folder in (CGROUP_ROOT / "system.slice" / f"docker-{container}.scope", CGROUP_ROOT / "docker" / container):
+            if (folder / "cpu.stat").is_file():
+                return folder
+        return None
 
     def _remove(self, name: str):
         try:
@@ -157,6 +182,7 @@ class DockerRunner:
         finally:
             with self.lock:
                 self.active.discard(name)
+                self.cgroups.pop(name, None)
 
     def remove_leftovers(self) -> int:
         """Removes sandboxes this same worker left behind when it crashed or was killed.
@@ -181,10 +207,18 @@ class DockerRunner:
                 pass
 
     def _metrics(self, name: str) -> tuple[int, int, int]:
-        # Collected by the trusted worker, outside contestant stdout/stderr, in one exec
-        # (each docker exec round trip costs ~0.1-0.3 s).
-        raw = self.control(["exec", "--user", "0:0", name, "cat", "/sys/fs/cgroup/cpu.stat",
-                            "/sys/fs/cgroup/memory.peak", "/sys/fs/cgroup/memory.events"])
+        # Collected by the trusted worker, outside contestant stdout/stderr. The same three files
+        # either way: directly when the host tree is mounted, otherwise in one docker exec.
+        folder = self.cgroups.get(name)
+        raw = None
+        if folder is not None:
+            try:
+                raw = "".join((folder / part).read_text() for part in ("cpu.stat", "memory.peak", "memory.events"))
+            except OSError:
+                pass
+        if raw is None:
+            raw = self.control(["exec", "--user", "0:0", name, "cat", "/sys/fs/cgroup/cpu.stat",
+                                "/sys/fs/cgroup/memory.peak", "/sys/fs/cgroup/memory.events"])
         def values(lines):
             return {line.split()[0]: int(line.split()[1]) for line in lines if len(line.split()) == 2}
         try:
@@ -323,7 +357,7 @@ class DockerRunner:
             name = None
             overhead = 0
             try:
-                for test in tests:
+                for position, test in enumerate(tests):
                     if cancelled is not None and cancelled.is_set():
                         raise InfrastructureError("Lease lost")
                     if time.monotonic()-started > self.max_job_seconds:
@@ -337,10 +371,14 @@ class DockerRunner:
                                            int(job["output_limit_kb"])*1024, cancelled=cancelled)
                     tests_seconds += time.monotonic()-phase
                     result.cpu_ms = max(0, result.cpu_ms - overhead)
-                    if result.timeout or result.overflow or result.oom or not self._reset(name):
+                    stop = self._record(cases, test, result, job) and not job.get("run_all_tests")
+                    # The sandbox is about to be deleted after the last test or an early stop, so
+                    # cleaning it first would only cost another docker exec.
+                    finished = stop or position == len(tests) - 1
+                    if result.timeout or result.overflow or result.oom or (not finished and not self._reset(name)):
                         self._remove(name)
                         name = None
-                    if self._record(cases, test, result, job) and not job.get("run_all_tests"):
+                    if stop:
                         break
             finally:
                 if name is not None:
