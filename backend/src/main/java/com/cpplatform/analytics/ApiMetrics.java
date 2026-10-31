@@ -40,6 +40,13 @@ public class ApiMetrics implements Filter {
 
     private final ArrayDeque<Slice> slices = new ArrayDeque<>();
 
+    /** Totals since the last drain, so the minute sampler can persist them. */
+    private final LongAdder minuteRequests = new LongAdder();
+    private final LongAdder minuteClientErrors = new LongAdder();
+    private final LongAdder minuteServerErrors = new LongAdder();
+    private final LongAdder minuteTotalMs = new LongAdder();
+    private final AtomicLong minuteMaxMs = new AtomicLong();
+
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
         if (!(request instanceof HttpServletRequest http)) { chain.doFilter(request, response); return; }
@@ -70,6 +77,28 @@ public class ApiMetrics implements Filter {
         if (status >= 500) serverPerSecond.incrementAndGet(slot);
         else if (status >= 400) clientPerSecond.incrementAndGet(slot);
         slice(now / 60_000).record(key(request), status, millis);
+        minuteRequests.increment();
+        if (status >= 500) minuteServerErrors.increment();
+        else if (status >= 400) minuteClientErrors.increment();
+        minuteTotalMs.add(millis);
+        long current = minuteMaxMs.get();
+        while (millis > current && !minuteMaxMs.compareAndSet(current, millis)) current = minuteMaxMs.get();
+    }
+
+    /** Totals since the previous drain, and resets them. Called once a minute by the sampler. */
+    public Map<String, Object> drain() {
+        long requests = minuteRequests.sumThenReset();
+        long client = minuteClientErrors.sumThenReset();
+        long server = minuteServerErrors.sumThenReset();
+        long totalMs = minuteTotalMs.sumThenReset();
+        long maxMs = minuteMaxMs.getAndSet(0);
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("requests", requests);
+        row.put("clientErrors", client);
+        row.put("serverErrors", server);
+        row.put("totalMs", totalMs);
+        row.put("maxMs", maxMs);
+        return row;
     }
 
     /** The matched route when Spring has one, so /api/submissions/<uuid> is one row and not thousands. */

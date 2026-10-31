@@ -12,8 +12,7 @@ import java.util.*;
 @RestController
 public class AnalyticsController {
     private final AnalyticsService analytics;
-    private final ApiMetrics apiMetrics;
-    public AnalyticsController(AnalyticsService analytics,ApiMetrics apiMetrics){this.analytics=analytics;this.apiMetrics=apiMetrics;}
+    public AnalyticsController(AnalyticsService analytics){this.analytics=analytics;}
     private static Actor admin(Authentication authentication) {
         Actor actor=Actor.of(authentication);Api.require(actor.superAdmin(),HttpStatus.FORBIDDEN,"Super administrator permission required");return actor;
     }
@@ -28,8 +27,8 @@ public class AnalyticsController {
     }
     @GetMapping("/api/admin/analytics/api")
     Object api(Authentication auth,@RequestParam(defaultValue="10") int minutes) {
-        admin(auth);Api.require(minutes>=1 && minutes<=ApiMetrics.WINDOW_MINUTES,HttpStatus.BAD_REQUEST,"minutes must be 1-"+ApiMetrics.WINDOW_MINUTES);
-        return apiMetrics.summary(minutes);
+        admin(auth);Api.require(minutes>=1 && minutes<=20160,HttpStatus.BAD_REQUEST,"minutes must be 1-20160");
+        return analytics.apiUsage(minutes);
     }
     @GetMapping("/api/admin/analytics/daily")
     Object daily(Authentication auth,@RequestParam(defaultValue="30") int days) {

@@ -13,8 +13,8 @@ import java.util.*;
 /** Platform analytics for the control room: live load, history, daily reports and per-contest statistics. */
 @Service
 public class AnalyticsService {
-    private final Database db;private final ServerMetrics server;private final Permissions access;private final ObjectMapper json;
-    public AnalyticsService(Database db,ServerMetrics server,Permissions access,ObjectMapper json){this.db=db;this.server=server;this.access=access;this.json=json;}
+    private final Database db;private final ServerMetrics server;private final Permissions access;private final ObjectMapper json;private final ApiMetrics apiMetrics;
+    public AnalyticsService(Database db,ServerMetrics server,Permissions access,ObjectMapper json,ApiMetrics apiMetrics){this.db=db;this.server=server;this.access=access;this.json=json;this.apiMetrics=apiMetrics;}
 
     // Latest judging generation per submission, so rejudges replace the original verdict.
     private static final String LATEST="SELECT DISTINCT ON (j.submission_id) j.submission_id,j.status,j.created_at,j.first_started_at,j.completed_at,r.verdict,r.execution_time_ms,r.peak_memory_kb FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id";
@@ -31,6 +31,10 @@ public class AnalyticsService {
                 server.host,s.get("processCpu"),s.get("systemCpu"),s.get("loadAverage"),s.get("memoryUsedMb"),s.get("memoryTotalMb"),
                 s.get("heapUsedMb"),s.get("heapMaxMb"),s.get("threads"),s.get("diskFreeMb"));
         db.jdbc.update("DELETE FROM metric_samples WHERE sampled_at<now()-interval '14 days'");
+        var api=apiMetrics.drain();
+        db.jdbc.update("INSERT INTO api_request_samples(requests,client_errors,server_errors,total_ms,max_ms) VALUES (?,?,?,?,?)",
+                api.get("requests"),api.get("clientErrors"),api.get("serverErrors"),api.get("totalMs"),api.get("maxMs"));
+        db.jdbc.update("DELETE FROM api_request_samples WHERE sampled_at<now()-interval '14 days'");
     }
 
     /** Writes the report of every finished UTC day that has none yet (up to 30 days back), e.g. after downtime. */
@@ -196,6 +200,57 @@ public class AnalyticsService {
     private static double rate(Object count,int bucketSeconds) {
         if(count==null) return 0;
         return Math.round(((Number)count).doubleValue()*6000.0/bucketSeconds)/100.0;
+    }
+
+    /**
+     * HTTP traffic for the analytics screen. Recent minutes come from the in-process meter, which
+     * survives no restart; older ranges come from the per-minute rows the sampler persists.
+     */
+    public Map<String,Object> apiUsage(int minutes) {
+        var live=apiMetrics.summary(minutes);
+        long liveRequests=((Number)((Map<?,?>)live.get("now")).get("requests")).longValue();
+        if (minutes<=ApiMetrics.WINDOW_MINUTES&&liveRequests>0) { live.put("source","live"); return live; }
+        int bucket=Math.max(60,minutes*60/240);
+        var rows=db.jdbc.queryForList("SELECT date_bin(make_interval(secs=>?),sampled_at,timestamptz '2000-01-01') AS at,"+
+                "sum(requests) AS requests,sum(client_errors) AS client_errors,sum(server_errors) AS server_errors,sum(total_ms) AS total_ms,max(max_ms) AS max_ms "+
+                "FROM api_request_samples WHERE sampled_at>now()-make_interval(mins=>?) GROUP BY 1 ORDER BY 1",bucket,minutes);
+        if (rows.isEmpty()) { live.put("source","live"); return live; }
+        long requests=0,client=0,server=0,totalMs=0,maxMs=0;
+        double peak=0;
+        var buckets=new ArrayList<Map<String,Object>>();
+        for(var row:rows) {
+            long count=((Number)row.get("requests")).longValue();
+            double rps=Math.round(count*6000.0/bucket)/100.0;
+            requests+=count;
+            client+=((Number)row.get("client_errors")).longValue();
+            server+=((Number)row.get("server_errors")).longValue();
+            totalMs+=((Number)row.get("total_ms")).longValue();
+            maxMs=Math.max(maxMs,((Number)row.get("max_ms")).longValue());
+            peak=Math.max(peak,rps);
+            var point=new LinkedHashMap<String,Object>();
+            point.put("at",Api.time(row.get("at")).toString());
+            point.put("requests",count);
+            point.put("rps",rps);
+            point.put("clientErrors",row.get("client_errors"));
+            point.put("serverErrors",row.get("server_errors"));
+            buckets.add(point);
+        }
+        var totals=new LinkedHashMap<String,Object>();
+        totals.put("path","all");
+        totals.put("requests",requests);
+        totals.put("clientErrors",client);
+        totals.put("serverErrors",server);
+        totals.put("avgMs",requests==0?0:Math.round((double)totalMs/requests));
+        totals.put("maxMs",maxMs);
+        var out=new LinkedHashMap<String,Object>();
+        out.put("windowMinutes",minutes);
+        out.put("bucketSeconds",bucket);
+        out.put("now",totals);
+        out.put("peakRps",Math.round(peak*100)/100.0);
+        out.put("buckets",buckets);
+        out.put("endpoints",List.of());
+        out.put("source","stored");
+        return out;
     }
 
     // One row per submission with its latest judging. Times are milliseconds; a rejudge is timed from when it was requested.

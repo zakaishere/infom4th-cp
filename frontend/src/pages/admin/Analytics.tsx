@@ -219,13 +219,13 @@ function ApiCalls() {
   return (
     <div className="stack" style={{ gap: "1.25rem" }}>
       <div className="row">
-        {[[1, "1 min"], [5, "5 min"], [10, "10 min"], [15, "15 min"]].map(([m, l]) =>
+        {[[1, "1 min"], [5, "5 min"], [10, "10 min"], [15, "15 min"], [60, "1 hour"], [360, "6 hours"], [1440, "24 hours"]].map(([m, l]) =>
           <button key={m} className={"small" + (minutes === m ? " primary" : "")} onClick={() => setMinutes(m as number)}>{l}</button>)}
       </div>
       {a.error && <ErrorBox error={a.error} />}
       {!a.data ? <Loading /> : (
         <>
-          <span className="small muted">Counted in the API process over the last {a.data.windowMinutes} minutes, {a.data.bucketSeconds} s per point. Includes rejected requests that never reach the database. Refreshes every 5 seconds.</span>
+          <span className="small muted">Last {a.data.windowMinutes} minutes, {a.data.bucketSeconds} s per point, {a.data.source === "live" ? "read from the live meter (covers the last 15 minutes)" : "read from the saved per-minute totals"}. Includes rejected requests that never reach the database. Refreshes every 5 seconds.</span>
           <div className="stat-tiles">
             <Stat label="Requests" value={n(now?.requests)} hint={`peak ${n(a.data.peakRps)}/s in this window`} />
             <Stat label="4xx rejected" value={n(now?.clientErrors)} hint="429 admission, 401 auth, 403 permission" tone={now?.clientErrors > 0 ? "warn" : "ok"} />
@@ -239,7 +239,7 @@ function ApiCalls() {
           </div>
           <section className="card stack">
             <h3 style={{ margin: 0 }}>Endpoints in this window</h3>
-            {!a.data.endpoints?.length ? <span className="small muted">No requests recorded yet.</span> : (
+            {!a.data.endpoints?.length ? <span className="small muted">{a.data.source === "stored" ? "Per-endpoint detail is kept in the live meter only (last 15 minutes); this range shows totals." : "No requests recorded yet."}</span> : (
               <div className="table-wrap"><table>
                 <thead><tr><th>Endpoint</th><th>Requests</th><th>4xx</th><th>5xx</th><th>Average</th><th>Slowest</th></tr></thead>
                 <tbody>{a.data.endpoints.map((e: any) => (
