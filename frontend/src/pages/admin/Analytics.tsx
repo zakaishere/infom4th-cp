@@ -26,7 +26,14 @@ function TimeChart({ rows, value, area, format = n, max, title, names }: {
   const values = rows.map((r) => Number(r[value] ?? 0));
   const top = max ?? Math.max(1, ...values, ...(area ? rows.map((r) => Number(r[area] ?? 0)) : []));
   const t0 = new Date(rows[0].at).getTime(), t1 = Math.max(t0 + 1, new Date(rows[rows.length - 1].at).getTime());
-  const x = (i: number) => L + ((new Date(rows[i].at).getTime() - t0) / (t1 - t0)) * (W - L - 4);
+  const xt = (t: number) => L + ((t - t0) / (t1 - t0)) * (W - L - 4);
+  const x = (i: number) => xt(new Date(rows[i].at).getTime());
+  // A range with fewer samples than its bucket size leaves holes. A missing API sample means the
+  // server said nothing at all; drawing straight through it would look like calm instead of an outage.
+  const times = rows.map((r) => new Date(r.at).getTime());
+  const gaps = times.slice(1).map((t, i) => t - times[i]).filter((g) => g > 0).sort((a, b) => a - b);
+  const typical = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  const holes = typical > 0 ? times.slice(1).map((t, i) => ({ from: times[i], to: t })).filter((h) => h.to - h.from > typical * 2.2) : [];
   const y = (v: number) => T + (1 - Math.min(1, v / top)) * (H - T - B);
   const path = (key: string) => rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(Number(r[key] ?? 0)).toFixed(1)).join(" ");
   const areaPath = area ? path(area) + ` L${x(rows.length - 1)} ${H - B} L${x(0)} ${H - B} Z` : "";
@@ -55,6 +62,13 @@ function TimeChart({ rows, value, area, format = n, max, title, names }: {
             </g>
           ))}
           {[t0, (t0 + t1) / 2, t1].map((t, i) => <text key={i} x={L + ((t - t0) / (t1 - t0)) * (W - L - 4)} y={H - 6} className="chart-axis" textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"}>{tick(t)}</text>)}
+          {holes.map((h, i) => {
+            const width = Math.max(1, xt(h.to) - xt(h.from));
+            return <g key={"gap" + i}>
+              <rect x={xt(h.from)} y={T} width={width} height={H - T - B} className="chart-gap" />
+              {width > 46 && <text x={xt(h.from) + width / 2} y={T + 12} textAnchor="middle" className="chart-gap-label">no data</text>}
+            </g>;
+          })}
           {area && <path d={areaPath} className="chart-area" />}
           <path d={path(value)} className="chart-line" />
           {h && <>
@@ -197,20 +211,79 @@ function Live() {
   );
 }
 
-function History() {
-  const [hours, setHours] = useState(24);
-  const t = useData<any>("/api/admin/analytics/timeseries?hours=" + hours, 60000);
+function ApiCalls() {
+  const [minutes, setMinutes] = useState(10);
+  const a = useData<any>("/api/admin/analytics/api?minutes=" + minutes, 5000);
+  const buckets = a.data?.buckets ?? [];
+  const now = a.data?.now;
   return (
     <div className="stack" style={{ gap: "1.25rem" }}>
       <div className="row">
-        {[[1, "1 hour"], [6, "6 hours"], [24, "24 hours"], [72, "3 days"], [168, "7 days"], [336, "14 days"]].map(([h, l]) =>
-          <button key={h} className={"small" + (hours === h ? " primary" : "")} onClick={() => setHours(h as number)}>{l}</button>)}
+        {[[1, "1 min"], [5, "5 min"], [10, "10 min"], [15, "15 min"], [60, "1 hour"], [360, "6 hours"], [1440, "24 hours"]].map(([m, l]) =>
+          <button key={m} className={"small" + (minutes === m ? " primary" : "")} onClick={() => setMinutes(m as number)}>{l}</button>)}
+      </div>
+      {a.error && <ErrorBox error={a.error} />}
+      {!a.data ? <Loading /> : (
+        <>
+          <span className="small muted">Last {a.data.windowMinutes} minutes, {a.data.bucketSeconds} s per point, {a.data.source === "live" ? "read from the live meter (covers the last 15 minutes)" : "read from the saved per-minute totals"}. Includes rejected requests that never reach the database. Refreshes every 5 seconds.</span>
+          <div className="stat-tiles">
+            <Stat label="Requests" value={n(now?.requests)} hint={`peak ${n(a.data.peakRps)}/s in this window`} />
+            <Stat label="4xx rejected" value={n(now?.clientErrors)} hint="429 admission, 401 auth, 403 permission" tone={now?.clientErrors > 0 ? "warn" : "ok"} />
+            <Stat label="5xx errors" value={n(now?.serverErrors)} hint="the API itself failed" tone={now?.serverErrors > 0 ? "bad" : "ok"} />
+            <Stat label="Average response" value={ms(now?.avgMs)} hint={`slowest ${ms(now?.maxMs)}`} />
+          </div>
+          <TimeChart title="Requests per second" rows={buckets} value="rps" format={(v) => Number(v).toFixed(2)} />
+          <div className="grid grid-2">
+            <TimeChart title="Rejected requests (4xx)" rows={buckets} value="clientErrors" />
+            <TimeChart title="Server errors (5xx)" rows={buckets} value="serverErrors" />
+          </div>
+          <section className="card stack">
+            <h3 style={{ margin: 0 }}>Endpoints in this window</h3>
+            {!a.data.endpoints?.length ? <span className="small muted">{a.data.source === "stored" ? "Per-endpoint detail is kept in the live meter only (last 15 minutes); this range shows totals." : "No requests recorded yet."}</span> : (
+              <div className="table-wrap"><table>
+                <thead><tr><th>Endpoint</th><th>Requests</th><th>4xx</th><th>5xx</th><th>Average</th><th>Slowest</th></tr></thead>
+                <tbody>{a.data.endpoints.map((e: any) => (
+                  <tr key={e.path}>
+                    <td className="small mono">{e.path}</td>
+                    <td className="small">{n(e.requests)}</td>
+                    <td className="small" style={{ color: e.clientErrors ? "var(--warn)" : undefined }}>{n(e.clientErrors)}</td>
+                    <td className="small" style={{ color: e.serverErrors ? "var(--bad)" : undefined }}>{n(e.serverErrors)}</td>
+                    <td className="small mono">{ms(e.avgMs)}</td>
+                    <td className="small mono">{ms(e.maxMs)}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+const HISTORY_RANGES: [number, string][] = [[10, "10 min"], [60, "1 hour"], [360, "6 hours"], [1440, "24 hours"], [10080, "7 days"], [20160, "14 days"]];
+
+function History() {
+  const [minutes, setMinutes] = useState(1440);
+  // Short contest windows need fresh points; long history does not.
+  const t = useData<any>("/api/admin/analytics/timeseries?minutes=" + minutes, minutes <= 60 ? 10000 : 60000);
+  const bucket = t.data ? (t.data.bucketSeconds < 60 ? t.data.bucketSeconds + " s" : Math.round(t.data.bucketSeconds / 60) + " min") : "";
+  const rate = (v: Num) => Number(v).toFixed(2);
+  return (
+    <div className="stack" style={{ gap: "1.25rem" }}>
+      <div className="row">
+        {HISTORY_RANGES.map(([m, l]) =>
+          <button key={m} className={"small" + (minutes === m ? " primary" : "")} onClick={() => setMinutes(m)}>{l}</button>)}
       </div>
       {t.error && <ErrorBox error={t.error} />}
       {!t.data ? <Loading /> : (
         <>
-          <span className="small muted">Server load is sampled every minute and kept 14 days; each point is {t.data.bucketMinutes} min.</span>
-          <TimeChart title="Submissions" rows={t.data.activity} value="submissions" area="accepted" names={["Submitted", "Accepted"]} />
+          <span className="small muted">Pipeline numbers are counted per bucket, {bucket} each. Host metrics are sampled every minute, so short ranges show one point per sample.</span>
+          <TimeChart title="Arrivals vs claims per minute" rows={t.data.activity} value="arrivals_per_min" area="claims_per_min" names={["Arrived", "Claimed"]} format={rate} />
+          <div className="grid grid-2">
+            <TimeChart title="Judge queue backlog" rows={t.data.activity} value="backlog" />
+            <TimeChart title="Retries vs dropped jobs per minute" rows={t.data.activity} value="retries_per_min" area="dropped_per_min" names={["Retried", "Dropped"]} format={rate} />
+          </div>
           <div className="grid grid-2">
             <TimeChart title="Server CPU" rows={t.data.server} value="system_cpu" format={pct} max={1} />
             <TimeChart title="Memory used" rows={t.data.server} value="memory_used_mb" format={mb} max={Math.max(1, ...t.data.server.map((r: any) => Number(r.memory_total_mb ?? 0)))} />
@@ -327,7 +400,7 @@ function Contests() {
 type TimedRow = {
   id: string; submitted_at: string; kind: string; language_code: string; handle: string; problem: string; contest: string | null; label: string | null; samples_only: boolean;
   status: string | null; verdict: string | null; passed_tests: number | null; total_tests: number | null; execution_time_ms: number | null; peak_memory_kb: number | null;
-  generation: number | null; attempt_count: number | null; worker: string | null; wait_ms: number | null; judge_ms: number | null; server_ms: number | null;
+  generation: number | null; attempt_count: number | null; last_error_code: string | null; worker: string | null; wait_ms: number | null; judge_ms: number | null; server_ms: number | null;
   compile_ms: number | null; tests_ms: number | null; sandbox_ms: number | null; accepted_ms: number | null; verdict_ms: number | null;
 };
 const KINDS = ["Contest", "Practice", "Practice examples", "Problem testing"];
@@ -343,12 +416,15 @@ function LatencyTable({ title, first, rows, name }: { title: string; first: stri
       <h3 style={{ margin: 0 }}>{title}</h3>
       {!rows?.length ? <span className="small muted">No finished submissions in this range.</span> : (
         <div className="table-wrap"><table>
-          <thead><tr><th>{first}</th><th>Count</th><th>Accepted by server</th><th>Wait for judge</th><th>Judging</th><th>Verdict on screen</th><th>Compile</th><th>Tests</th><th>Sandbox</th></tr></thead>
+          <thead><tr><th>{first}</th><th>Count</th><th>Accepted by server</th><th>Wait for judge</th><th>Judging</th><th>Verdict on screen</th><th>Compile</th><th>Tests</th><th>Sandbox</th><th>Retries</th></tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={name(r)}>
               <td className="small"><strong>{name(r)}</strong></td><td className="small">{n(r.count)}</td>
               {["accepted_ms", "wait_ms", "judge_ms", "verdict_ms"].map((c) => <td key={c} className="small mono">{ms(r["avg_" + c])}<div className="muted">p95 {ms(r["p95_" + c])}</div></td>)}
               <td className="small mono">{ms(r.avg_compile_ms)}</td><td className="small mono">{ms(r.avg_tests_ms)}</td><td className="small mono">{ms(r.avg_sandbox_ms)}</td>
+              <td className="small mono" title={`${r.avg_attempts ?? 1} attempts per job on average, worst ${r.worst_attempts ?? 1}`}>
+                {r.retried ? <strong>{n(r.retried)}</strong> : "0"}{r.retried ? <div className="muted">of {n(r.count)}</div> : null}
+              </td>
             </tr>
           ))}</tbody>
         </table></div>
@@ -380,6 +456,28 @@ function Submissions() {
       <LatencyTable title="Average latency by type" first="Type" rows={stats.data?.byKind} name={(r) => r.kind} />
       <LatencyTable title="Average latency by language" first="Language" rows={stats.data?.byLanguage} name={(r) => LANGUAGE_NAMES[r.language_code] ?? r.language_code} />
       <section className="card stack">
+        <h3 style={{ margin: 0 }}>Jobs the platform dropped</h3>
+        {stats.data?.failures && Number(stats.data.failures.total) > 0 ? (
+          <>
+            <div className="small muted">
+              {n(stats.data.failures.total)} job(s) used every attempt without producing a verdict. Time is from submission to giving up, retries included.
+            </div>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Reason</th><th>Count</th><th>Average</th><th>p95</th><th>Worst</th></tr></thead>
+              <tbody>{(stats.data.failureCodes ?? []).map((f: any) => (
+                <tr key={f.code}>
+                  <td className="small mono"><strong>{f.code}</strong></td>
+                  <td className="small">{n(f.count)}</td>
+                  <td className="small mono">{ms(f.avg_server_ms)}</td>
+                  <td className="small mono">{ms(f.p95_server_ms)}</td>
+                  <td className="small mono">{ms(f.max_server_ms)}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          </>
+        ) : <span className="small muted">No job has exhausted its attempts in this range.</span>}
+      </section>
+      <section className="card stack">
         <div className="row-between"><h3 style={{ margin: 0 }}>Recent submissions</h3>
           <div className="row" style={{ alignItems: "center" }}>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="User, problem or contest" style={{ width: 200 }} />
@@ -397,7 +495,7 @@ function Submissions() {
                 <td className="small">@{s.handle}</td>
                 <td className="small">{s.label ? <strong>{s.label} </strong> : null}{s.problem}<div className="muted">{s.contest ?? s.kind}</div></td>
                 <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>
-                <td className="small"><Verdict status={s.status ?? undefined} verdict={s.verdict} />{s.total_tests ? <div className="muted mono">{s.passed_tests}/{s.total_tests} tests</div> : null}{(s.generation ?? 1) > 1 ? <div className="muted">rejudge</div> : null}</td>
+                <td className="small"><Verdict status={s.status ?? undefined} verdict={s.verdict} />{s.total_tests ? <div className="muted mono">{s.passed_tests}/{s.total_tests} tests</div> : null}{(s.generation ?? 1) > 1 ? <div className="muted">rejudge</div> : null}{(s.attempt_count ?? 0) > 1 ? <div className="muted">×{s.attempt_count} attempts</div> : null}{s.status === "FAILED" && s.last_error_code ? <div className="muted mono">{s.last_error_code}</div> : null}</td>
                 <td className="small mono">{ms(s.accepted_ms)}</td><td className="small mono">{ms(s.wait_ms)}</td>
                 <td className="small mono" title={s.compile_ms != null ? `Compile ${ms(s.compile_ms)}, tests ${ms(s.tests_ms)}, sandbox ${ms(s.sandbox_ms)}` : undefined}>{ms(s.judge_ms)}</td>
                 <td className="small mono"><strong>{ms(s.verdict_ms)}</strong></td>
@@ -471,16 +569,25 @@ function Capacity() {
 
 export default function Analytics() {
   const { superAdmin } = useAuth();
-  const tabs = superAdmin ? [["live", "Live"], ["history", "History"], ["daily", "Daily reports"], ["submissions", "Submissions"], ["capacity", "Capacity"], ["contests", "Contests"]] : [["contests", "Contests"]];
+  const health = useData<any>(superAdmin ? "/api/admin/analytics/overview" : null, 30000);
+  const state = health.data?.health;
+  const tabs = superAdmin ? [["live", "Live"], ["history", "History"], ["api", "API"], ["daily", "Daily reports"], ["submissions", "Submissions"], ["capacity", "Capacity"], ["contests", "Contests"]] : [["contests", "Contests"]];
   const [tab, setTab] = useState(tabs[0][0]);
   return (
     <div className="stack">
       <div className="page-head" style={{ marginBottom: 0 }}>
         <div><div className="eyebrow">Control room</div><h1>Analytics</h1><p>Server resources, judging performance, platform activity and contest statistics.</p></div>
       </div>
+      {state && state.level !== "ok" && (
+        <div className={"notice " + (state.level === "bad" ? "bad" : "warn")}>
+          <strong>{state.level === "bad" ? "The platform is not healthy." : "Worth watching."}</strong>
+          <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>{(state.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
+        </div>
+      )}
       <div className="tabs">{tabs.map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
       {tab === "live" && <Live />}
       {tab === "history" && <History />}
+      {tab === "api" && <ApiCalls />}
       {tab === "daily" && <Daily />}
       {tab === "submissions" && <Submissions />}
       {tab === "capacity" && <Capacity />}

@@ -13,8 +13,8 @@ import java.util.*;
 /** Platform analytics for the control room: live load, history, daily reports and per-contest statistics. */
 @Service
 public class AnalyticsService {
-    private final Database db;private final ServerMetrics server;private final Permissions access;private final ObjectMapper json;
-    public AnalyticsService(Database db,ServerMetrics server,Permissions access,ObjectMapper json){this.db=db;this.server=server;this.access=access;this.json=json;}
+    private final Database db;private final ServerMetrics server;private final Permissions access;private final ObjectMapper json;private final ApiMetrics apiMetrics;
+    public AnalyticsService(Database db,ServerMetrics server,Permissions access,ObjectMapper json,ApiMetrics apiMetrics){this.db=db;this.server=server;this.access=access;this.json=json;this.apiMetrics=apiMetrics;}
 
     // Latest judging generation per submission, so rejudges replace the original verdict.
     private static final String LATEST="SELECT DISTINCT ON (j.submission_id) j.submission_id,j.status,j.created_at,j.first_started_at,j.completed_at,r.verdict,r.execution_time_ms,r.peak_memory_kb FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id";
@@ -31,6 +31,10 @@ public class AnalyticsService {
                 server.host,s.get("processCpu"),s.get("systemCpu"),s.get("loadAverage"),s.get("memoryUsedMb"),s.get("memoryTotalMb"),
                 s.get("heapUsedMb"),s.get("heapMaxMb"),s.get("threads"),s.get("diskFreeMb"));
         db.jdbc.update("DELETE FROM metric_samples WHERE sampled_at<now()-interval '14 days'");
+        var api=apiMetrics.drain();
+        db.jdbc.update("INSERT INTO api_request_samples(requests,client_errors,server_errors,total_ms,max_ms) VALUES (?,?,?,?,?)",
+                api.get("requests"),api.get("clientErrors"),api.get("serverErrors"),api.get("totalMs"),api.get("maxMs"));
+        db.jdbc.update("DELETE FROM api_request_samples WHERE sampled_at<now()-interval '14 days'");
     }
 
     /** Writes the report of every finished UTC day that has none yet (up to 30 days back), e.g. after downtime. */
@@ -116,31 +120,144 @@ public class AnalyticsService {
                 "(SELECT count(*) FROM competitions) AS competitions,(SELECT count(*) FROM competitions WHERE status='RUNNING') AS running_competitions,"+
                 "(SELECT count(*) FROM contest_runs WHERE status='RUNNING') AS running_runs,(SELECT count(*) FROM teams) AS teams"));
         result.put("today",day(LocalDate.now(ZoneOffset.UTC)));
+        result.put("health",health());
         return result;
     }
 
-    /** Server samples and submission activity in about 240 buckets covering the last {@code hours}. */
-    public Map<String,Object> timeseries(int hours) {
-        int bucket=Math.max(1,hours*60/240);
-        var serverRows=db.jdbc.queryForList("SELECT date_bin(make_interval(mins=>?),sampled_at,timestamptz '2000-01-01') AS at,"+
+    /**
+     * One derived verdict for the banner, from data already stored: is the platform alive, is the
+     * queue growing, and did anything die in the last hour. Charts need a human watching; this does not.
+     */
+    public Map<String,Object> health() {
+        var row=db.jdbc.queryForMap("SELECT "+
+                "(SELECT coalesce(extract(epoch FROM now()-max(sampled_at))::int,999999) FROM metric_samples) AS sample_age,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.status='FAILED' AND j.completed_at>now()-interval '1 hour' AND s.context<>'BENCHMARK') AS dropped,"+
+                "(SELECT coalesce(max(extract(epoch FROM now()-created_at))::int,0) FROM judging_jobs WHERE status IN ('QUEUED','RETRY')) AS oldest_wait,"+
+                "(SELECT coalesce(max(extract(epoch FROM now()-created_at))::int,0) FROM judge_outbox WHERE published_at IS NULL) AS outbox_age,"+
+                "(SELECT count(*) FROM (SELECT queued_jobs,lag(queued_jobs) OVER (ORDER BY sampled_at) AS previous FROM "+
+                "(SELECT sampled_at,queued_jobs FROM metric_samples ORDER BY sampled_at DESC LIMIT 3) t) x WHERE previous IS NOT NULL AND queued_jobs>previous) AS rising");
+        long sampleAge=((Number)row.get("sample_age")).longValue(),dropped=((Number)row.get("dropped")).longValue();
+        long oldestWait=((Number)row.get("oldest_wait")).longValue(),outboxAge=((Number)row.get("outbox_age")).longValue();
+        long rising=((Number)row.get("rising")).longValue();
+        List<String> reasons=new ArrayList<>();
+        if(sampleAge>120) reasons.add("No server sample for "+(sampleAge>600000?"a long time":sampleAge+" s")+": the API may be down.");
+        if(dropped>0) reasons.add(dropped+" job(s) used every attempt in the last hour.");
+        if(oldestWait>300) reasons.add("The oldest waiting job has queued for "+(oldestWait/60)+" min.");
+        if(rising>=2) reasons.add("The judge queue grew in each of the last samples.");
+        if(outboxAge>30) reasons.add("A judge message waited "+outboxAge+" s to be published.");
+        String level=!reasons.isEmpty()&&(sampleAge>120||dropped>0||oldestWait>300)?"bad":!reasons.isEmpty()?"warn":"ok";
+        Map<String,Object> out=new LinkedHashMap<>();
+        out.put("level",level);
+        out.put("reasons",reasons);
+        out.put("sampleAgeSeconds",sampleAge);
+        out.put("droppedLastHour",dropped);
+        out.put("oldestWaitSeconds",oldestWait);
+        return out;
+    }
+
+    /** Bucket size in seconds: about 240 points, never finer than 5 seconds, so short contest windows stay readable. */
+    private static int bucketSeconds(int minutes) {
+        int ideal = Math.max(1, minutes * 60 / 240);
+        int chosen = 5;
+        for (int step : new int[]{5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200}) {
+            if (step > ideal) break;
+            chosen = step;
+        }
+        return chosen;
+    }
+
+    /** Server samples and pipeline activity in about 240 buckets covering the last {@code minutes}. */
+    public Map<String,Object> timeseries(int minutes) {
+        int bucket=bucketSeconds(minutes);
+        var serverRows=db.jdbc.queryForList("SELECT date_bin(make_interval(secs=>?),sampled_at,timestamptz '2000-01-01') AS at,"+
                 "round(avg(system_cpu)::numeric,3) AS system_cpu,round(max(system_cpu)::numeric,3) AS peak_cpu,round(avg(process_cpu)::numeric,3) AS process_cpu,"+
                 "round(avg(memory_used_mb)) AS memory_used_mb,max(memory_total_mb) AS memory_total_mb,round(avg(heap_used_mb)) AS heap_used_mb,max(heap_max_mb) AS heap_max_mb,"+
                 "round(avg(load_average)::numeric,2) AS load_average,max(db_connections) AS db_connections,max(threads) AS threads,"+
                 "max(queued_jobs) AS queued_jobs,max(running_jobs) AS running_jobs,min(workers_online) AS workers_online,max(judge_slots) AS judge_slots "+
-                "FROM metric_samples WHERE sampled_at>now()-make_interval(hours=>?) GROUP BY 1 ORDER BY 1",bucket,hours);
-        var activity=db.jdbc.queryForList("WITH b AS (SELECT generate_series(date_bin(make_interval(mins=>?),now()-make_interval(hours=>?),timestamptz '2000-01-01'),now(),make_interval(mins=>?)) AS at) "+
-                "SELECT b.at,(SELECT count(*) FROM submissions s WHERE s.submitted_at>=b.at AND s.submitted_at<b.at+make_interval(mins=>?)) AS submissions,"+
-                "(SELECT count(*) FROM judging_results r WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(mins=>?) AND r.verdict='ACCEPTED') AS accepted,"+
-                "(SELECT count(*) FROM judging_results r WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(mins=>?)) AS judged "+
-                "FROM b ORDER BY b.at",bucket,hours,bucket,bucket,bucket,bucket);
-        return Map.of("bucketMinutes",bucket,"hours",hours,"server",serverRows,"activity",activity);
+                "FROM metric_samples WHERE sampled_at>now()-make_interval(mins=>?) GROUP BY 1 ORDER BY 1",bucket,minutes);
+        // Counts per bucket. Rates are derived below so a 10 s bucket and a 42 min bucket are comparable.
+        var activity=db.jdbc.queryForList("WITH b AS (SELECT generate_series(date_bin(make_interval(secs=>?),now()-make_interval(mins=>?),timestamptz '2000-01-01'),now(),make_interval(secs=>?)) AS at) "+
+                "SELECT b.at,"+
+                "(SELECT count(*) FROM submissions s WHERE s.submitted_at>=b.at AND s.submitted_at<b.at+make_interval(secs=>?) AND s.context<>'BENCHMARK') AS arrivals,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.first_started_at>=b.at AND j.first_started_at<b.at+make_interval(secs=>?) AND s.context<>'BENCHMARK') AS claims,"+
+                "(SELECT count(*) FROM judging_results r JOIN judging_jobs j ON j.id=r.job_id JOIN submissions s ON s.id=j.submission_id WHERE r.judged_at>=b.at AND r.judged_at<b.at+make_interval(secs=>?) AND s.context<>'BENCHMARK') AS verdicts,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.first_started_at>=b.at AND j.first_started_at<b.at+make_interval(secs=>?) AND j.attempt_count>1 AND s.context<>'BENCHMARK') AS retries,"+
+                "(SELECT count(*) FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE j.completed_at>=b.at AND j.completed_at<b.at+make_interval(secs=>?) AND j.status='FAILED' AND s.context<>'BENCHMARK') AS dropped,"+
+                "(SELECT max(queued_jobs) FROM metric_samples m WHERE m.sampled_at>=b.at AND m.sampled_at<b.at+make_interval(secs=>?)) AS backlog "+
+                "FROM b ORDER BY b.at",bucket,minutes,bucket,bucket,bucket,bucket,bucket,bucket,bucket);
+        // The server sample is one point per minute, so finer buckets are empty. Carry the last backlog forward.
+        Integer lastBacklog=null;
+        for(var row:activity) {
+            Object backlog=row.get("backlog");
+            if(backlog==null) { if(lastBacklog!=null) row.put("backlog",lastBacklog); }
+            else lastBacklog=((Number)backlog).intValue();
+            for(String count:List.of("arrivals","claims","verdicts","retries","dropped"))
+                row.put(count+"_per_min",rate(row.get(count),bucket));
+        }
+        return Map.of("bucketSeconds",bucket,"minutes",minutes,"server",serverRows,"activity",activity);
+    }
+
+    private static double rate(Object count,int bucketSeconds) {
+        if(count==null) return 0;
+        return Math.round(((Number)count).doubleValue()*6000.0/bucketSeconds)/100.0;
+    }
+
+    /**
+     * HTTP traffic for the analytics screen. Recent minutes come from the in-process meter, which
+     * survives no restart; older ranges come from the per-minute rows the sampler persists.
+     */
+    public Map<String,Object> apiUsage(int minutes) {
+        var live=apiMetrics.summary(minutes);
+        long liveRequests=((Number)((Map<?,?>)live.get("now")).get("requests")).longValue();
+        if (minutes<=ApiMetrics.WINDOW_MINUTES&&liveRequests>0) { live.put("source","live"); return live; }
+        int bucket=Math.max(60,minutes*60/240);
+        var rows=db.jdbc.queryForList("SELECT date_bin(make_interval(secs=>?),sampled_at,timestamptz '2000-01-01') AS at,"+
+                "sum(requests) AS requests,sum(client_errors) AS client_errors,sum(server_errors) AS server_errors,sum(total_ms) AS total_ms,max(max_ms) AS max_ms "+
+                "FROM api_request_samples WHERE sampled_at>now()-make_interval(mins=>?) GROUP BY 1 ORDER BY 1",bucket,minutes);
+        if (rows.isEmpty()) { live.put("source","live"); return live; }
+        long requests=0,client=0,server=0,totalMs=0,maxMs=0;
+        double peak=0;
+        var buckets=new ArrayList<Map<String,Object>>();
+        for(var row:rows) {
+            long count=((Number)row.get("requests")).longValue();
+            double rps=Math.round(count*6000.0/bucket)/100.0;
+            requests+=count;
+            client+=((Number)row.get("client_errors")).longValue();
+            server+=((Number)row.get("server_errors")).longValue();
+            totalMs+=((Number)row.get("total_ms")).longValue();
+            maxMs=Math.max(maxMs,((Number)row.get("max_ms")).longValue());
+            peak=Math.max(peak,rps);
+            var point=new LinkedHashMap<String,Object>();
+            point.put("at",Api.time(row.get("at")).toString());
+            point.put("requests",count);
+            point.put("rps",rps);
+            point.put("clientErrors",row.get("client_errors"));
+            point.put("serverErrors",row.get("server_errors"));
+            buckets.add(point);
+        }
+        var totals=new LinkedHashMap<String,Object>();
+        totals.put("path","all");
+        totals.put("requests",requests);
+        totals.put("clientErrors",client);
+        totals.put("serverErrors",server);
+        totals.put("avgMs",requests==0?0:Math.round((double)totalMs/requests));
+        totals.put("maxMs",maxMs);
+        var out=new LinkedHashMap<String,Object>();
+        out.put("windowMinutes",minutes);
+        out.put("bucketSeconds",bucket);
+        out.put("now",totals);
+        out.put("peakRps",Math.round(peak*100)/100.0);
+        out.put("buckets",buckets);
+        out.put("endpoints",List.of());
+        out.put("source","stored");
+        return out;
     }
 
     // One row per submission with its latest judging. Times are milliseconds; a rejudge is timed from when it was requested.
     private static final String TIMED="SELECT s.id,s.submitted_at,s.context,s.samples_only,s.language_code,s.submitted_by,u.handle,pv.title AS problem,c.title AS contest,r.kind AS run_kind,cp.label,"+
             "CASE WHEN s.context='CONTEST' THEN 'Contest' WHEN s.context='LABORATORY' THEN 'Problem testing' WHEN s.context='BENCHMARK' THEN 'Benchmark' WHEN s.samples_only THEN 'Practice examples' ELSE 'Practice' END AS kind,"+
             "CASE WHEN s.context='CONTEST' OR (SELECT b.lane FROM benchmark_runs b WHERE b.id=s.benchmark_id)='official' THEN 'official' ELSE 'internal' END AS lane,"+
-            "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.worker,l.compile_ms,l.tests_ms,"+
+            "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.last_error_code,l.worker,l.compile_ms,l.tests_ms,"+
             "round(extract(epoch FROM coalesce(l.first_started_at,now())-l.created_at)*1000) AS wait_ms,"+
             "round(extract(epoch FROM l.completed_at-coalesce(l.last_started_at,l.first_started_at))*1000) AS judge_ms,"+
             "round(extract(epoch FROM l.completed_at-l.created_at)*1000) AS server_ms,"+
@@ -149,7 +266,7 @@ public class AnalyticsService {
             "FROM submissions s JOIN users u ON u.id=s.submitted_by JOIN problem_versions pv ON pv.id=s.problem_version_id "+
             "LEFT JOIN contest_runs r ON r.id=s.run_id LEFT JOIN competitions c ON c.id=r.competition_id "+
             "LEFT JOIN competition_problems cp ON cp.competition_version_id=s.competition_version_id AND cp.slot=s.problem_slot "+
-            "LEFT JOIN LATERAL (SELECT j.status,j.generation,j.attempt_count,j.created_at,j.first_started_at,j.last_started_at,j.completed_at,w.name AS worker,res.verdict,res.passed_tests,res.total_tests,res.execution_time_ms,res.peak_memory_kb,res.compile_ms,res.tests_ms,res.judge_total_ms "+
+            "LEFT JOIN LATERAL (SELECT j.status,j.generation,j.attempt_count,j.last_error_code,j.created_at,j.first_started_at,j.last_started_at,j.completed_at,w.name AS worker,res.verdict,res.passed_tests,res.total_tests,res.execution_time_ms,res.peak_memory_kb,res.compile_ms,res.tests_ms,res.judge_total_ms "+
             "FROM judging_jobs j LEFT JOIN judging_results res ON res.job_id=j.id LEFT JOIN judge_workers w ON w.id=j.worker_id WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) l ON true "+
             "LEFT JOIN submission_client_timings t ON t.submission_id=s.id ";
 
@@ -166,19 +283,32 @@ public class AnalyticsService {
                 ",round((percentile_cont(0.95) WITHIN GROUP (ORDER BY "+column+"))::numeric) AS p95_"+column+",max("+column+") AS max_"+column;
     }
 
-    /** Latency by kind of submission and by language, and what each judge lane has available. */
+    /** Latency by kind of submission and by language, lane capacity, and how jobs die. */
     public Map<String,Object> latency(int hours) {
         String window="FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d WHERE d.status='COMPLETED' ";
+        // A job that needed more than one claim means infrastructure dropped it; the extra claims are the cost.
         String columns="count(*) AS count,"+spread("wait_ms")+","+spread("judge_ms")+","+spread("server_ms")+","+spread("accepted_ms")+","+spread("verdict_ms")+
-                ",round(avg(compile_ms)) AS avg_compile_ms,round(avg(tests_ms)) AS avg_tests_ms,round(avg(sandbox_ms)) AS avg_sandbox_ms,round(avg(total_tests),1) AS avg_tests ";
+                ",round(avg(compile_ms)) AS avg_compile_ms,round(avg(tests_ms)) AS avg_tests_ms,round(avg(sandbox_ms)) AS avg_sandbox_ms,round(avg(total_tests),1) AS avg_tests,"+
+                "round(avg(attempt_count),2) AS avg_attempts,count(*) FILTER (WHERE attempt_count>1) AS retried,max(attempt_count) AS worst_attempts ";
         var result=new LinkedHashMap<String,Object>();
         result.put("hours",hours);
         result.put("byKind",db.jdbc.queryForList("SELECT kind,"+columns+window+"GROUP BY kind ORDER BY count(*) DESC",hours));
         result.put("byLanguage",db.jdbc.queryForList("SELECT language_code,"+columns+window+"GROUP BY language_code ORDER BY count(*) DESC",hours));
         // Examples only run a few tests, so they would make capacity look better than it is.
-        result.put("lanes",db.jdbc.queryForList("SELECT w.lane,w.workers,w.slots,w.cpus,w.memory_mb,m.count,m.avg_judge_ms,m.p95_judge_ms FROM "+
-                "(SELECT lane,count(*) AS workers,sum(coalesce(reported_target,desired_concurrency,default_concurrency)) AS slots,max(detected_cpus) AS cpus,max(detected_memory_mb) AS memory_mb FROM judge_workers WHERE "+ONLINE+" AND NOT drain_requested GROUP BY lane) w "+
-                "LEFT JOIN (SELECT lane,count(*) AS count,round(avg(judge_ms)) AS avg_judge_ms,round((percentile_cont(0.95) WITHIN GROUP (ORDER BY judge_ms))::numeric) AS p95_judge_ms "+window+"AND NOT samples_only GROUP BY lane) m ON m.lane=w.lane ORDER BY w.lane",hours));
+        // Both lanes are always listed, including a lane with no online worker: that is the outage case.
+        result.put("lanes",db.jdbc.queryForList("SELECT l.lane,coalesce(w.workers,0) AS workers,coalesce(w.slots,0) AS slots,w.cpus,w.memory_mb,"+
+                "coalesce(m.count,0) AS count,m.avg_judge_ms,m.p95_judge_ms,m.avg_attempts,m.retried,m.worst_attempts,coalesce(q.unpublished,0) AS unpublished,q.oldest_unpublished_ms "+
+                "FROM (VALUES ('official'),('internal')) l(lane) "+
+                "LEFT JOIN (SELECT lane,count(*) AS workers,sum(coalesce(reported_target,desired_concurrency,default_concurrency)) AS slots,max(detected_cpus) AS cpus,max(detected_memory_mb) AS memory_mb FROM judge_workers WHERE "+ONLINE+" AND NOT drain_requested GROUP BY lane) w ON w.lane=l.lane "+
+                "LEFT JOIN (SELECT lane,count(*) AS count,round(avg(judge_ms)) AS avg_judge_ms,round((percentile_cont(0.95) WITHIN GROUP (ORDER BY judge_ms))::numeric) AS p95_judge_ms,"+
+                "round(avg(attempt_count),2) AS avg_attempts,count(*) FILTER (WHERE attempt_count>1) AS retried,max(attempt_count) AS worst_attempts "+
+                window+"AND NOT samples_only GROUP BY lane) m ON m.lane=l.lane "+
+                "LEFT JOIN (SELECT lane,count(*) AS unpublished,round(max(extract(epoch FROM now()-created_at))*1000) AS oldest_unpublished_ms FROM judge_outbox WHERE published_at IS NULL GROUP BY lane) q ON q.lane=l.lane "+
+                "ORDER BY l.lane",hours));
+        // Jobs that ran out of attempts. They are excluded from the averages above, which is why the block is separate.
+        String failed="FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d WHERE d.status='FAILED' ";
+        result.put("failures",db.jdbc.queryForMap("SELECT count(*) AS total,"+spread("server_ms")+" "+failed,hours));
+        result.put("failureCodes",db.jdbc.queryForList("SELECT coalesce(last_error_code,'UNKNOWN') AS code,count(*) AS count,"+spread("server_ms")+" "+failed+"GROUP BY 1 ORDER BY count(*) DESC",hours));
         result.put("limits",db.jdbc.queryForMap("SELECT pending_submissions_per_user,submissions_per_minute,max_queued_submissions FROM judging_settings"));
         result.put("hostBudgetMb",db.jdbc.queryForObject("SELECT min(host_memory_budget_mb) FROM judge_workers WHERE "+ONLINE,Integer.class));
         result.put("slotMemoryMb",db.jdbc.queryForObject("SELECT max(slot_memory_mb) FROM judge_workers WHERE "+ONLINE,Integer.class));

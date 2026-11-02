@@ -96,8 +96,25 @@ public class LaboratoryService {
             if(body.containsKey(field.getKey())) db.jdbc.update("UPDATE problem_versions SET "+field.getValue()+"=? WHERE id=?",
                     Api.number(body,field.getKey(),0,1,65536),version);
         if(body.containsKey("languages")) {
-            db.jdbc.update("DELETE FROM problem_version_languages WHERE problem_version_id=?",version);
-            for(String language:Api.languages(body)) db.jdbc.update("INSERT INTO problem_version_languages VALUES (?,?)",version,language);
+            // Diff instead of delete-then-insert: reference_solutions references
+            // (problem_version_id, language_code), so wiping the list always violates that
+            // foreign key on any problem that has references. Add what is missing, and only
+            // drop a language once its reference solution is gone.
+            var wanted=new LinkedHashSet<>(Api.languages(body));
+            var current=new LinkedHashSet<>(db.jdbc.queryForList("SELECT language_code FROM problem_version_languages WHERE problem_version_id=?",String.class,version));
+            for(String language:wanted) {
+                if(!current.contains(language)) {
+                    Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM languages WHERE code=? AND enabled)",language),
+                            HttpStatus.BAD_REQUEST,"Unknown or disabled language: "+language);
+                    db.jdbc.update("INSERT INTO problem_version_languages(problem_version_id,language_code) VALUES (?,?)",version,language);
+                }
+            }
+            for(String language:current) {
+                if(wanted.contains(language)) continue;
+                Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM reference_solutions WHERE problem_version_id=? AND language_code=?)",version,language),
+                        HttpStatus.CONFLICT,"Delete the "+language+" reference solution before removing that language");
+                db.jdbc.update("DELETE FROM problem_version_languages WHERE problem_version_id=? AND language_code=?",version,language);
+            }
         }
     }
     @Transactional

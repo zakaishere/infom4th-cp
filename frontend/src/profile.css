@@ -33,6 +33,8 @@ a.person:hover { text-decoration: none; color: var(--accent); }
 .chart { position: relative; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-gap { fill: var(--muted); opacity: 0.12; }
+.chart-gap-label { fill: var(--muted); font-size: 10px; }
 .chart-grid-area { fill: none; stroke: var(--line); stroke-width: 1; }
 .chart-axis { fill: var(--muted); font-size: 11px; }
 .small-axis { font-size: 8px; }
