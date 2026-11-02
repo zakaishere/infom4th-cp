@@ -222,4 +222,32 @@ public class LaboratoryService {
         db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by) VALUES (?,?,?) ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now()",row.get("problem_id"),version,actor.id());
         db.audit(actor.id(),"PRACTICE_PUBLISH","problem_version",version,null);
     }
+
+    /** Grants or changes a user's access to the problem (EDITOR, REVIEWER or MANAGER); only the owner or a super administrator delegates. */
+    @Transactional
+    public void grantCollaborator(Actor actor,UUID version,UUID user,String accessLevel,String reason) {
+        var p=db.one("SELECT p.id,p.owner_id FROM problem_versions v JOIN problems p ON p.id=v.problem_id WHERE v.id=?",version);
+        Api.require(actor.superAdmin() || actor.id().equals(p.get("owner_id")),HttpStatus.FORBIDDEN,"Only the owner can delegate problem permissions");
+        db.jdbc.update("INSERT INTO problem_collaborators(problem_id,user_id,access_level,granted_by) VALUES (?,?,?,?) ON CONFLICT(problem_id,user_id) DO UPDATE SET access_level=excluded.access_level,granted_by=excluded.granted_by",
+                p.get("id"),user,accessLevel,actor.id());
+        db.audit(actor.id(),"COLLABORATOR_GRANT","problem",(UUID)p.get("id"),reason);
+    }
+    public Map<String,Object> status(Actor actor,UUID version) {
+        access.problemRead(actor,version);
+        return db.one("SELECT v.id,v.status,(SELECT r.status FROM problem_validation_results r WHERE r.problem_version_id=v.id ORDER BY r.created_at DESC LIMIT 1) AS validation_status FROM problem_versions v WHERE v.id=?",version);
+    }
+    /** Problems the actor owns or collaborates on (every problem for a super administrator); deleted=true lists the deleted ones instead. */
+    public List<Map<String,Object>> list(Actor actor,boolean deleted) {
+        access.setter(actor);
+        return db.jdbc.queryForList("SELECT p.id,p.slug,v.id AS version_id,v.title,v.version_number,v.status,p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE NOT p.system_benchmark AND (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC LIMIT 500",
+                actor.superAdmin(),actor.id(),actor.id(),deleted);
+    }
+    /** Everything a setter edits: the version, its tests with hidden content, reference solutions, validations and languages. */
+    public Map<String,Object> detail(Actor actor,UUID version) {
+        access.problemRead(actor,version);var result=new LinkedHashMap<>(db.one("SELECT * FROM problem_versions WHERE id=?",version));
+        result.put("tests",db.jdbc.queryForList("SELECT t.* FROM test_cases t JOIN test_case_groups g ON g.id=t.group_id WHERE t.problem_version_id=? ORDER BY g.position,t.position",version));
+        result.put("references",db.jdbc.queryForList("SELECT * FROM reference_solutions WHERE problem_version_id=?",version));
+        result.put("validations",db.jdbc.queryForList("SELECT id,status,report::text AS report,created_at,completed_at FROM problem_validation_results WHERE problem_version_id=? ORDER BY created_at DESC",version));
+        result.put("languages",db.jdbc.queryForList("SELECT language_code FROM problem_version_languages WHERE problem_version_id=?",String.class,version));return result;
+    }
 }

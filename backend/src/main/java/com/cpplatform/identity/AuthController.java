@@ -9,8 +9,8 @@ import java.util.*;
 
 @RestController
 public class AuthController {
-    private final AuthService auth; private final Database db; private final RateLimits limits;
-    public AuthController(AuthService auth,Database db,RateLimits limits) {this.auth=auth;this.db=db;this.limits=limits;}
+    private final AuthService auth; private final RateLimits limits;
+    public AuthController(AuthService auth,RateLimits limits) {this.auth=auth;this.limits=limits;}
     @PostMapping("/api/auth/register")
     @ResponseStatus(HttpStatus.CREATED)
     Object register(@RequestBody Map<String,Object> body,HttpServletRequest request) {
@@ -47,8 +47,5 @@ public class AuthController {
         return auth.changePassword(actor.id(),body);
     }
     @GetMapping("/api/me")
-    Object me(Authentication authentication) {
-        Actor actor=Actor.of(authentication);var result=new LinkedHashMap<>(db.one("SELECT id,email,handle,display_name FROM users WHERE id=?",actor.id()));
-        result.put("roles",actor.roles());return result;
-    }
+    Object me(Authentication authentication){return auth.me(Actor.of(authentication));}
 }

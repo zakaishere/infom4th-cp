@@ -91,6 +91,7 @@ public class CompetitionService {
         db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points) SELECT ?,?,?,problem_id,id,? FROM problem_versions WHERE id=?",
                 v.get("id"),slot,label,points,problemVersion);
     }
+    public List<String> readiness(Actor actor,UUID competition){access.competition(actor,competition,false);return readiness(competition);}
     public List<String> readiness(UUID competition) {
         var v=version(competition);List<String> errors=new ArrayList<>();
         var problems=db.jdbc.queryForList("SELECT p.* FROM competition_problems cp JOIN problem_versions p ON p.id=cp.problem_version_id WHERE cp.competition_version_id=?",v.get("id"));
@@ -167,6 +168,29 @@ public class CompetitionService {
         Api.require(actor.id().equals(t.get("captain_id")),HttpStatus.FORBIDDEN,"Only the captain can register the team");
         UUID id=db.id("INSERT INTO registrations(competition_id,team_id,status) VALUES (?,?,'APPROVED') RETURNING id",competition,team);
         addTeam((UUID)run.get("id"),team,((Number)v.get("max_team_size")).intValue());return id;
+    }
+    /** Keeps a contest out of the rating or brings it back; the rating recalculates from saved results. */
+    @Transactional
+    public void setRated(Actor actor,UUID competition,boolean rated,String reason) {
+        access.competition(actor,competition,false);
+        db.jdbc.update("UPDATE competitions SET rated=? WHERE id=?",rated,competition);
+        db.audit(actor.id(),rated?"COMPETITION_RATED":"COMPETITION_UNRATED","competition",competition,reason);
+    }
+    /** Lets a user register for a private competition. */
+    @Transactional
+    public void invite(Actor actor,UUID competition,UUID user) {
+        access.competition(actor,competition,false);
+        db.jdbc.update("INSERT INTO competition_invitations VALUES (?,?,?) ON CONFLICT DO NOTHING",competition,user,actor.id());
+        db.audit(actor.id(),"PARTICIPANT_INVITE","competition",competition,null);
+    }
+    /** Grants or changes a user's staff access (MANAGER, JURY or TESTER); only the owner or a super administrator delegates. */
+    @Transactional
+    public void grantStaff(Actor actor,UUID competition,UUID user,String accessLevel,boolean canPublish,String reason) {
+        var c=db.one("SELECT owner_id FROM competitions WHERE id=?",competition);
+        Api.require(actor.superAdmin() || actor.id().equals(c.get("owner_id")),HttpStatus.FORBIDDEN,"Only the owner can delegate contest permissions");
+        db.jdbc.update("INSERT INTO competition_staff(competition_id,user_id,access_level,can_publish,granted_by) VALUES (?,?,?,?,?) ON CONFLICT(competition_id,user_id) DO UPDATE SET access_level=excluded.access_level,can_publish=excluded.can_publish,granted_by=excluded.granted_by",
+                competition,user,accessLevel,canPublish,actor.id());
+        db.audit(actor.id(),"STAFF_GRANT","competition",competition,reason);
     }
     /**
      * Organizer registration of existing users by handle or email (individual contests).

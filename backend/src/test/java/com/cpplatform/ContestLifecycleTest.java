@@ -607,6 +607,51 @@ class ContestLifecycleTest {
         assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='CLARIFICATION_ANSWER' AND resource_id=?::uuid",Long.class,id));
     }
 
+    @Test void delegationRejudgingAndRuntimeAdministrationKeepTheirRules() throws Exception {
+        User owner=user(true),helper=user(false),entrant=user(false);UUID contest=contest(owner,0);
+        // Invitations and staff grants: organizers invite, only the owner delegates.
+        assertEquals(403,http("PUT","/api/manage/competitions/"+contest+"/invitations/"+entrant.actor.id(),entrant.token,null).statusCode());
+        assertEquals(200,http("PUT","/api/manage/competitions/"+contest+"/invitations/"+entrant.actor.id(),owner.token,null).statusCode());
+        assertTrue(db.exists("SELECT EXISTS(SELECT 1 FROM competition_invitations WHERE competition_id=? AND user_id=?)",contest,entrant.actor.id()));
+        String jury="{\"accessLevel\":\"JURY\",\"reason\":\"Helps judge\"}";
+        assertEquals(403,http("PUT","/api/manage/competitions/"+contest+"/staff/"+helper.actor.id(),entrant.token,jury).statusCode());
+        assertEquals(200,http("PUT","/api/manage/competitions/"+contest+"/staff/"+helper.actor.id(),owner.token,jury).statusCode());
+        assertEquals("JURY",db.one("SELECT access_level FROM competition_staff WHERE competition_id=? AND user_id=?",contest,helper.actor.id()).get("access_level"));
+        // Problem collaborators: only the owner delegates, and the grant is audited.
+        UUID version=db.id("SELECT cp.problem_version_id FROM competition_problems cp JOIN competition_versions v ON v.id=cp.competition_version_id WHERE v.competition_id=? LIMIT 1",contest);
+        UUID problem=db.id("SELECT problem_id FROM problem_versions WHERE id=?",version);
+        assertEquals(403,http("PUT","/api/lab/problems/"+version+"/collaborators/"+helper.actor.id(),entrant.token,"{\"accessLevel\":\"REVIEWER\"}").statusCode());
+        assertEquals(200,http("PUT","/api/lab/problems/"+version+"/collaborators/"+helper.actor.id(),owner.token,"{\"accessLevel\":\"REVIEWER\"}").statusCode());
+        assertEquals("REVIEWER",db.one("SELECT access_level FROM problem_collaborators WHERE problem_id=? AND user_id=?",problem,helper.actor.id()).get("access_level"));
+        assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='COLLABORATOR_GRANT' AND resource_id=?",Long.class,problem));
+        // Rejudging a judged contest submission starts a new generation, once at a time.
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(entrant.actor,contest,null);control(owner,run,"start-now");
+        UUID submission=submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}"));
+        UUID job=db.id("SELECT id FROM judging_jobs WHERE submission_id=?",submission);
+        var claimed=judge.claim(job,official,0).orElseThrow();
+        var cases=((List<?>)claimed.get("tests")).stream().map(t->Map.of("id",((Map<?,?>)t).get("id"),"verdict","ACCEPTED","executionTimeMs",10,"peakMemoryKb",1024)).toList();
+        judge.complete(job,official,Api.uuid(claimed.get("leaseToken")),Map.of("verdict","ACCEPTED","cases",cases,"executionTimeMs",10,"peakMemoryKb",1024));
+        String reason="{\"reason\":\"Tests were fixed\"}";
+        assertEquals(403,http("POST","/api/manage/submissions/"+submission+"/rejudge",entrant.token,reason).statusCode());
+        var rejudged=http("POST","/api/manage/submissions/"+submission+"/rejudge",owner.token,reason);
+        assertEquals(202,rejudged.statusCode(),rejudged.body());
+        assertEquals(2,((Number)db.one("SELECT generation FROM judging_jobs WHERE id=?",Api.uuid(JSON.readTree(rejudged.body()).get("jobId").asText())).get("generation")).intValue());
+        assertEquals(409,http("POST","/api/manage/submissions/"+submission+"/rejudge",owner.token,reason).statusCode(),"judging is already active");
+        // Judge overview and languages are super-administrator only; enabling needs a verified runtime.
+        assertEquals(403,http("GET","/api/admin/judge",entrant.token,null).statusCode());
+        assertTrue(http("GET","/api/admin/judge",owner.token,null).body().contains("\"workers\""));
+        assertEquals(403,http("GET","/api/admin/languages",entrant.token,null).statusCode());
+        assertTrue(http("GET","/api/admin/languages",owner.token,null).body().contains("\"PHP\""));
+        assertEquals(409,http("PUT","/api/admin/languages/PHP",owner.token,"{\"enabled\":true,\"imageId\":\"sha256:"+"b".repeat(64)+"\",\"reason\":\"try\"}").statusCode());
+        assertEquals(200,http("PUT","/api/admin/languages/PHP",owner.token,"{\"enabled\":false,\"reason\":\"Not offered\"}").statusCode());
+        assertEquals(404,http("PUT","/api/admin/languages/NOPE",owner.token,"{\"enabled\":false,\"reason\":\"x\"}").statusCode());
+        // The additive role endpoint is gone: it could grant SUPER_ADMIN without the last-administrator checks.
+        assertNotEquals(200,http("PUT","/api/admin/users/"+helper.actor.id()+"/roles",owner.token,"{\"role\":\"SUPER_ADMIN\",\"reason\":\"x\"}").statusCode());
+        assertFalse(db.exists("SELECT EXISTS(SELECT 1 FROM user_roles WHERE user_id=? AND role_code='SUPER_ADMIN')",helper.actor.id()));
+    }
+
     @Test void endingARehearsalMovesItsClock() throws Exception {
         User owner=user(true);UUID contest=contest(owner,0);
         UUID rehearsal=db.id("SELECT id FROM contest_runs WHERE competition_id=? AND kind='REHEARSAL'",contest);

@@ -8,8 +8,8 @@ import java.util.*;
 
 @RestController
 public class ProfileController {
-    private final ProfileService profiles;private final RateLimits limits;private final Database db;private final Permissions access;
-    public ProfileController(ProfileService profiles,RateLimits limits,Database db,Permissions access){this.profiles=profiles;this.limits=limits;this.db=db;this.access=access;}
+    private final ProfileService profiles;private final RateLimits limits;private final CompetitionService contests;
+    public ProfileController(ProfileService profiles,RateLimits limits,CompetitionService contests){this.profiles=profiles;this.limits=limits;this.contests=contests;}
     @GetMapping("/api/profiles/{handle}")
     Object profile(Authentication auth,@PathVariable String handle){return profiles.profile(Actor.of(auth),handle);}
     @GetMapping("/api/profiles/{first}/vs/{second}")
@@ -34,10 +34,7 @@ public class ProfileController {
     /** Keeps a contest out of the rating or brings it back; the rating recalculates from saved results. */
     @PostMapping("/api/manage/competitions/{id}/rated")
     Object rated(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body) {
-        Actor actor=Actor.of(auth);access.competition(actor,id,false);
         boolean rated=Boolean.TRUE.equals(body.get("rated"));
-        db.jdbc.update("UPDATE competitions SET rated=? WHERE id=?",rated,id);
-        db.audit(actor.id(),rated?"COMPETITION_RATED":"COMPETITION_UNRATED","competition",id,Api.optional(body,"reason","Rating setting",2000));
-        return Map.of("rated",rated);
+        contests.setRated(Actor.of(auth),id,rated,Api.optional(body,"reason","Rating setting",2000));return Map.of("rated",rated);
     }
 }

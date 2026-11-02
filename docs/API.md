@@ -40,7 +40,7 @@ additionally requires organizer authority and reviewer/manager access.
 | POST | /api/lab/problems/{versionId}/validate | Seal content and enqueue reference solutions; returns validationId |
 | POST | /api/lab/problems/{versionId}/approve | reason; passing validation required |
 | POST | /api/lab/problems/{versionId}/publish-practice | Explicitly publish approved version |
-| PUT | /api/lab/problems/{versionId}/collaborators/{userId} | accessLevel: EDITOR/REVIEWER/MANAGER, owner only |
+| PUT | /api/lab/problems/{versionId}/collaborators/{userId} | accessLevel: EDITOR/REVIEWER/MANAGER, optional reason; owner only, audited |
 
 Draft fields: title, statement, inputFormat, outputFormat, constraints, explanation,
 setterNotes, difficulty, checker, languages, timeLimitMs, memoryLimitMb, outputLimitKb.
@@ -140,7 +140,7 @@ Rehearsal submissions never enter the official result projection.
 | GET/POST | /api/runs/{runId}/clarifications | Own/team/public questions; POST question |
 | POST | /api/manage/clarifications/{id}/answer | answer, public; jury |
 | GET | /api/admin/users?offset=0 | Super administrator |
-| PUT | /api/admin/users/{id}/roles | role, reason; additive grant, super administrator |
+| PUT | /api/admin/users/{id}/role | role (PARTICIPANT, MODERATOR, ADMIN or SUPER_ADMIN), reason; replaces the staff role, refuses removing the last active super administrator or your own; super administrator |
 | PUT | /api/admin/languages/{code} | enabled, imageId, reason; super administrator |
 | GET | /api/admin/judge | Jobs, worker manifests, capacity, unpublished outbox count (legacy summary) |
 | POST | /api/admin/judge/workers/{id}/drain | reason; running jobs finish, new claims refused; persists across restarts |

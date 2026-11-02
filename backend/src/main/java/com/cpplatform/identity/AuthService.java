@@ -97,6 +97,11 @@ public class AuthService {
         db.jdbc.update("UPDATE refresh_tokens SET revoked_at=now() WHERE id=?",row.get("id"));
         return Optional.of(issue((UUID)row.get("user_id"),(UUID)row.get("family_id")));
     }
+    /** The signed-in account and the roles its access token carries. */
+    public Map<String,Object> me(Actor actor) {
+        var result=new LinkedHashMap<>(db.one("SELECT id,email,handle,display_name FROM users WHERE id=?",actor.id()));
+        result.put("roles",actor.roles());return result;
+    }
     @Transactional
     public void logout(Actor actor,String refresh) {
         db.jdbc.update("UPDATE refresh_tokens SET revoked_at=coalesce(revoked_at,now()) WHERE user_id=? AND family_id IN (SELECT family_id FROM refresh_tokens WHERE token_digest=?)",
