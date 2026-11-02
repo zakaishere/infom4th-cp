@@ -470,6 +470,95 @@ class ContestLifecycleTest {
         assertEquals("FINISHED",db.one("SELECT status FROM contest_runs WHERE id=?",run).get("status"));
     }
 
+    String fullscreenEvent(String action,String kind,String reason,int agoMs) {
+        return "{\"id\":\""+UUID.randomUUID()+"\",\"action\":\""+action+"\",\"kind\":\""+kind+"\",\"reason\":\""+reason+"\",\"agoMs\":"+agoMs+"}";
+    }
+
+    @Test void fullscreenExitsAreLoggedForTheJuryAndRaiseAnAlert() throws Exception {
+        User owner=user(true),entrant=user(false),outsider=user(false);UUID contest=contest(owner,0);
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(entrant.actor,contest,null);
+        String path="/api/runs/"+run+"/fullscreen-events",log="/api/manage/runs/"+run+"/fullscreen";
+        control(owner,run,"start-now");
+        Thread.sleep(1200);// so the events below can sit inside the contest clock
+
+        assertEquals(403,http("POST",path,outsider.token,fullscreenEvent("left","LEFT_FULLSCREEN","EXITED",0)).statusCode());
+        assertEquals(400,http("POST",path,entrant.token,fullscreenEvent("left","NONSENSE","EXITED",0)).statusCode());
+        assertEquals(400,http("POST",path,entrant.token,fullscreenEvent("left","LEFT_FULLSCREEN","NONSENSE",0)).statusCode());
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("left","LEFT_FULLSCREEN","EXITED",0)).statusCode());
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("left","LEFT_FULLSCREEN","EXITED",0)).statusCode(),"a repeat while already away changes nothing");
+
+        // Contestants and outsiders can't read it; the alert reaches the organizer while they are away.
+        assertEquals(403,http("GET",log,entrant.token,null).statusCode());
+        assertEquals(403,http("GET",log+"/report.xlsx",entrant.token,null).statusCode());
+        var alert=json(http("GET","/api/manage/fullscreen/alerts",owner.token,null));
+        assertTrue(alert.get("count").asInt()>=1);
+        assertEquals(0,json(http("GET","/api/manage/fullscreen/alerts",entrant.token,null)).get("count").asInt(),"not their contest");
+        String later=java.net.URLEncoder.encode(Instant.now().plusSeconds(5).toString(),java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0,json(http("GET","/api/manage/fullscreen/alerts?after="+later,owner.token,null)).get("count").asInt(),"seen alerts stay quiet");
+
+        var away=json(http("GET",log,owner.token,null));
+        assertEquals(1,away.get("total").asInt());
+        assertTrue(away.get("people").get(0).get("away_now").asBoolean());
+        assertEquals(1,away.get("people").get(0).get("left_count").asInt());
+
+        Thread.sleep(300);
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("returned","LEFT_FULLSCREEN","EXITED",0)).statusCode());
+        accept(submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}")),official);
+        // Reported late after losing the connection: the time away is still right.
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("left","LEFT_FULLSCREEN","PAGE_RELOAD",800)).statusCode());
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("returned","LEFT_FULLSCREEN","PAGE_RELOAD",300)).statusCode());
+        // A blink of lost focus is logged but raises no alert.
+        String before=java.net.URLEncoder.encode(Instant.now().toString(),java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("left","LOST_FOCUS","OTHER_WINDOW",0)).statusCode());
+        assertEquals(0,json(http("GET","/api/manage/fullscreen/alerts?after="+before,owner.token,null)).get("count").asInt());
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("returned","LOST_FOCUS","OTHER_WINDOW",0)).statusCode());
+
+        var response=http("GET",log,owner.token,null);
+        var done=json(response);
+        assertEquals(3,done.get("total").asInt());
+        assertFalse(response.body().contains("@example.test"));
+        var person=done.get("people").get(0);
+        assertEquals(handle(entrant),person.get("handle").asText());
+        assertEquals(2,person.get("left_count").asInt());
+        assertEquals(1,person.get("focus_count").asInt());
+        assertEquals(1,person.get("reload_count").asInt());
+        assertFalse(person.get("away_now").asBoolean());
+        assertTrue(person.get("total_away_ms").asLong()>=500,person.toString());
+        com.fasterxml.jackson.databind.JsonNode reload=null,firstExit=null;
+        for(var event:done.get("events")) {
+            if(event.get("reason").asText().equals("PAGE_RELOAD"))reload=event;
+            if(event.get("reason").asText().equals("EXITED"))firstExit=event;
+        }
+        assertNotNull(reload);assertNotNull(firstExit);
+        long reloadAway=reload.get("away_ms").asLong();
+        assertTrue(reloadAway>=400 && reloadAway<5000,"about 500 ms away, got "+reloadAway);
+        assertFalse(firstExit.get("next_submission_seconds").isNull(),"the submission followed this return");
+        assertTrue(firstExit.get("next_submission_seconds").asLong()>=0);
+
+        var download=HTTP.send(HttpRequest.newBuilder(URI.create(base+log+"/report.xlsx")).header("Authorization","Bearer "+owner.token).build(),HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200,download.statusCode());
+        var parts=new HashMap<String,org.w3c.dom.Document>();
+        try(var zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(download.body()))) {
+            for(var entry=zip.getNextEntry();entry!=null;entry=zip.getNextEntry())parts.put(entry.getName(),javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new java.io.ByteArrayInputStream(zip.readAllBytes())));
+        }
+        assertEquals(1+1,parts.get("xl/worksheets/sheet1.xml").getElementsByTagName("row").getLength());
+        assertEquals(1+3,parts.get("xl/worksheets/sheet2.xml").getElementsByTagName("row").getLength());
+        assertTrue(parts.get("xl/worksheets/sheet2.xml").getDocumentElement().getTextContent().contains("Page reload"));
+
+        // Someone who never came back: time away stops at the end, and nothing new is logged afterwards.
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("left","LEFT_FULLSCREEN","EXITED",0)).statusCode());
+        control(owner,run,"end-now");
+        Thread.sleep(100);
+        assertEquals(4,json(http("GET",log,owner.token,null)).get("total").asInt());
+        assertEquals(200,http("POST",path,entrant.token,fullscreenEvent("left","LOST_FOCUS","OTHER_WINDOW",0)).statusCode());
+        var over=json(http("GET",log,owner.token,null));
+        assertEquals(4,over.get("total").asInt(),"the contest is over");
+        assertFalse(over.get("people").get(0).get("away_now").asBoolean());
+        assertEquals(0,json(http("GET","/api/manage/fullscreen/alerts",owner.token,null)).findValues("competition_id").stream().filter(c->c.asText().equals(contest.toString())).count(),"a finished contest raises no alert");
+    }
+
     @Test void adminsCanSeeTeamsAndWhatTheyPlayed() throws Exception {
         User owner=user(true),captain=user(false),member=user(false),idle=user(false);
         var created=JSON.readTree(http("POST","/api/teams",captain.token,"{\"name\":\"Team "+UUID.randomUUID()+"\"}").body());
@@ -508,6 +597,72 @@ class ContestLifecycleTest {
         var never=http("GET","/api/admin/teams?activity=never",owner.token,null).body();
         assertTrue(never.contains(quiet));assertFalse(never.contains(team));
         assertTrue(http("GET","/api/admin/teams?activity=locked",owner.token,null).body().contains(team));
+    }
+
+    @Test void clarificationsStayPrivateUntilAnsweredPubliclyAndOnlyStaffAnnounce() throws Exception {
+        User owner=user(true),asker=user(false),other=user(false);UUID contest=contest(owner,0);
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(asker.actor,contest,null);contests.register(other.actor,contest,null);
+        control(owner,run,"start-now");
+        var asked=http("POST","/api/runs/"+run+"/clarifications",asker.token,"{\"question\":\"Is the input sorted?\"}");
+        assertEquals(201,asked.statusCode(),asked.body());
+        String id=JSON.readTree(asked.body()).get("clarificationId").asText();
+        assertTrue(http("GET","/api/runs/"+run+"/clarifications",asker.token,null).body().contains("Is the input sorted?"));
+        assertFalse(http("GET","/api/runs/"+run+"/clarifications",other.token,null).body().contains("Is the input sorted?"),"unanswered questions are private to the asker");
+        assertEquals(403,http("POST","/api/manage/clarifications/"+id+"/answer",other.token,"{\"answer\":\"Yes\",\"public\":true}").statusCode());
+        assertEquals(200,http("POST","/api/manage/clarifications/"+id+"/answer",owner.token,"{\"answer\":\"No, read the statement\",\"public\":true}").statusCode());
+        assertTrue(http("GET","/api/runs/"+run+"/clarifications",other.token,null).body().contains("No, read the statement"));
+        assertEquals(403,http("POST","/api/manage/runs/"+run+"/announcements",asker.token,"{\"title\":\"Hi\",\"body\":\"Not staff\"}").statusCode());
+        assertEquals(201,http("POST","/api/manage/runs/"+run+"/announcements",owner.token,"{\"title\":\"Note\",\"body\":\"Limits were raised\"}").statusCode());
+        assertTrue(http("GET","/api/runs/"+run+"/announcements",other.token,null).body().contains("Limits were raised"));
+        assertEquals(List.of("ANNOUNCEMENT","CLARIFICATION_UPDATED"),db.jdbc.queryForList("SELECT kind FROM run_events WHERE run_id=? AND kind IN ('ANNOUNCEMENT','CLARIFICATION_UPDATED') ORDER BY kind",String.class,run));
+        assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='ANNOUNCEMENT_PUBLISH' AND resource_id=?",Long.class,run));
+        assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='CLARIFICATION_ANSWER' AND resource_id=?::uuid",Long.class,id));
+    }
+
+    @Test void delegationRejudgingAndRuntimeAdministrationKeepTheirRules() throws Exception {
+        User owner=user(true),helper=user(false),entrant=user(false);UUID contest=contest(owner,0);
+        // Invitations and staff grants: organizers invite, only the owner delegates.
+        assertEquals(403,http("PUT","/api/manage/competitions/"+contest+"/invitations/"+entrant.actor.id(),entrant.token,null).statusCode());
+        assertEquals(200,http("PUT","/api/manage/competitions/"+contest+"/invitations/"+entrant.actor.id(),owner.token,null).statusCode());
+        assertTrue(db.exists("SELECT EXISTS(SELECT 1 FROM competition_invitations WHERE competition_id=? AND user_id=?)",contest,entrant.actor.id()));
+        String jury="{\"accessLevel\":\"JURY\",\"reason\":\"Helps judge\"}";
+        assertEquals(403,http("PUT","/api/manage/competitions/"+contest+"/staff/"+helper.actor.id(),entrant.token,jury).statusCode());
+        assertEquals(200,http("PUT","/api/manage/competitions/"+contest+"/staff/"+helper.actor.id(),owner.token,jury).statusCode());
+        assertEquals("JURY",db.one("SELECT access_level FROM competition_staff WHERE competition_id=? AND user_id=?",contest,helper.actor.id()).get("access_level"));
+        // Problem collaborators: only the owner delegates, and the grant is audited.
+        UUID version=db.id("SELECT cp.problem_version_id FROM competition_problems cp JOIN competition_versions v ON v.id=cp.competition_version_id WHERE v.competition_id=? LIMIT 1",contest);
+        UUID problem=db.id("SELECT problem_id FROM problem_versions WHERE id=?",version);
+        assertEquals(403,http("PUT","/api/lab/problems/"+version+"/collaborators/"+helper.actor.id(),entrant.token,"{\"accessLevel\":\"REVIEWER\"}").statusCode());
+        assertEquals(200,http("PUT","/api/lab/problems/"+version+"/collaborators/"+helper.actor.id(),owner.token,"{\"accessLevel\":\"REVIEWER\"}").statusCode());
+        assertEquals("REVIEWER",db.one("SELECT access_level FROM problem_collaborators WHERE problem_id=? AND user_id=?",problem,helper.actor.id()).get("access_level"));
+        assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='COLLABORATOR_GRANT' AND resource_id=?",Long.class,problem));
+        // Rejudging a judged contest submission starts a new generation, once at a time.
+        UUID official=db.id("SELECT id FROM judge_workers WHERE runtime_manifest->>'lane'='official' ORDER BY registered_at DESC LIMIT 1");
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(entrant.actor,contest,null);control(owner,run,"start-now");
+        UUID submission=submissions.submit(entrant.actor,run,1,null,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}"));
+        UUID job=db.id("SELECT id FROM judging_jobs WHERE submission_id=?",submission);
+        var claimed=judge.claim(job,official,0).orElseThrow();
+        var cases=((List<?>)claimed.get("tests")).stream().map(t->Map.of("id",((Map<?,?>)t).get("id"),"verdict","ACCEPTED","executionTimeMs",10,"peakMemoryKb",1024)).toList();
+        judge.complete(job,official,Api.uuid(claimed.get("leaseToken")),Map.of("verdict","ACCEPTED","cases",cases,"executionTimeMs",10,"peakMemoryKb",1024));
+        String reason="{\"reason\":\"Tests were fixed\"}";
+        assertEquals(403,http("POST","/api/manage/submissions/"+submission+"/rejudge",entrant.token,reason).statusCode());
+        var rejudged=http("POST","/api/manage/submissions/"+submission+"/rejudge",owner.token,reason);
+        assertEquals(202,rejudged.statusCode(),rejudged.body());
+        assertEquals(2,((Number)db.one("SELECT generation FROM judging_jobs WHERE id=?",Api.uuid(JSON.readTree(rejudged.body()).get("jobId").asText())).get("generation")).intValue());
+        assertEquals(409,http("POST","/api/manage/submissions/"+submission+"/rejudge",owner.token,reason).statusCode(),"judging is already active");
+        // Judge overview and languages are super-administrator only; enabling needs a verified runtime.
+        assertEquals(403,http("GET","/api/admin/judge",entrant.token,null).statusCode());
+        assertTrue(http("GET","/api/admin/judge",owner.token,null).body().contains("\"workers\""));
+        assertEquals(403,http("GET","/api/admin/languages",entrant.token,null).statusCode());
+        assertTrue(http("GET","/api/admin/languages",owner.token,null).body().contains("\"PHP\""));
+        assertEquals(409,http("PUT","/api/admin/languages/PHP",owner.token,"{\"enabled\":true,\"imageId\":\"sha256:"+"b".repeat(64)+"\",\"reason\":\"try\"}").statusCode());
+        assertEquals(200,http("PUT","/api/admin/languages/PHP",owner.token,"{\"enabled\":false,\"reason\":\"Not offered\"}").statusCode());
+        assertEquals(404,http("PUT","/api/admin/languages/NOPE",owner.token,"{\"enabled\":false,\"reason\":\"x\"}").statusCode());
+        // The additive role endpoint is gone: it could grant SUPER_ADMIN without the last-administrator checks.
+        assertNotEquals(200,http("PUT","/api/admin/users/"+helper.actor.id()+"/roles",owner.token,"{\"role\":\"SUPER_ADMIN\",\"reason\":\"x\"}").statusCode());
+        assertFalse(db.exists("SELECT EXISTS(SELECT 1 FROM user_roles WHERE user_id=? AND role_code='SUPER_ADMIN')",helper.actor.id()));
     }
 
     @Test void endingARehearsalMovesItsClock() throws Exception {

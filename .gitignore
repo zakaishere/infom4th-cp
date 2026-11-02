@@ -12,6 +12,9 @@ node_modules/
 dist/
 .env.bak
 
+# Separate Android app project, kept outside this repository.
+/lifeos-android/
+
 # Personal scratch copies of work in progress (never committed).
 draft/
 examples/

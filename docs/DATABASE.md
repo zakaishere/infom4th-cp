@@ -15,6 +15,7 @@ neither imported nor modified.
 | V7 | Immutable per-problem runtime image snapshots captured during validation |
 | V16 | Profile fields, the per-contest rated switch, saved final contest results and private rivals |
 | V17 | Administrator benchmarks: benchmark_runs, the BENCHMARK submission context and the private problem flag |
+| V18 | fullscreen_events: when contestants left the contest screen and for how long, for jury review |
 
 Official submissions bind the submitting user, entry, run and exact problem snapshot
 through composite foreign keys. Laboratory/practice submissions explicitly have no
