@@ -3,7 +3,7 @@
 #   sh scripts/build-runtimes.sh cpp python go
 set -eu
 cd "$(dirname "$0")/.."
-languages="${*:-cpp c java python pypy javascript go rust kotlin csharp ruby php}"
+languages="${*:-cpp c java python pypy javascript go rust kotlin csharp ruby php zig brainfuck}"
 for language in $languages; do
   docker build -f "judge/images/$language.Dockerfile" -t "cp-judge-$language:local" judge/images
 done

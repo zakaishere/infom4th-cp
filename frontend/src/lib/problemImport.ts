@@ -7,6 +7,8 @@ export type BankProblem = {
   timeLimitMs: number; memoryLimitMb: number; outputLimitKb: number; languages: string[];
   tests: { input: string; expected: string; sample: boolean }[];
   reference: { label: string; language: string; sourceCode: string };
+  /** A function problem's signature (see lib/functionMode.ts); the server checks it and the tests. */
+  functionSignature?: ObjectValue;
 };
 type ObjectValue = Record<string, unknown>;
 const bytes = (text: string) => new TextEncoder().encode(text).length;
@@ -100,6 +102,7 @@ export function parseProblemBank(value: unknown): BankProblem[] {
         memoryLimitMb: number(p.memoryLimitMb, "memory limit", 256, 16, 4096), outputLimitKb, tests,
         reference: { label: r.label === undefined ? "Main solution" : text(r.label, "reference label", 100, true), language, sourceCode: text(r.sourceCode, "reference source", 262144, true) },
       };
+      if (p.functionSignature != null) result.functionSignature = object(p.functionSignature);
       if (bytes(JSON.stringify(result)) > 20 * 1024 * 1024) throw new Error("Problem request exceeds 20 MiB");
       return result;
     } catch (error) { throw new Error(`Problem ${index + 1}: ${error instanceof Error ? error.message : "Invalid data"}`); }

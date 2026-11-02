@@ -95,6 +95,36 @@ class BackendWorkflowTest {
                 "tests",List.of(Map.of("input","2 3\n","expected","5\n","sample",true),Map.of("input","4 5\n","expected","9\n","sample",false)),
                 "reference",Map.of("language","CPP","sourceCode","int main() {}")));
     }
+    @Test void functionProblemsCheckTestsLanguagesAndReachTheJudge() {
+        User owner=user(true);UUID worker=worker("internal",2);
+        db.jdbc.update("UPDATE languages SET enabled=true,runtime_image_id=? WHERE code='BRAINFUCK'",IMAGE);
+        UUID version=lab.create(owner.actor,Map.of("slug","two-sum-"+UUID.randomUUID(),"title","Two Sum","statement","Find two indices","languages",List.of("CPP")));
+        var signature=Map.of("functionName","twoSum","params",List.of(Map.of("name","nums","type","int[]"),Map.of("name","target","type","int")),"returnType","int[]");
+        lab.edit(owner.actor,version,Map.of("functionSignature",signature));
+        // Names that clash with a language keyword, unknown types and C's size parameters are refused.
+        for(var bad:List.of(Map.of("functionName","class","params",List.of(Map.of("name","nums","type","int[]")),"returnType","int"),
+                Map.of("functionName","solve","params",List.of(Map.of("name","grid","type","int[][][]")),"returnType","int"),
+                Map.of("functionName","solve","params",List.of(Map.of("name","nums","type","int[]"),Map.of("name","numsSize","type","int")),"returnType","int")))
+            assertThrows(ResponseStatusException.class,()->lab.edit(owner.actor,version,Map.of("functionSignature",bad)));
+        var wrongCount=assertThrows(ResponseStatusException.class,()->lab.tests(owner.actor,version,List.of(Map.of("input","[2,7,11,15]","expected","[0,1]","sample",true))));
+        assertTrue(wrongCount.getReason().contains("Test 1"));
+        assertThrows(ResponseStatusException.class,()->lab.tests(owner.actor,version,List.of(Map.of("input","[2,7]\n9","expected","\"0,1\"","sample",true))));
+        lab.tests(owner.actor,version,List.of(Map.of("input","[2,7,11,15]\n9","expected","[0,1]","sample",true),Map.of("input","[3,2,4]\n6\n","expected","[1, 2]","sample",false)));
+        assertThrows(ResponseStatusException.class,()->lab.edit(owner.actor,version,Map.of("languages",List.of("CPP","BRAINFUCK"))),"Brainfuck has no functions");
+        var shown=context.getBean(CompetitionQueries.class).problem(version);
+        assertTrue(String.valueOf(shown.get("function_signature")).contains("\"twoSum\""));
+        lab.reference(owner.actor,version,Map.of("label","Correct","language","CPP","sourceCode","class Solution {};","expectedVerdict","ACCEPTED"));
+        UUID validation=lab.validate(owner.actor,version);
+        UUID job=db.jdbc.queryForObject("SELECT j.id FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id WHERE s.validation_id=?",UUID.class,validation);
+        var claimed=judge.claim(job,worker,0).orElseThrow();
+        assertEquals(shown.get("function_signature"),claimed.get("function_signature"));
+        UUID copy=lab.cloneVersion(owner.actor,version);
+        assertEquals(shown.get("function_signature"),db.one("SELECT function_signature FROM problem_versions WHERE id=?",copy).get("function_signature"));
+        // Back to standard input and output.
+        lab.edit(owner.actor,copy,Collections.singletonMap("functionSignature",null));
+        assertNull(db.one("SELECT function_signature FROM problem_versions WHERE id=?",copy).get("function_signature"));
+        db.jdbc.update("UPDATE languages SET enabled=false,runtime_image_id=NULL WHERE code='BRAINFUCK'");
+    }
     @Test void bankImportIsAtomicRetrySafeAndPrivate() throws Exception {
         User owner=user(true),participant=user(false);String slug="bank-"+UUID.randomUUID();
         var body=bankProblem(slug);String content=JSON.writeValueAsString(body);

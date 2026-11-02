@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, post } from "../api";
 import { navigate, useData, useToast } from "../app";
-import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey, readDraft, uuid,
+import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey, readDraft, templateFor, uuid,
   type ProblemDetail, type SubmissionDetail, type SubmissionRow } from "../components/Problem";
 import { submissionAccepted, verdictShown } from "../lib/latency";
-import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Ring, TEMPLATES, VERDICTS } from "../ui";
+import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Ring, VERDICTS } from "../ui";
+import { parseSignature } from "../lib/functionMode";
 import { DocsPanel } from "../components/DocsPanel";
 
 export type PracticeProblem = {
@@ -181,11 +182,15 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
     try { saved = localStorage.getItem("cp.language"); } catch { /* ignore */ }
     setLanguage((current) => (languages.includes(current) ? current : saved && languages.includes(saved) ? saved : languages[0]));
   }, [languages.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setSource(readDraft(scope, language) ?? TEMPLATES[language] ?? ""); }, [scope, language]);
+  // Function problems start from their starter code, which is only known once the problem has loaded.
+  const loaded = Boolean(problem.data);
+  const template = templateFor(language, parseSignature(problem.data?.function_signature));
+  useEffect(() => { if (loaded) setSource(readDraft(scope, language) ?? template); }, [scope, language, template, loaded]);
   useEffect(() => {
+    if (!loaded) return;
     const timer = setTimeout(() => { try { localStorage.setItem(draftKey(scope, language), source); } catch { /* ignore */ } }, 400);
     return () => clearTimeout(timer);
-  }, [scope, language, source]);
+  }, [scope, language, source, loaded]);
 
   // Follow the latest run/submission until it has a verdict.
   const outcomeId = outcome?.id;
@@ -281,7 +286,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
           <select value={language} onChange={(e) => { setLanguage(e.target.value); try { localStorage.setItem("cp.language", e.target.value); } catch { /* ignore */ } }} style={{ width: "auto" }}>
             {languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l] ?? l}</option>)}
           </select>
-          <button className="ghost small" onClick={() => { if (confirm("Replace your code with the starter template?")) setSource(TEMPLATES[language] ?? ""); }} title="Reset to the starter template">↺ Reset</button>
+          <button className="ghost small" onClick={() => { if (confirm("Replace your code with the starter template?")) setSource(template); }} title="Reset to the starter template">↺ Reset</button>
           <button className="small" onClick={() => setDocs((value) => !value)} aria-expanded={docs}>Reference</button>
           <span className="spacer" />
           <span className="small muted hide-narrow">Draft saved</span>
@@ -297,7 +302,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
         {docs && <DocsPanel language={language} onClose={() => setDocs(false)} />}
         <div className={"ws-console" + (result?.verdict ? " has-result" : "")}>
           {!outcome ? (
-            <div className="small muted">Write your solution, then <strong>▶ Run examples</strong> to check it on the statement's examples, or <strong>Submit</strong> to be judged on every test. Read from standard input, print to standard output{languages.includes("JAVA") ? "; Java classes must be named Main" : ""}.</div>
+            <div className="small muted">Write your solution, then <strong>▶ Run examples</strong> to check it on the statement's examples, or <strong>Submit</strong> to be judged on every test. {p.function_signature ? "Complete the function; the judge calls it on every test." : <>Read from standard input, print to standard output{languages.includes("JAVA") ? "; Java classes must be named Main" : ""}.</>}</div>
           ) : !result?.verdict && result?.status !== "FAILED" ? (
             <div className="row"><span className="spinner" /><strong>{outcome.kind === "run" ? "Running on the examples…" : "Judging on all tests…"}</strong>
               <span className="small muted">{result?.status === "RUNNING" ? "compiling and running" : "waiting for a free judge"}</span></div>

@@ -42,6 +42,8 @@ public class BenchmarkService {
         out.put("CSHARP","using System;\nusing System.Linq;\n\nclass Program {\n    static void Main() {\n        var data = Console.In.ReadToEnd().Split((char[])null, StringSplitOptions.RemoveEmptyEntries);\n        Console.WriteLine(data.Skip(1).Sum(x => long.Parse(x)));\n    }\n}\n");
         out.put("RUBY","data = STDIN.read.split.map(&:to_i)\nputs data.drop(1).sum\n");
         out.put("PHP","<?php\n$data = preg_split('/\\s+/', trim(stream_get_contents(STDIN)));\necho array_sum(array_slice($data, 1)), \"\\n\";\n");
+        out.put("ZIG","const std = @import(\"std\");\n\npub fn main() !void {\n    const input = try std.io.getStdIn().readToEndAlloc(std.heap.page_allocator, 1 << 30);\n    var it = std.mem.tokenizeAny(u8, input, \" \\r\\n\\t\");\n    const n = try std.fmt.parseInt(usize, it.next().?, 10);\n    var sum: i64 = 0;\n    for (0..n) |_| sum += try std.fmt.parseInt(i64, it.next().?, 10);\n    try std.io.getStdOut().writer().print(\"{d}\\n\", .{sum});\n}\n");
+        // Brainfuck has no benchmark program: summing numbers in it is impractical.
         return Collections.unmodifiableMap(out);
     }
 

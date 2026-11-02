@@ -3,6 +3,7 @@ import { post } from "../api";
 import { useData, useToast } from "../app";
 import { submissionAccepted } from "../lib/latency";
 import { DocsPanel } from "./DocsPanel";
+import { describe, labelInput, parseSignature, starter, type Signature } from "../lib/functionMode";
 import { CodeEditor, ErrorBox, LANGUAGE_NAMES, Loading, Markdown, Modal, TEMPLATES, VERDICTS, Verdict, timeOf, when } from "../ui";
 
 export type ProblemDetail = {
@@ -10,7 +11,14 @@ export type ProblemDetail = {
   constraints_md: string; explanation_md: string; time_limit_ms: number; memory_limit_mb: number; output_limit_kb: number;
   samples: { input_data: string; expected_output: string; explanation_md: string }[];
   languages: string[];
+  /** JSON signature of a function problem; null when the program reads standard input. */
+  function_signature?: string | null;
 };
+
+/** Starter code: the function to complete on function problems, the usual template otherwise. */
+export function templateFor(language: string, signature: Signature | null) {
+  return signature ? starter(language, signature) : TEMPLATES[language] ?? "";
+}
 
 export type SubmissionRow = {
   id: string; problem_slot: number | null; problem_version_id: string; language_code: string; submitted_at: string;
@@ -22,6 +30,7 @@ export const pending = (s: { status: string | null }) => s.status === "QUEUED" |
 
 export function ProblemStatement({ problem, label }: { problem: ProblemDetail; label?: string }) {
   const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => undefined);
+  const signature = parseSignature(problem.function_signature);
   return (
     <article>
       <h1 style={{ marginBottom: "0.25rem" }}>{label && <span className="muted">{label}. </span>}{problem.title}</h1>
@@ -31,6 +40,11 @@ export function ProblemStatement({ problem, label }: { problem: ProblemDetail; l
         <span>Output: <strong>{problem.output_limit_kb} KB</strong></span>
       </div>
       <Markdown text={problem.statement_md} />
+      {signature && <>
+        <h2>Function</h2>
+        <pre>{describe(signature)}</pre>
+        <p className="small muted">Complete the function in the editor; do not read input or print the answer. Anything you print is ignored, so printing to debug is fine.</p>
+      </>}
       {problem.input_format_md && <><h2>Input</h2><Markdown text={problem.input_format_md} /></>}
       {problem.output_format_md && <><h2>Output</h2><Markdown text={problem.output_format_md} /></>}
       {problem.constraints_md && <><h2>Constraints</h2><Markdown text={problem.constraints_md} /></>}
@@ -38,8 +52,9 @@ export function ProblemStatement({ problem, label }: { problem: ProblemDetail; l
       {problem.samples.map((s, i) => (
         <div key={i}>
           <div className="sample">
-            <div><div className="row-between small"><strong>Input {i + 1}</strong><button className="ghost small" onClick={() => copy(s.input_data)}>Copy</button></div><pre>{s.input_data}</pre></div>
-            <div><div className="row-between small"><strong>Output {i + 1}</strong><button className="ghost small" onClick={() => copy(s.expected_output)}>Copy</button></div><pre>{s.expected_output}</pre></div>
+            <div><div className="row-between small"><strong>Input {i + 1}</strong><button className="ghost small" onClick={() => copy(s.input_data)}>Copy</button></div>
+              <pre>{signature ? labelInput(signature, s.input_data).map(([name, value]) => `${name} = ${value}`).join("\n") : s.input_data}</pre></div>
+            <div><div className="row-between small"><strong>{signature ? "Returns" : "Output " + (i + 1)}</strong><button className="ghost small" onClick={() => copy(s.expected_output)}>Copy</button></div><pre>{s.expected_output}</pre></div>
           </div>
           {s.explanation_md && <Markdown text={s.explanation_md} />}
         </div>
@@ -64,8 +79,8 @@ export function readDraft(scope: string, language: string) {
 }
 
 /** Editor with language choice, autosaved drafts and idempotent submission. */
-export function SubmitPanel({ scope, languages, path, disabled, disabledReason, onSubmitted }: {
-  scope: string; languages: string[]; path: string; disabled?: boolean; disabledReason?: string; onSubmitted: () => void;
+export function SubmitPanel({ scope, languages, path, disabled, disabledReason, onSubmitted, signature = null }: {
+  scope: string; languages: string[]; path: string; disabled?: boolean; disabledReason?: string; onSubmitted: () => void; signature?: Signature | null;
 }) {
   const toast = useToast();
   const [language, setLanguage] = useState(() => {
@@ -80,7 +95,8 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
   useEffect(() => {
     if (!languages.includes(language) && languages[0]) setLanguage(languages[0]);
   }, [languages, language]);
-  useEffect(() => { setSource(readDraft(scope, language) ?? TEMPLATES[language] ?? ""); }, [scope, language]);
+  const template = templateFor(language, signature);
+  useEffect(() => { setSource(readDraft(scope, language) ?? template); }, [scope, language]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const timer = setTimeout(() => { try { localStorage.setItem(draftKey(scope, language), source); } catch { /* ignore */ } }, 400);
     return () => clearTimeout(timer);
@@ -109,7 +125,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
           <select value={language} onChange={(e) => { setLanguage(e.target.value); try { localStorage.setItem("cp.language", e.target.value); } catch { /* ignore */ } }} style={{ width: "auto" }}>
             {languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l] ?? l}</option>)}
           </select>
-          <button className="ghost small" onClick={() => { if (confirm("Replace your code with the template?")) setSource(TEMPLATES[language] ?? ""); }}>Reset</button>
+          <button className="ghost small" onClick={() => { if (confirm("Replace your code with the template?")) setSource(template); }}>Reset</button>
           <button className="small" onClick={() => setDocs((open) => !open)} aria-expanded={docs}>Reference</button>
         </div>
         <button className="primary" disabled={disabled || busy || !source.trim() || languages.length === 0} onClick={submit} title="Ctrl+Enter">
@@ -119,7 +135,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
       {disabled && disabledReason && <div className="notice warn small">{disabledReason}</div>}
       {languages.length === 0 && <div className="notice warn small">No language is currently enabled for this problem.</div>}
       <CodeEditor value={source} onChange={setSource} onSubmit={submit} language={language} />
-      <div className="small muted">Read from standard input, write to standard output. Java classes must be named Main. Drafts are saved in this browser. Press Tab to accept a suggestion.</div>
+      <div className="small muted">{signature ? "Complete the function; the judge calls it on every test." : "Read from standard input, write to standard output. Java classes must be named Main."} Drafts are saved in this browser. Press Tab to accept a suggestion.</div>
       {docs && <DocsPanel language={language} onClose={() => setDocs(false)} />}
     </div>
   );

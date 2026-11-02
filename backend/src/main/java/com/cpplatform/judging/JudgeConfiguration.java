@@ -12,7 +12,7 @@ import org.springframework.amqp.core.Queue;
 @ConditionalOnProperty(name="cp.dispatch.enabled",havingValue="true",matchIfMissing=true)
 public class JudgeConfiguration {
     public static final String EXCHANGE="cp.judge";
-    public static final List<String> LANGUAGES=List.of("CPP","CPP20","C","JAVA","PYTHON","PYPY","JAVASCRIPT","GO","RUST","KOTLIN","CSHARP","RUBY","PHP");
+    public static final List<String> LANGUAGES=List.of("CPP","CPP20","C","JAVA","PYTHON","PYPY","JAVASCRIPT","GO","RUST","KOTLIN","CSHARP","RUBY","PHP","ZIG","BRAINFUCK");
     @Bean Declarables judgeTopology() {
         List<Declarable> declarations=new ArrayList<>();
         DirectExchange exchange=new DirectExchange(EXCHANGE,true,false),dead=new DirectExchange("cp.judge.dead",true,false);

@@ -18,6 +18,7 @@ import { go } from "@codemirror/lang-go";
 import { php } from "@codemirror/lang-php";
 import { kotlin, csharp } from "@codemirror/legacy-modes/mode/clike";
 import { ruby } from "@codemirror/legacy-modes/mode/ruby";
+import { brainfuck } from "@codemirror/legacy-modes/mode/brainfuck";
 import type { Extension } from "@codemirror/state";
 
 /** Syntax support per judge language code. */
@@ -27,6 +28,8 @@ function languageSupport(language?: string): Extension {
     JAVASCRIPT: javascript, RUST: rust, GO: go, PHP: () => php({ plain: false }),
     KOTLIN: () => StreamLanguage.define(kotlin), CSHARP: () => StreamLanguage.define(csharp),
     RUBY: () => StreamLanguage.define(ruby),
+    // No Zig grammar is packaged; Rust's colours its keywords, strings and comments well.
+    ZIG: rust, BRAINFUCK: () => StreamLanguage.define(brainfuck),
   };
   return (language && table[language]?.()) || [];
 }

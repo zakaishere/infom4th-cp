@@ -3,7 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends docker.io ca-ce
 WORKDIR /judge
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY runner.py worker.py diagnose.py ./
+COPY runner.py worker.py diagnose.py drivers.py ./
 # Runtime Dockerfiles: the worker builds any missing language image on first start.
 COPY images ./images
 COPY tests ./tests

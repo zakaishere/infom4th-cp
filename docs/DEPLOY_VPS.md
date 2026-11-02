@@ -28,8 +28,9 @@ editing it, run `docker compose up -d` again; nothing else needs editing.
   Ubuntu 22.04+ and Debian 12), or Docker Desktop. Install only on a server without Docker
   (on a shared server never reinstall it; see SETUP_SERVER.md):
   `curl -fsSL https://get.docker.com | sh`.
-- Disk: about **12 GB** for all 13 language images plus the platform (C/C++ ≈ 2 GB,
-  Rust ≈ 1.1 GB, Go ≈ 1.2 GB, PHP/Kotlin/C# ≈ 0.7 GB each, the rest 0.2–0.6 GB). A 60 GB
+- Disk: about **12.5 GB** for all 15 language images plus the platform (C/C++ ≈ 2 GB,
+  Rust ≈ 1.1 GB, Go ≈ 1.2 GB, PHP/Kotlin/C# ≈ 0.7 GB each, Zig ≈ 0.4 GB, Brainfuck shares
+  the C image, the rest 0.2–0.6 GB). A 60 GB
   SSD is plenty. List fewer languages in `JUDGE_LANGUAGES` to save space.
 - RAM: see the slot table below.
 - Open the website port (80 by default) in the VPS firewall. Database, broker and API
@@ -56,7 +57,7 @@ Leave every other judge line empty; it is calculated from the slot counts.
 All languages (the default):
 
 ```
-JUDGE_LANGUAGES=CPP,CPP20,C,JAVA,PYTHON,PYPY,JAVASCRIPT,GO,RUST,KOTLIN,CSHARP,RUBY,PHP
+JUDGE_LANGUAGES=CPP,CPP20,C,JAVA,PYTHON,PYPY,JAVASCRIPT,GO,RUST,KOTLIN,CSHARP,RUBY,PHP,ZIG,BRAINFUCK
 ```
 
 ### How many slots?
@@ -111,7 +112,7 @@ first start, and run `docker compose up -d --build`.
 ## 6. Adding languages
 
 Available: C++17, C++20, C, Java, Python, PyPy, JavaScript (Node), Go, Rust, Kotlin,
-C#, Ruby, PHP. Add the codes to `JUDGE_LANGUAGES` and run `docker compose up -d`; the
+C#, Ruby, PHP, Zig, Brainfuck. Add the codes to `JUDGE_LANGUAGES` and run `docker compose up -d`; the
 judges build any missing image and self-test it (they compile and run a correct and a
 wrong program). A language that fails is skipped and logged, never offered to
 contestants, while the judge keeps serving the other languages. To rebuild an image

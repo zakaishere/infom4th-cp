@@ -349,8 +349,39 @@ export const SHEETS: Record<string, { name: string; sections: Section[] }> = {
   },
 };
 
+SHEETS.zig = {
+  name: "Zig",
+  sections: [
+    { title: "Input and output", entries: [
+      { title: "Read all input as numbers", code: "var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\nconst allocator = arena.allocator();\nconst input = try std.io.getStdIn().readToEndAlloc(allocator, 1 << 30);\nvar tokens = std.mem.tokenizeAny(u8, input, \" \\r\\n\\t\");\nconst n = try std.fmt.parseInt(i64, tokens.next().?, 10);", note: "Zig 0.13. The arena frees everything when the program ends." },
+      { title: "Buffered output", code: "var buffered = std.io.bufferedWriter(std.io.getStdOut().writer());\nconst out = buffered.writer();\ntry out.print(\"{d} {s}\\n\", .{ x, name });\ntry buffered.flush();", note: "Forgetting flush() prints nothing." },
+    ] },
+    { title: "Numbers", entries: [
+      { title: "Integer types", code: "const a: i32 = 5;\nconst b: i64 = @as(i64, a) * 1000000000;\nconst c: usize = @intCast(b);\nconst d: f64 = @floatFromInt(a);", note: "Overflow is a runtime error in the judge (ReleaseSafe); use +% for wrapping." },
+      { title: "Math", code: "@max(a, b); @min(a, b); @abs(x);\n@divTrunc(a, b); @mod(a, b); @rem(a, b);\nstd.math.sqrt(x); std.math.pow(f64, x, y);" },
+    ] },
+    { title: "Slices and lists", entries: [
+      { title: "Allocate", code: "const v = try allocator.alloc(i64, n);\n@memset(v, 0);\nvar list = std.ArrayList(i64).init(allocator);\ntry list.append(x);\nlist.items.len; list.items[0];" },
+      { title: "Loop", code: "for (v, 0..) |x, i| { _ = x; _ = i; }\nvar i: usize = 0;\nwhile (i < n) : (i += 1) { }" },
+      { title: "Sort", code: "std.mem.sort(i64, v, {}, std.sort.asc(i64));\nstd.mem.sort(i64, v, {}, std.sort.desc(i64));" },
+      { title: "Map", code: "var m = std.AutoHashMap(i64, i64).init(allocator);\ntry m.put(k, v);\nm.get(k);    // ?i64\nm.contains(k);", note: "Use std.StringHashMap for string keys." },
+    ] },
+  ],
+};
+SHEETS.brainfuck = {
+  name: "Brainfuck",
+  sections: [
+    { title: "Commands", entries: [
+      { title: "The eight commands", code: "> <    move the pointer right / left\n+ -    add / subtract 1 (cells are 8-bit and wrap)\n.      print the cell as a byte\n,      read a byte (0 at the end of input)\n[ ]    repeat while the cell is not 0", note: "Everything else is a comment. The tape is 1 MiB on each side of the start." },
+      { title: "Clear a cell", code: "[-]" },
+      { title: "Move a value right", code: "[->+<]", note: "Adds the current cell to the next one and empties it." },
+      { title: "Echo the input", code: ",[.,]" },
+    ] },
+  ],
+};
+
 /** Which sheet opens first for a judge language. */
 export const SHEET_OF: Record<string, string> = {
   CPP: "cpp", CPP20: "cpp", C: "c", JAVA: "java", PYTHON: "python", PYPY: "python", JAVASCRIPT: "javascript",
-  GO: "go", RUST: "rust", KOTLIN: "kotlin", CSHARP: "csharp", RUBY: "ruby", PHP: "php",
+  GO: "go", RUST: "rust", KOTLIN: "kotlin", CSHARP: "csharp", RUBY: "ruby", PHP: "php", ZIG: "zig", BRAINFUCK: "brainfuck",
 };
