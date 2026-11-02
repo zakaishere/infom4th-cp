@@ -586,6 +586,27 @@ class ContestLifecycleTest {
         assertTrue(http("GET","/api/admin/teams?activity=locked",owner.token,null).body().contains(team));
     }
 
+    @Test void clarificationsStayPrivateUntilAnsweredPubliclyAndOnlyStaffAnnounce() throws Exception {
+        User owner=user(true),asker=user(false),other=user(false);UUID contest=contest(owner,0);
+        UUID run=contests.schedule(owner.actor,contest,Instant.now().plusSeconds(60),"PUBLIC");
+        contests.register(asker.actor,contest,null);contests.register(other.actor,contest,null);
+        control(owner,run,"start-now");
+        var asked=http("POST","/api/runs/"+run+"/clarifications",asker.token,"{\"question\":\"Is the input sorted?\"}");
+        assertEquals(201,asked.statusCode(),asked.body());
+        String id=JSON.readTree(asked.body()).get("clarificationId").asText();
+        assertTrue(http("GET","/api/runs/"+run+"/clarifications",asker.token,null).body().contains("Is the input sorted?"));
+        assertFalse(http("GET","/api/runs/"+run+"/clarifications",other.token,null).body().contains("Is the input sorted?"),"unanswered questions are private to the asker");
+        assertEquals(403,http("POST","/api/manage/clarifications/"+id+"/answer",other.token,"{\"answer\":\"Yes\",\"public\":true}").statusCode());
+        assertEquals(200,http("POST","/api/manage/clarifications/"+id+"/answer",owner.token,"{\"answer\":\"No, read the statement\",\"public\":true}").statusCode());
+        assertTrue(http("GET","/api/runs/"+run+"/clarifications",other.token,null).body().contains("No, read the statement"));
+        assertEquals(403,http("POST","/api/manage/runs/"+run+"/announcements",asker.token,"{\"title\":\"Hi\",\"body\":\"Not staff\"}").statusCode());
+        assertEquals(201,http("POST","/api/manage/runs/"+run+"/announcements",owner.token,"{\"title\":\"Note\",\"body\":\"Limits were raised\"}").statusCode());
+        assertTrue(http("GET","/api/runs/"+run+"/announcements",other.token,null).body().contains("Limits were raised"));
+        assertEquals(List.of("ANNOUNCEMENT","CLARIFICATION_UPDATED"),db.jdbc.queryForList("SELECT kind FROM run_events WHERE run_id=? AND kind IN ('ANNOUNCEMENT','CLARIFICATION_UPDATED') ORDER BY kind",String.class,run));
+        assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='ANNOUNCEMENT_PUBLISH' AND resource_id=?",Long.class,run));
+        assertEquals(1L,db.jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE action='CLARIFICATION_ANSWER' AND resource_id=?::uuid",Long.class,id));
+    }
+
     @Test void endingARehearsalMovesItsClock() throws Exception {
         User owner=user(true);UUID contest=contest(owner,0);
         UUID rehearsal=db.id("SELECT id FROM contest_runs WHERE competition_id=? AND kind='REHEARSAL'",contest);
