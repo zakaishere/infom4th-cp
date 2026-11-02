@@ -61,7 +61,7 @@ public class CompetitionQueries {
     }
     /** What a contestant may see of a problem version: the statement, limits and sample tests only. */
     public Map<String,Object> problem(UUID version) {
-        var result=new LinkedHashMap<>(db.one("SELECT id,title,statement_md,input_format_md,output_format_md,constraints_md,explanation_md,time_limit_ms,memory_limit_mb,output_limit_kb FROM problem_versions WHERE id=?",version));
+        var result=new LinkedHashMap<>(db.one("SELECT id,title,statement_md,input_format_md,output_format_md,constraints_md,explanation_md,time_limit_ms,memory_limit_mb,output_limit_kb,function_signature FROM problem_versions WHERE id=?",version));
         result.put("samples",db.jdbc.queryForList("SELECT input_data,expected_output,explanation_md FROM test_cases WHERE problem_version_id=? AND is_sample ORDER BY position",version));
         result.put("languages",db.jdbc.queryForList("SELECT p.language_code FROM problem_version_languages p JOIN languages l ON l.code=p.language_code WHERE p.problem_version_id=? AND l.enabled",String.class,version));return result;
     }

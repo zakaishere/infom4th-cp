@@ -3,6 +3,9 @@ import { post, put, patch } from "../../api";
 import { navigate, useAction, useData } from "../../app";
 import { Badge, CodeEditor, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, when } from "../../ui";
 import { LanguagePicker } from "../../components/LanguagePicker";
+import { SignatureEditor } from "../../components/SignatureEditor";
+import { templateFor } from "../../components/Problem";
+import { EMPTY_SIGNATURE, FUNCTION_LANGUAGES, describe, parseSignature, type Signature } from "../../lib/functionMode";
 
 const STATUS_TONE: Record<string, string> = { DRAFT: "neutral", IN_TESTING: "info", READY_FOR_REVIEW: "warn", APPROVED: "ok", PUBLISHED: "ok", ARCHIVED: "neutral" };
 
@@ -64,7 +67,7 @@ export function ProblemList() {
 type Version = {
   id: string; problem_id: string; title: string; status: string; version_number: number; sealed_at: string | null; difficulty: string; checker: string;
   statement_md: string; input_format_md: string; output_format_md: string; constraints_md: string; explanation_md: string; setter_notes: string;
-  time_limit_ms: number; memory_limit_mb: number; output_limit_kb: number;
+  time_limit_ms: number; memory_limit_mb: number; output_limit_kb: number; function_signature: string | null;
   tests: { id: string; input_data: string; expected_output: string; is_sample: boolean }[];
   references: { id: string; label: string; language_code: string; expected_verdict: string; source_code: string }[];
   validations: { id: string; status: string; report: string; created_at: string; completed_at: string | null }[];
@@ -126,7 +129,11 @@ function StatementForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; on
     title: p.title, statement: p.statement_md, inputFormat: p.input_format_md, outputFormat: p.output_format_md, constraints: p.constraints_md,
     explanation: p.explanation_md, setterNotes: p.setter_notes, difficulty: p.difficulty, checker: p.checker,
     timeLimitMs: p.time_limit_ms, memoryLimitMb: p.memory_limit_mb, outputLimitKb: p.output_limit_kb, languages: p.languages,
+    functionSignature: parseSignature(p.function_signature),
   });
+  const signature = f.functionSignature;
+  const setSignature = (next: Signature | null) =>
+    setF({ ...f, functionSignature: next, languages: next ? f.languages.filter((l) => FUNCTION_LANGUAGES.includes(l)) : f.languages });
   const [preview, setPreview] = useState(false);
   const { busy, run } = useAction();
   const text = (key: keyof typeof f, label: string, rows = 4) => (
@@ -137,8 +144,12 @@ function StatementForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; on
       <form className="card stack" onSubmit={(e) => { e.preventDefault(); run(async () => { await patch("/api/lab/problems/" + p.id, f); onSaved(); }, "Saved"); }}>
         <Field label="Title"><input disabled={sealed} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
         {text("statement", "Statement (Markdown)", 10)}
-        {text("inputFormat", "Input format")}
-        {text("outputFormat", "Output format")}
+        <Field label="How contestants answer" hint="A function works like LeetCode: contestants complete one function and never read input.">
+          <select disabled={sealed} value={signature ? "FUNCTION" : "STDIO"} onChange={(e) => setSignature(e.target.value === "FUNCTION" ? EMPTY_SIGNATURE : null)}>
+            <option value="STDIO">Full program (standard input and output)</option><option value="FUNCTION">Complete a function (LeetCode style)</option></select></Field>
+        {signature && <SignatureEditor value={signature} onChange={setSignature} disabled={sealed} />}
+        {!signature && text("inputFormat", "Input format")}
+        {!signature && text("outputFormat", "Output format")}
         {text("constraints", "Constraints", 3)}
         {text("explanation", "Notes / explanation", 3)}
         {text("setterNotes", "Private setter notes (never shown to contestants)", 3)}
@@ -146,19 +157,20 @@ function StatementForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; on
           <Field label="Time limit (ms)"><input type="number" min={1} max={60000} disabled={sealed} value={f.timeLimitMs} onChange={(e) => setF({ ...f, timeLimitMs: Number(e.target.value) })} /></Field>
           <Field label="Memory (MB)" hint="Must fit the worker slot memory."><input type="number" min={16} max={4096} disabled={sealed} value={f.memoryLimitMb} onChange={(e) => setF({ ...f, memoryLimitMb: Number(e.target.value) })} /></Field>
           <Field label="Output (KB)"><input type="number" min={1} max={65536} disabled={sealed} value={f.outputLimitKb} onChange={(e) => setF({ ...f, outputLimitKb: Number(e.target.value) })} /></Field>
-          <Field label="Checker"><select disabled={sealed} value={f.checker} onChange={(e) => setF({ ...f, checker: e.target.value })}>
+          <Field label="Checker" hint={signature ? "Not used: function results are compared as values." : undefined}><select disabled={sealed || Boolean(signature)} value={f.checker} onChange={(e) => setF({ ...f, checker: e.target.value })}>
             <option value="TRIMMED_LINES">Trimmed lines</option><option value="TOKENS">Tokens</option><option value="EXACT">Exact</option></select></Field>
           <Field label="Difficulty"><select disabled={sealed} value={f.difficulty} onChange={(e) => setF({ ...f, difficulty: e.target.value })}>
             <option>EASY</option><option>MEDIUM</option><option>HARD</option></select></Field>
         </div>
         <Field label="Languages">
-          <LanguagePicker disabled={sealed} value={f.languages} onChange={(languages) => setF({ ...f, languages })} />
+          <LanguagePicker disabled={sealed} value={f.languages} onChange={(languages) => setF({ ...f, languages })} allowed={signature ? FUNCTION_LANGUAGES : undefined} />
         </Field>
         {!sealed && <div><button className="primary" disabled={busy}>Save draft</button></div>}
       </form>
       <div className="card">
         <div className="row-between"><h3>Contestant preview</h3><button className="small" onClick={() => setPreview(!preview)}>{preview ? "Hide" : "Show"}</button></div>
-        {preview && <><h1>{f.title}</h1><Markdown text={f.statement} /><h2>Input</h2><Markdown text={f.inputFormat} /><h2>Output</h2><Markdown text={f.outputFormat} /></>}
+        {preview && signature && <><h1>{f.title}</h1><Markdown text={f.statement} /><h2>Function</h2><pre>{describe(signature)}</pre></>}
+        {preview && !signature && <><h1>{f.title}</h1><Markdown text={f.statement} /><h2>Input</h2><Markdown text={f.inputFormat} /><h2>Output</h2><Markdown text={f.outputFormat} /></>}
       </div>
     </div>
   );
@@ -170,7 +182,8 @@ function TestsForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSave
   const update = (i: number, change: Partial<(typeof tests)[number]>) => setTests(tests.map((t, j) => (i === j ? { ...t, ...change } : t)));
   return (
     <div className="stack">
-      <div className="notice small">Tests replace the whole suite (1-200 tests, 16 MiB total). Mark at least one sample (shown in the statement) and keep at least one hidden test.</div>
+      <div className="notice small">Tests replace the whole suite (1-200 tests, 16 MiB total). Mark at least one sample (shown in the statement) and keep at least one hidden test.
+        {p.function_signature && " Function problem: each input has one JSON value per parameter line, and the expected output is the return value as JSON."}</div>
       {tests.map((t, i) => (
         <div key={i} className="card stack">
           <div className="row-between"><strong>Test {i + 1}</strong>
@@ -193,7 +206,8 @@ function TestsForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSave
 }
 
 function References({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSaved: () => void }) {
-  const [form, setForm] = useState({ label: "Main solution", language: "CPP", expectedVerdict: "ACCEPTED", sourceCode: "" });
+  const signature = parseSignature(p.function_signature);
+  const [form, setForm] = useState(() => ({ label: "Main solution", language: p.languages[0] ?? "CPP", expectedVerdict: "ACCEPTED", sourceCode: signature ? templateFor(p.languages[0] ?? "CPP", signature) : "" }));
   const { busy, run } = useAction();
   return (
     <div className="grid grid-2" style={{ alignItems: "start" }}>
@@ -210,7 +224,7 @@ function References({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSav
           <h3>Add reference solution</h3>
           <div className="grid grid-3">
             <Field label="Label"><input required value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
-            <Field label="Language"><select value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })}>{p.languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l]}</option>)}</select></Field>
+            <Field label="Language"><select value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value, sourceCode: signature && (!form.sourceCode.trim() || form.sourceCode === templateFor(form.language, signature)) ? templateFor(e.target.value, signature) : form.sourceCode })}>{p.languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l]}</option>)}</select></Field>
             <Field label="Expected verdict"><select value={form.expectedVerdict} onChange={(e) => setForm({ ...form, expectedVerdict: e.target.value })}>
               {Object.entries(VERDICTS).filter(([k]) => k !== "JUDGE_ERROR").map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
           </div>

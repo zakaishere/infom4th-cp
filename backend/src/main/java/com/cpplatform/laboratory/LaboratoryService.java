@@ -40,6 +40,7 @@ public class LaboratoryService {
         fields.put("timeLimitMs",Api.number(body,"timeLimitMs",2000,1,60000));
         fields.put("memoryLimitMb",Api.number(body,"memoryLimitMb",256,16,4096));
         fields.put("outputLimitKb",Api.number(body,"outputLimitKb",1024,1,65536));
+        if(body.get("functionSignature")!=null) fields.put("functionSignature",body.get("functionSignature"));
         Object rawLanguages=body.get("languages");
         Api.require(rawLanguages instanceof List<?> && !((List<?>)rawLanguages).isEmpty() && ((List<?>)rawLanguages).size()<=16
                 && ((List<?>)rawLanguages).stream().allMatch(l->l instanceof String && ((String)l).matches("[A-Z][A-Z0-9_]{0,23}")),HttpStatus.BAD_REQUEST,"Invalid languages");
@@ -116,13 +117,31 @@ public class LaboratoryService {
                 db.jdbc.update("DELETE FROM problem_version_languages WHERE problem_version_id=? AND language_code=?",version,language);
             }
         }
+        if(body.containsKey("functionSignature"))
+            db.jdbc.update("UPDATE problem_versions SET function_signature=? WHERE id=?",FunctionSignature.normalize(body.get("functionSignature")),version);
+        if(body.containsKey("functionSignature") || body.containsKey("languages")) functionLanguages(version);
+    }
+    /** A function problem may only offer languages the judge can generate a driver for. */
+    private void functionLanguages(UUID version) {
+        if(signature(version)==null)return;
+        for(String language:db.jdbc.queryForList("SELECT language_code FROM problem_version_languages WHERE problem_version_id=? ORDER BY language_code",String.class,version))
+            Api.require(FunctionSignature.LANGUAGES.contains(language),HttpStatus.BAD_REQUEST,language+" cannot be offered on a function problem");
+    }
+    private String signature(UUID version) {
+        return (String)db.one("SELECT function_signature FROM problem_versions WHERE id=?",version).get("function_signature");
+    }
+    private void functionTests(UUID version,List<Map<String,Object>> tests) {
+        String signature=signature(version);
+        if(signature==null)return;
+        for(int i=0;i<tests.size();i++)
+            FunctionSignature.checkTest(signature,i,(String)tests.get(i).get("input"),(String)tests.get(i).get("expected"));
     }
     @Transactional
     public UUID cloneVersion(Actor actor,UUID version) {
         access.problem(actor,version,true);
         var old=db.one("SELECT * FROM problem_versions WHERE id=?",version);UUID problem=(UUID)old.get("problem_id");
         db.one("SELECT id FROM problems WHERE id=? FOR UPDATE",problem);
-        UUID next=db.id("INSERT INTO problem_versions(problem_id,version_number,title,difficulty,statement_md,input_format_md,output_format_md,constraints_md,explanation_md,setter_notes,time_limit_ms,memory_limit_mb,output_limit_kb,checker,created_by) SELECT problem_id,(SELECT max(version_number)+1 FROM problem_versions WHERE problem_id=?),title,difficulty,statement_md,input_format_md,output_format_md,constraints_md,explanation_md,setter_notes,time_limit_ms,memory_limit_mb,output_limit_kb,checker,? FROM problem_versions WHERE id=? RETURNING id",problem,actor.id(),version);
+        UUID next=db.id("INSERT INTO problem_versions(problem_id,version_number,title,difficulty,statement_md,input_format_md,output_format_md,constraints_md,explanation_md,setter_notes,time_limit_ms,memory_limit_mb,output_limit_kb,checker,function_signature,created_by) SELECT problem_id,(SELECT max(version_number)+1 FROM problem_versions WHERE problem_id=?),title,difficulty,statement_md,input_format_md,output_format_md,constraints_md,explanation_md,setter_notes,time_limit_ms,memory_limit_mb,output_limit_kb,checker,function_signature,? FROM problem_versions WHERE id=? RETURNING id",problem,actor.id(),version);
         db.jdbc.update("INSERT INTO problem_version_languages SELECT ?,language_code FROM problem_version_languages WHERE problem_version_id=?",next,version);
         for(var group:db.jdbc.queryForList("SELECT * FROM test_case_groups WHERE problem_version_id=?",version)) {
             UUID id=db.id("INSERT INTO test_case_groups(problem_version_id,name,position) VALUES (?,?,?) RETURNING id",next,group.get("name"),group.get("position"));
@@ -144,6 +163,7 @@ public class LaboratoryService {
             }
         }
         Api.require(total<=16*1024*1024,HttpStatus.BAD_REQUEST,"Test suite exceeds 16 MiB");
+        functionTests(version,tests);
         db.jdbc.update("DELETE FROM test_cases WHERE problem_version_id=?",version);
         db.jdbc.update("DELETE FROM test_case_groups WHERE problem_version_id=?",version);
         UUID group=db.id("INSERT INTO test_case_groups(problem_version_id,name,position) VALUES (?,'Main',0) RETURNING id",version);
@@ -173,6 +193,9 @@ public class LaboratoryService {
         Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM test_cases WHERE problem_version_id=? AND is_sample)",version)
                 && db.exists("SELECT EXISTS(SELECT 1 FROM test_cases WHERE problem_version_id=? AND NOT is_sample)",version),
                 HttpStatus.CONFLICT,"Sample and hidden tests are required");
+        // The signature may have changed after the tests were saved.
+        functionTests(version,db.jdbc.queryForList("SELECT input_data AS input,expected_output AS expected FROM test_cases WHERE problem_version_id=? ORDER BY position",version));
+        functionLanguages(version);
         var refs=db.jdbc.queryForList("SELECT * FROM reference_solutions WHERE problem_version_id=?",version);
         Api.require(refs.stream().anyMatch(r->"ACCEPTED".equals(r.get("expected_verdict"))),HttpStatus.CONFLICT,"An accepted reference solution is required");
         runtimes(version);

@@ -14,10 +14,10 @@ export const VERDICTS: Record<string, { label: string; short: string; tone: stri
 
 export const LANGUAGE_NAMES: Record<string, string> = {
   CPP: "C++17", CPP20: "C++20", C: "C17", JAVA: "Java 17", PYTHON: "Python 3", PYPY: "PyPy 3", JAVASCRIPT: "JavaScript (Node)",
-  GO: "Go", RUST: "Rust", KOTLIN: "Kotlin", CSHARP: "C# (Mono)", RUBY: "Ruby 3", PHP: "PHP 8",
+  GO: "Go", RUST: "Rust", KOTLIN: "Kotlin", CSHARP: "C# (Mono)", RUBY: "Ruby 3", PHP: "PHP 8", ZIG: "Zig 0.13", BRAINFUCK: "Brainfuck",
 };
 /** Every language the judge can be configured to run, in display order. */
-export const ALL_LANGUAGES = ["CPP", "CPP20", "C", "JAVA", "PYTHON", "PYPY", "JAVASCRIPT", "GO", "RUST", "KOTLIN", "CSHARP", "RUBY", "PHP"];
+export const ALL_LANGUAGES = ["CPP", "CPP20", "C", "JAVA", "PYTHON", "PYPY", "JAVASCRIPT", "GO", "RUST", "KOTLIN", "CSHARP", "RUBY", "PHP", "ZIG", "BRAINFUCK"];
 
 /** Shows the judging state of a submission: queued, running, or the final verdict. */
 export function Verdict({ status, verdict }: { status?: string | null; verdict?: string | null }) {
@@ -199,6 +199,9 @@ export const TEMPLATES: Record<string, string> = {
   CSHARP: "using System;\n\nclass Program {\n    static void Main() {\n        var line = Console.ReadLine();\n    }\n}\n",
   RUBY: "data = STDIN.read.split\n\n",
   PHP: "<?php\n$data = preg_split('/\\s+/', trim(stream_get_contents(STDIN)));\n\n",
+  ZIG: "const std = @import(\"std\");\n\npub fn main() !void {\n    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\n    const allocator = arena.allocator();\n    const input = try std.io.getStdIn().readToEndAlloc(allocator, 1 << 30);\n    var tokens = std.mem.tokenizeAny(u8, input, \" \\r\\n\\t\");\n    const stdout = std.io.getStdOut().writer();\n    _ = &tokens;\n    _ = stdout;\n}\n",
+  // Comment text must avoid the eight command characters: + - < > [ ] , .
+  BRAINFUCK: "Echo the input: cells are 8 bit and wrap and the end of input reads as zero\n,[.,]\n",
 };
 
 export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: string }) {

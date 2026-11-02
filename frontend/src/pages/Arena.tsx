@@ -7,6 +7,7 @@ import { ProblemStatement, SubmissionModal, SubmissionTable, SubmitPanel, pendin
 import Standings, { SCORING_INFO, firstSolves, totalOf, useBoard, type Board } from "../components/Standings";
 import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, timeOf, when } from "../ui";
 import type { RunDetail } from "./Lobby";
+import { parseSignature } from "../lib/functionMode";
 
 type View = { kind: "problems" } | { kind: "problem"; slot: number } | { kind: "submissions" } | { kind: "scoreboard" } | { kind: "questions" };
 type Clarification = { id: string; question: string; answer: string | null; is_public: boolean; created_at: string; answered_at: string | null };
@@ -269,14 +270,16 @@ export default function Arena({ runId }: { runId: string }) {
                 {problems[slot] ? <ProblemStatement problem={problems[slot]} label={labels[slot]} /> : <Loading label="Loading statement…" />}
               </section>
               <section className="arena-pane editor-pane" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                <SubmitPanel
+                {/* Mounted once the problem is loaded, so a function problem's editor starts from its starter code. */}
+                {problems[slot] ? <SubmitPanel
                   scope={runId + "." + slot}
-                  languages={problems[slot]?.languages ?? []}
+                  languages={problems[slot].languages}
                   path={"/api/runs/" + runId + "/problems/" + slot + "/submissions"}
                   disabled={phase !== "live" || r.submissions_paused || !entry}
                   disabledReason={!entry ? "You are not an entrant of this contest." : phase !== "live" ? "The contest is over." : "Organizers paused submissions. Keep working; submit when resumed."}
                   onSubmitted={() => submissions.reload()}
-                />
+                  signature={parseSignature(problems[slot].function_signature)}
+                /> : <Loading label="Loading editor…" />}
                 <div>
                   <strong className="small">Submissions for {labels[slot]}</strong>
                   <SubmissionTable rows={(submissions.data ?? []).filter((s) => s.problem_slot === slot)} onOpen={setOpenSubmission} showAuthor={isTeam} />

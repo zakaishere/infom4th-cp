@@ -159,9 +159,18 @@ const TABLES: Record<string, Table> = {
     members: [],
   },
 };
+TABLES.zig = {
+  globals: [
+    ...list("keyword", "const var fn pub return if else while for switch break continue try catch defer errdefer orelse and or struct enum union comptime undefined null true false unreachable"),
+    ...list("type", "i32 i64 u8 u32 u64 usize isize f64 bool void anytype", "type"),
+    ...list("function", "@as @intCast @floatFromInt @intFromFloat @min @max @abs @divTrunc @mod @rem @memset @import @TypeOf", "builtin"),
+    ...list("variable", "std allocator", "std"),
+  ],
+  members: list("method", "io heap mem fmt math sort ArrayList AutoHashMap StringHashMap getStdIn getStdOut writer reader print readToEndAlloc tokenizeAny parseInt parseFloat next alloc free append items len put get contains init deinit flush"),
+};
 const TABLE_OF: Record<string, string> = {
   CPP: "cpp", CPP20: "cpp", C: "c", JAVA: "java", PYTHON: "python", PYPY: "python", JAVASCRIPT: "javascript",
-  GO: "go", RUST: "rust", KOTLIN: "kotlin", CSHARP: "csharp", RUBY: "ruby", PHP: "php",
+  GO: "go", RUST: "rust", KOTLIN: "kotlin", CSHARP: "csharp", RUBY: "ruby", PHP: "php", ZIG: "zig",
 };
 
 const MAX_SCAN = 100_000, MAX_NAMES = 300;

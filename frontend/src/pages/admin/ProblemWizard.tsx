@@ -3,19 +3,24 @@ import { get, patch, post, put } from "../../api";
 import { navigate, useToast } from "../../app";
 import { ProgressLog, StepNav, Steps, pairTestFiles, parsePastedTests, slugify, type LogLine } from "../../components/Wizard";
 import { LanguagePicker } from "../../components/LanguagePicker";
+import { SignatureEditor } from "../../components/SignatureEditor";
+import { templateFor } from "../../components/Problem";
 import { CodeEditor, Field, LANGUAGE_NAMES, Markdown, TEMPLATES } from "../../ui";
+import { EMPTY_SIGNATURE, FUNCTION_LANGUAGES, checkSignature, checkTest, describe, labelInput, type Signature } from "../../lib/functionMode";
 
 type Test = { input: string; expected: string; sample: boolean };
 type Draft = {
   title: string; slug: string; difficulty: string; timeLimitMs: number; memoryLimitMb: number; checker: string; languages: string[];
   statement: string; inputFormat: string; outputFormat: string; constraints: string; explanation: string;
   tests: Test[]; referenceLanguage: string; referenceCode: string; versionId?: string;
+  /** Set for a function problem (LeetCode style); null when the program reads standard input. */
+  functionSignature: Signature | null;
 };
 const KEY = "cp.problem-wizard";
 const EMPTY: Draft = {
   title: "", slug: "", difficulty: "MEDIUM", timeLimitMs: 2000, memoryLimitMb: 256, checker: "TRIMMED_LINES", languages: ["CPP", "C", "JAVA", "PYTHON"],
   statement: "", inputFormat: "", outputFormat: "", constraints: "", explanation: "",
-  tests: [{ input: "", expected: "", sample: true }], referenceLanguage: "CPP", referenceCode: TEMPLATES.CPP,
+  tests: [{ input: "", expected: "", sample: true }], referenceLanguage: "CPP", referenceCode: TEMPLATES.CPP, functionSignature: null,
 };
 const STEPS = ["Basics", "Statement", "Tests", "Solution", "Validate & publish"];
 
@@ -44,6 +49,19 @@ export default function ProblemWizard() {
   if (!d.tests.some((t) => !t.sample)) problems.push("Add at least one hidden (non-sample) test");
   if (d.tests.some((t) => !t.expected.trim() && !t.input.trim())) problems.push("Remove empty tests");
   if (!d.referenceCode.trim()) problems.push("Add a correct reference solution");
+  const signature = d.functionSignature;
+  if (signature) {
+    problems.push(...checkSignature(signature));
+    d.tests.forEach((t, i) => { const problem = checkTest(signature, t.input, t.expected); if (problem) problems.push(`Test ${i + 1}: ${problem}`); });
+  }
+  // Switching the answer format or the signature replaces the reference code while it is still a template.
+  const template = (language: string, s: Signature | null = signature) => templateFor(language, s);
+  const isTemplate = (code: string) => !code.trim() || code === TEMPLATES[d.referenceLanguage] || (signature !== null && code === template(d.referenceLanguage));
+  const setSignature = (next: Signature | null) => set({
+    functionSignature: next,
+    languages: next ? d.languages.filter((l) => FUNCTION_LANGUAGES.includes(l)) : d.languages,
+    referenceCode: isTemplate(d.referenceCode) ? template(d.referenceLanguage, next) : d.referenceCode,
+  });
 
   async function runStep(text: string, action: () => Promise<unknown>) {
     setLog((l) => [...l, { text, state: "running" }]);
@@ -75,6 +93,7 @@ export default function ProblemWizard() {
       await runStep("Saving statement and limits", () => patch("/api/lab/problems/" + id, {
         title: d.title, statement: d.statement, inputFormat: d.inputFormat, outputFormat: d.outputFormat, constraints: d.constraints,
         explanation: d.explanation, difficulty: d.difficulty, checker: d.checker, timeLimitMs: d.timeLimitMs, memoryLimitMb: d.memoryLimitMb, languages: d.languages,
+        functionSignature: d.functionSignature,
       }));
       await runStep(`Uploading ${d.tests.length} tests`, () => put("/api/lab/problems/" + id + "/tests", d.tests));
       const existing = await get<{ references: unknown[] }>("/api/lab/problems/" + id);
@@ -123,22 +142,27 @@ export default function ProblemWizard() {
             <Field label="Time limit (seconds)"><input type="number" min={0.1} max={60} step={0.1} value={d.timeLimitMs / 1000} onChange={(e) => set({ timeLimitMs: Math.round(Number(e.target.value) * 1000) })} /></Field>
             <Field label="Memory limit (MB)"><input type="number" min={16} max={4096} value={d.memoryLimitMb} onChange={(e) => set({ memoryLimitMb: Number(e.target.value) })} /></Field>
             <Field label="Difficulty"><select value={d.difficulty} onChange={(e) => set({ difficulty: e.target.value })}><option>EASY</option><option>MEDIUM</option><option>HARD</option></select></Field>
-            <Field label="Output comparison" hint="Trimmed lines ignores trailing spaces; tokens ignores all whitespace.">
-              <select value={d.checker} onChange={(e) => set({ checker: e.target.value })}><option value="TRIMMED_LINES">Trimmed lines (recommended)</option><option value="TOKENS">Tokens</option><option value="EXACT">Exact</option></select></Field>
-            <Field label="Allowed languages"><LanguagePicker value={d.languages} onChange={(languages) => set({ languages })} /></Field>
+            <Field label="How contestants answer" hint="A function works like LeetCode: contestants complete one function and never read input.">
+              <select value={signature ? "FUNCTION" : "STDIO"} onChange={(e) => setSignature(e.target.value === "FUNCTION" ? EMPTY_SIGNATURE : null)}>
+                <option value="STDIO">Full program (standard input and output)</option><option value="FUNCTION">Complete a function (LeetCode style)</option></select></Field>
+            {!signature && <Field label="Output comparison" hint="Trimmed lines ignores trailing spaces; tokens ignores all whitespace.">
+              <select value={d.checker} onChange={(e) => set({ checker: e.target.value })}><option value="TRIMMED_LINES">Trimmed lines (recommended)</option><option value="TOKENS">Tokens</option><option value="EXACT">Exact</option></select></Field>}
+            {signature && <div style={{ gridColumn: "1 / -1" }}><Field label="Function"><SignatureEditor value={signature} onChange={setSignature} /></Field></div>}
+            <Field label="Allowed languages"><LanguagePicker value={d.languages} onChange={(languages) => set({ languages })} allowed={signature ? FUNCTION_LANGUAGES : undefined} /></Field>
           </div>
         )}
         {step === 1 && (
           <div className="grid grid-2" style={{ alignItems: "start" }}>
             <div className="stack">
               <Field label="Statement" hint="Markdown: **bold**, `code`, blank line for a new paragraph."><textarea rows={9} value={d.statement} onChange={(e) => set({ statement: e.target.value })} /></Field>
-              <Field label="Input format"><textarea rows={3} value={d.inputFormat} onChange={(e) => set({ inputFormat: e.target.value })} /></Field>
-              <Field label="Output format"><textarea rows={3} value={d.outputFormat} onChange={(e) => set({ outputFormat: e.target.value })} /></Field>
+              {!signature && <Field label="Input format"><textarea rows={3} value={d.inputFormat} onChange={(e) => set({ inputFormat: e.target.value })} /></Field>}
+              {!signature && <Field label="Output format"><textarea rows={3} value={d.outputFormat} onChange={(e) => set({ outputFormat: e.target.value })} /></Field>}
               <Field label="Constraints"><textarea rows={2} value={d.constraints} onChange={(e) => set({ constraints: e.target.value })} placeholder="1 ≤ n ≤ 10^5" /></Field>
               <Field label="Notes (optional)"><textarea rows={2} value={d.explanation} onChange={(e) => set({ explanation: e.target.value })} /></Field>
             </div>
             <div className="card-flat"><div className="eyebrow">Contestant preview</div><h1>{d.title || "Untitled"}</h1><Markdown text={d.statement} />
-              {d.inputFormat && <><h2>Input</h2><Markdown text={d.inputFormat} /></>}{d.outputFormat && <><h2>Output</h2><Markdown text={d.outputFormat} /></>}
+              {signature && <><h2>Function</h2><pre>{describe(signature)}</pre></>}
+              {!signature && d.inputFormat && <><h2>Input</h2><Markdown text={d.inputFormat} /></>}{!signature && d.outputFormat && <><h2>Output</h2><Markdown text={d.outputFormat} /></>}
               {d.constraints && <><h2>Constraints</h2><Markdown text={d.constraints} /></>}</div>
           </div>
         )}
@@ -160,7 +184,7 @@ export default function ProblemWizard() {
               <div className="card-flat stack">
                 <strong>Paste many tests</strong>
                 <span className="small muted">Input, a line <code>---</code>, expected output. Separate tests with a line <code>===</code>.</span>
-                <textarea rows={4} className="mono" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={"2 3\n---\n5\n===\n10 20\n---\n30"} />
+                <textarea rows={4} className="mono" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={signature ? "[2,7,11,15]\n9\n---\n[0,1]\n===\n[3,2,4]\n6\n---\n[1,2]" : "2 3\n---\n5\n===\n10 20\n---\n30"} />
                 <div><button className="small" disabled={!paste.trim()} onClick={() => {
                   const parsed = parsePastedTests(paste);
                   if (!parsed.length) { toast("error", "Nothing recognised; check the --- and === separators"); return; }
@@ -171,23 +195,25 @@ export default function ProblemWizard() {
             </div>
             <div className="row-between"><strong>{d.tests.length} tests · {d.tests.filter((t) => t.sample).length} shown as examples</strong>
               <button className="small" onClick={() => set({ tests: [...d.tests, { input: "", expected: "", sample: false }] })}>+ Add test</button></div>
+            {signature && <div className="notice small">Function problem: each input has one line per parameter ({signature.params.map((p) => p.name).join(", ")}), written as JSON; the expected output is the return value as JSON.</div>}
             {d.tests.map((t, i) => (
               <div key={i} className="card-flat stack">
                 <div className="row-between"><strong>Test {i + 1}</strong>
                   <div className="row"><label className="check small"><input type="checkbox" checked={t.sample} onChange={(e) => setTest(i, { sample: e.target.checked })} />Show as example</label>
                     <button className="small danger" onClick={() => set({ tests: d.tests.filter((_, j) => j !== i) })}>Remove</button></div></div>
                 <div className="grid grid-2">
-                  <textarea className="mono" rows={3} placeholder="Input" value={t.input} onChange={(e) => setTest(i, { input: e.target.value })} />
-                  <textarea className="mono" rows={3} placeholder="Expected output" value={t.expected} onChange={(e) => setTest(i, { expected: e.target.value })} />
+                  <textarea className="mono" rows={3} placeholder={signature ? signature.params.map((p) => p.name + " (" + p.type + ")").join("\n") : "Input"} value={t.input} onChange={(e) => setTest(i, { input: e.target.value })} />
+                  <textarea className="mono" rows={3} placeholder={signature ? "Return value (" + signature.returnType + ")" : "Expected output"} value={t.expected} onChange={(e) => setTest(i, { expected: e.target.value })} />
                 </div>
+                {signature && (t.input.trim() || t.expected.trim()) && <TestCheck signature={signature} test={t} />}
               </div>
             ))}
           </div>
         )}
         {step === 3 && (
           <div className="stack">
-            <p className="muted" style={{ margin: 0 }}>Paste a correct solution. It runs on every test in the real sandbox to prove the tests and limits are right.</p>
-            <Field label="Language"><select value={d.referenceLanguage} style={{ maxWidth: 220 }} onChange={(e) => set({ referenceLanguage: e.target.value, referenceCode: d.referenceCode.trim() && d.referenceCode !== TEMPLATES[d.referenceLanguage] ? d.referenceCode : TEMPLATES[e.target.value] ?? "" })}>
+            <p className="muted" style={{ margin: 0 }}>{signature ? "Complete the function with a correct solution." : "Paste a correct solution."} It runs on every test in the real sandbox to prove the tests and limits are right.</p>
+            <Field label="Language"><select value={d.referenceLanguage} style={{ maxWidth: 220 }} onChange={(e) => set({ referenceLanguage: e.target.value, referenceCode: isTemplate(d.referenceCode) ? template(e.target.value) : d.referenceCode })}>
               {d.languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l]}</option>)}</select></Field>
             <div style={{ height: 360, display: "flex" }}><CodeEditor value={d.referenceCode} onChange={(v) => set({ referenceCode: v })} language={d.referenceLanguage} /></div>
           </div>
@@ -219,4 +245,12 @@ export default function ProblemWizard() {
       </section>
     </div>
   );
+}
+
+/** Under a function problem's test: what is wrong with it, or how the judge will call the function. */
+function TestCheck({ signature, test }: { signature: Signature; test: Test }) {
+  const problem = checkTest(signature, test.input, test.expected);
+  if (problem) return <span className="small" style={{ color: "var(--danger)" }}>{problem}</span>;
+  const args = labelInput(signature, test.input).map(([name, value]) => name + " = " + value).join(", ");
+  return <span className="small muted mono">{signature.functionName}({args}) → {test.expected.trim()}</span>;
 }

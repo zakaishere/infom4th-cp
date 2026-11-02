@@ -105,7 +105,7 @@ public class JudgeService {
                 worker,lease,w.get("runtime_manifest").toString(),job,dispatch,w.get("runtime_manifest").toString(),w.get("runtime_manifest").toString(),w.get("runtime_manifest").toString(),w.get("runtime_manifest").toString());
         if(rows.isEmpty())return Optional.empty();
         // IOI contests need every test result for partial points; other contexts stop at the first failure.
-        var result=new LinkedHashMap<>(db.one("SELECT s.source_code,s.language_code,v.id AS problem_version_id,v.time_limit_ms,v.memory_limit_mb,v.output_limit_kb,v.checker,coalesce((SELECT cv.scoring_system='IOI' FROM competition_versions cv WHERE cv.id=s.competition_version_id),false) AS run_all_tests FROM submissions s JOIN problem_versions v ON v.id=s.problem_version_id WHERE s.id=?",rows.get(0).get("submission_id")));
+        var result=new LinkedHashMap<>(db.one("SELECT s.source_code,s.language_code,v.id AS problem_version_id,v.time_limit_ms,v.memory_limit_mb,v.output_limit_kb,v.checker,v.function_signature,coalesce((SELECT cv.scoring_system='IOI' FROM competition_versions cv WHERE cv.id=s.competition_version_id),false) AS run_all_tests FROM submissions s JOIN problem_versions v ON v.id=s.problem_version_id WHERE s.id=?",rows.get(0).get("submission_id")));
         // Practice "run examples" submissions are judged on the example tests only.
         result.put("tests",db.jdbc.queryForList("SELECT t.id,t.input_data,t.expected_output FROM test_cases t JOIN test_case_groups g ON g.id=t.group_id WHERE t.problem_version_id=? AND (t.is_sample OR NOT (SELECT samples_only FROM submissions WHERE id=?)) ORDER BY g.position,t.position",
                 rows.get(0).get("problem_version_id"),rows.get(0).get("submission_id")));

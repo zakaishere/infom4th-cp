@@ -14,6 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+import drivers
 
 LANGUAGES = {
     "CPP": ("main.cpp", ["g++", "-O2", "-std=c++17", "/work/main.cpp", "-o", "/work/program"], ["/work/program"]),
@@ -33,6 +34,10 @@ LANGUAGES = {
     "CSHARP": ("Main.cs", ["mcs", "-optimize+", "-out:/work/main.exe", "/work/Main.cs"], ["mono", "/work/main.exe"]),
     "RUBY": ("main.rb", None, ["ruby", "/work/main.rb"]),
     "PHP": ("main.php", None, ["php", "-d", "memory_limit=-1", "/work/main.php"]),
+    # The image pre-builds compiler_rt into /opt/zigcache; each compile copies it into the job folder.
+    "ZIG": ("main.zig", ["sh", "-c", "cp -r /opt/zigcache /work/.zigcache && zig build-exe -OReleaseSafe -fsingle-threaded --cache-dir /work/.zig-local --global-cache-dir /work/.zigcache -femit-bin=/work/program /work/main.zig"], ["/work/program"]),
+    # Translated to C by bf2c (judge/images/brainfuck/bf2c.c), then compiled.
+    "BRAINFUCK": ("main.bf", ["sh", "-c", "bf2c /work/main.bf /work/main.c && gcc -O2 -o /work/program /work/main.c"], ["/work/program"]),
 }
 # Languages that share another language's runtime image (default image cp-judge-<name>:local).
 IMAGE_NAMES = {"CPP20": "cpp"}
@@ -326,12 +331,28 @@ class DockerRunner:
         if memory > self.max_memory_mb or memory < 16:
             raise InfrastructureError("Job exceeds worker memory budget")
         filename, compile_command, run_command = LANGUAGES[language]
+        source_code = job["source_code"]
+        signature = job.get("function_signature")
+        if isinstance(signature, str):
+            signature = json.loads(signature)
+        if signature:
+            # Function problems: a generated driver wraps the contestant's function and prints
+            # its result after a marker only this job knows (see drivers.py).
+            if language not in drivers.FUNCTION_LANGUAGES:
+                return {"verdict": "COMPILATION_ERROR", "cases": [], "executionTimeMs": 0, "peakMemoryKb": 0,
+                        "timings": {"compileMs": 0, "testsMs": 0, "totalMs": 0},
+                        "compilerOutput": "This problem asks for a function, and " + language + " has no functions."}
+            job = {**job, "function_signature": signature, "function_marker": "@@cp-result-" + uuid.uuid4().hex}
+            try:
+                source_code = drivers.wrap(language, source_code, signature, job["function_marker"])
+            except ValueError as error:
+                raise InfrastructureError("Invalid function signature") from error
         started = time.monotonic()
         folder = Path(tempfile.mkdtemp(prefix="job-", dir=self.root))
         os.chmod(folder, 0o700)
         os.chown(folder, 10001, 10001)
         source = folder / filename
-        source.write_text(job["source_code"], encoding="utf-8")
+        source.write_text(source_code, encoding="utf-8")
         os.chown(source, 10001, 10001)
         cases = []
         compile_seconds = tests_seconds = 0.0
@@ -413,8 +434,13 @@ class DockerRunner:
     def _record(cases: list, test: dict, result: Execution, job: dict) -> bool:
         """Appends one test result; returns True when the test failed."""
         status = verdict(result, effective_limit_ms(job["language_code"], int(job["time_limit_ms"])))
-        if status == "ACCEPTED" and not matches(result.output, test["expected_output"], job["checker"]):
-            status = "WRONG_ANSWER"
+        if status == "ACCEPTED":
+            if job.get("function_signature"):
+                correct = drivers.result_matches(result.output, test["expected_output"], job["function_signature"], job["function_marker"])
+            else:
+                correct = matches(result.output, test["expected_output"], job["checker"])
+            if not correct:
+                status = "WRONG_ANSWER"
         cases.append({"id": test["id"], "verdict": status,
                       "executionTimeMs": result.cpu_ms, "peakMemoryKb": result.memory_kb})
         return status != "ACCEPTED"
@@ -470,6 +496,9 @@ class DockerRunner:
             "CSHARP": "using System;class P{static void Main(){var p=Console.ReadLine().Split(' ');Console.WriteLine(long.Parse(p[0])+long.Parse(p[1]));}}",
             "RUBY": "a,b=STDIN.read.split.map(&:to_i);puts a+b",
             "PHP": "<?php [$a,$b]=array_map('intval',preg_split('/\\s+/',trim(stream_get_contents(STDIN))));echo $a+$b,\"\\n\";",
+            "ZIG": "const std = @import(\"std\");\npub fn main() !void {\n    const input = try std.io.getStdIn().readToEndAlloc(std.heap.page_allocator, 1 << 20);\n    var it = std.mem.tokenizeAny(u8, input, \" \\r\\n\\t\");\n    const a = try std.fmt.parseInt(i64, it.next().?, 10);\n    const b = try std.fmt.parseInt(i64, it.next().?, 10);\n    try std.io.getStdOut().writer().print(\"{d}\\n\", .{a + b});\n}\n",
+            # Adding numbers takes a long Brainfuck program; echoing the input checks the same pipeline.
+            "BRAINFUCK": ",[.,]",
         }
         # One compilation, every test run: two correct answers, then one deliberately wrong
         # expected output that must be rejected.
@@ -478,6 +507,9 @@ class DockerRunner:
                "tests": [{"id": str(uuid.uuid4()), "input_data": "2 3\n", "expected_output": "5\n"},
                          {"id": str(uuid.uuid4()), "input_data": "-3 10\n", "expected_output": "7\n"},
                          {"id": str(uuid.uuid4()), "input_data": "2 3\n", "expected_output": "99\n"}]}
+        if language == "BRAINFUCK":
+            for test in job["tests"][:2]:
+                test["expected_output"] = test["input_data"]
         self.last_result = self.judge(job)
         verdicts = [case["verdict"] for case in self.last_result["cases"]]
         if verdicts != ["ACCEPTED", "ACCEPTED", "WRONG_ANSWER"] or self.last_result["verdict"] != "WRONG_ANSWER":

@@ -43,8 +43,17 @@ additionally requires organizer authority and reviewer/manager access.
 | PUT | /api/lab/problems/{versionId}/collaborators/{userId} | accessLevel: EDITOR/REVIEWER/MANAGER, optional reason; owner only, audited |
 
 Draft fields: title, statement, inputFormat, outputFormat, constraints, explanation,
-setterNotes, difficulty, checker, languages, timeLimitMs, memoryLimitMb, outputLimitKb.
-Checkers are EXACT, TRIMMED_LINES and TOKENS. A suite has 1-200 tests, at most 4 MiB
+setterNotes, difficulty, checker, languages, timeLimitMs, memoryLimitMb, outputLimitKb, functionSignature.
+Checkers are EXACT, TRIMMED_LINES and TOKENS.
+
+`functionSignature` makes a function problem (LeetCode style); null keeps standard input/output.
+It is `{"functionName": "twoSum", "params": [{"name": "nums", "type": "int[]"}, {"name": "target", "type": "int"}], "returnType": "int[]"}`
+with types int, long, double, bool or string followed by up to two `[]`. Names start with a lowercase
+letter and use only letters and digits; keywords of any judge language are refused. Each test input then
+holds one JSON value per parameter line and the expected output one JSON value; the checker is not used,
+because results are compared as values (doubles within 1e-5). Brainfuck cannot be offered on such problems.
+The judge generates the code around the contestant's function (judge/drivers.py) and the editor shows
+matching starter code (frontend/src/lib/functionMode.ts). A suite has 1-200 tests, at most 4 MiB
 combined input/expected UTF-8 data. Both sample and hidden tests are required.
 
 At least one reference must expect ACCEPTED. Other references can expect
@@ -327,6 +336,7 @@ not grant worker access. Keep these routes inside a private service network.
 - POST /internal/judge/jobs/{id}/heartbeat: workerId, leaseToken.
 - POST /internal/judge/jobs/{id}/complete: workerId, leaseToken, verdict, cases, resource metrics.
 
-A claim receives source, exact sealed tests/checker/limits and a random lease token.
+A claim receives source, exact sealed tests/checker/limits, the function signature (null for
+standard input/output problems) and a random lease token.
 Every result write is fenced by worker/token/expiry. ACCEPTED requires one accepted
 result for every expected case. Only committed results are acknowledged in RabbitMQ.
