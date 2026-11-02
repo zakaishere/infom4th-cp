@@ -15,7 +15,7 @@ public class TeamAdminController {
     private static Actor admin(Authentication authentication) {
         Actor actor=Actor.of(authentication);Api.require(actor.superAdmin(),HttpStatus.FORBIDDEN,"Super administrator permission required");return actor;
     }
-    private static final String LOCKED="EXISTS(SELECT 1 FROM registrations r JOIN competitions c ON c.id=r.competition_id WHERE r.team_id=t.id AND r.status='APPROVED' AND c.status IN ('SCHEDULED','RUNNING'))";
+    private static final String LOCKED=TeamRepository.LOCKED;
     private static final String PLAYED="EXISTS(SELECT 1 FROM run_entries e WHERE e.team_id=t.id)";
     private static final String FILTER=" WHERE (?::text IS NULL OR t.name ILIKE '%'||?::text||'%' OR EXISTS(SELECT 1 FROM team_members m JOIN users u ON u.id=m.user_id WHERE m.team_id=t.id AND (u.handle ILIKE '%'||?::text||'%' OR u.email ILIKE '%'||?::text||'%')))"+
             " AND (?::text IS NULL OR (?::text='played' AND "+PLAYED+") OR (?::text='never' AND NOT "+PLAYED+") OR (?::text='locked' AND "+LOCKED+"))";
