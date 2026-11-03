@@ -4,6 +4,7 @@ import "./styles.css";
 import "./refresh.css";
 import "./practice.css";
 import "./profile.css";
+import "./duel.css";
 import { AuthProvider, ToastProvider, keepServerClockSynced, navigate, useAuth, useRoute, useTheme } from "./app";
 import { logout, syncServerClock } from "./api";
 import { Loading } from "./ui";
@@ -12,6 +13,7 @@ import Home from "./pages/Home";
 import Lobby from "./pages/Lobby";
 import Arena from "./pages/Arena";
 import { PracticeList, PracticeProblem } from "./pages/Practice";
+import { DuelHub, DuelRoom } from "./pages/Duels";
 import Teams from "./pages/Teams";
 import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
@@ -37,6 +39,8 @@ function Shell() {
   if (parts[0] === "run" && parts[1]) page = <Lobby runId={parts[1]} />;
   else if (parts[0] === "practice" && parts[1]) page = <PracticeProblem versionId={parts[1]} />;
   else if (parts[0] === "practice") page = <PracticeList />;
+  else if (parts[0] === "duel" && parts[1]) page = <DuelRoom key={parts[1]} id={parts[1]} />;
+  else if (parts[0] === "duels") page = <DuelHub />;
   else if (parts[0] === "teams") page = <Teams />;
   else if (parts[0] === "leaderboard") page = <Leaderboard />;
   else if (parts[0] === "u" && parts[1] && parts[2] === "vs" && parts[3]) page = <HeadToHead first={parts[1]} second={parts[3]} />;
@@ -60,12 +64,14 @@ function Shell() {
               {link("/admin", "Control room")}
               {link("/contests", "Contests")}
               {link("/practice", "Practice")}
+              {link("/duels", "Duels")}
               {link("/leaderboard", "Leaderboard")}
             </>
           ) : (
             <>
               {link("/", "Contests")}
               {link("/practice", "Practice")}
+              {link("/duels", "Duels")}
               {link("/leaderboard", "Leaderboard")}
               {link("/teams", "Teams")}
             </>
