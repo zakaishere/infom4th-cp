@@ -39,24 +39,22 @@ public class LeaderboardService {
             +"JOIN LATERAL (SELECT jr.verdict FROM judging_jobs j JOIN judging_results jr ON jr.job_id=j.id WHERE j.submission_id=s.id AND j.status='COMPLETED' ORDER BY j.generation DESC LIMIT 1) latest ON latest.verdict='ACCEPTED' "
             // Staff can read hidden tests, so their solves would not be a fair score.
             +"WHERE NOT EXISTS(SELECT 1 FROM user_roles ur WHERE ur.user_id=s.submitted_by AND ur.role_code IN ('SUPER_ADMIN','ADMIN','MODERATOR')) AND "+COUNTED;
-    /** Everyone listed on the board, solved or not. Attempts in a private contest or rehearsal do not list anyone. */
-    private static final String SUBMITTERS="SELECT DISTINCT s.submitted_by FROM submissions s JOIN users u ON u.id=s.submitted_by AND u.status='ACTIVE' "
-            +"LEFT JOIN contest_runs r ON r.id=s.run_id LEFT JOIN competitions c ON c.id=r.competition_id "
-            +"WHERE NOT EXISTS(SELECT 1 FROM user_roles ur WHERE ur.user_id=s.submitted_by AND ur.role_code IN ('SUPER_ADMIN','ADMIN','MODERATOR')) AND ("
-            +"(s.context='PRACTICE' AND NOT s.samples_only) OR (s.context='CONTEST' AND r.kind='OFFICIAL' AND c.published_at IS NOT NULL AND c.visibility='PUBLIC'))";
+    /** Everyone listed on the board, solved or not: every active account except staff, who are never ranked. */
+    private static final String LISTED="SELECT u.id FROM users u WHERE u.status='ACTIVE' "
+            +"AND NOT EXISTS(SELECT 1 FROM user_roles ur WHERE ur.user_id=u.id AND ur.role_code IN ('SUPER_ADMIN','ADMIN','MODERATOR'))";
 
     private record Cached(long until,Board board,Map<UUID,Map<String,Object>> players,Map<UUID,Map<String,Object>> teams) {}
     private volatile Cached cached;
     private final Database db;
     public LeaderboardService(Database db){this.db=db;}
 
-    /** Top 100 of both boards plus the caller's own places, which may be further down. */
+    /** Every player, the top 100 teams, and the caller's own team places, which may be further down. */
     public Map<String,Object> get(Actor actor) {
         var current=current();
         var myTeams=db.jdbc.queryForList("SELECT team_id FROM team_members WHERE user_id=?",UUID.class,actor.id()).stream()
                 .map(current.teams::get).filter(Objects::nonNull).sorted(Comparator.comparingInt(t->(Integer)t.get("rank"))).toList();
         var result=new LinkedHashMap<String,Object>();
-        result.put("players",current.players.values().stream().limit(100).toList());
+        result.put("players",List.copyOf(current.players.values()));
         result.put("teams",current.teams.values().stream().limit(100).toList());
         result.put("playerCount",current.players.size());
         result.put("teamCount",current.teams.size());
@@ -112,11 +110,11 @@ public class LeaderboardService {
     public Board compute() {
         var solves=db.jdbc.queryForList(ACCEPTED).stream().map(s->new Solve((UUID)s.get("user_id"),(UUID)s.get("problem_id"),(String)s.get("difficulty"),Api.time(s.get("submitted_at")),(UUID)s.get("team_id"))).toList();
         var members=db.jdbc.queryForList("SELECT user_id,team_id,joined_at FROM team_members").stream().map(m->new Membership((UUID)m.get("user_id"),(UUID)m.get("team_id"),Api.time(m.get("joined_at")))).toList();
-        return calculate(solves,members,new HashSet<>(db.jdbc.queryForList(SUBMITTERS,UUID.class)),Instant.now());
+        return calculate(solves,members,new HashSet<>(db.jdbc.queryForList(LISTED,UUID.class)),Instant.now());
     }
 
     /** Rarity is measured among players who have solved anything, so it needs no list of idle accounts. */
-    public static Board calculate(List<Solve> solves,List<Membership> members,Set<UUID> submitters,Instant now) {
+    public static Board calculate(List<Solve> solves,List<Membership> members,Set<UUID> listed,Instant now) {
         Map<UUID,Set<UUID>> solvers=new HashMap<>();Map<UUID,String> difficulty=new HashMap<>();Set<UUID> everyone=new HashSet<>();
         for(Solve s:solves) {
             solvers.computeIfAbsent(s.problem(),k->new HashSet<>()).add(s.user());everyone.add(s.user());
@@ -134,8 +132,8 @@ public class LeaderboardService {
             // Joining a team never carries points earned before joining.
             for(Membership m:byUser.getOrDefault(s.user(),List.of()))if(!s.at().isBefore(m.joinedAt()))credit(teams,m.team(),s);
         }
-        // Submitting is enough to be listed, on Σ 0 until the first solve that counts.
-        for(UUID user:submitters)players.computeIfAbsent(user,k->new HashMap<>());
+        // Every listed account appears, on Σ 0 until the first solve that counts.
+        for(UUID user:listed)players.computeIfAbsent(user,k->new HashMap<>());
         return new Board(rank(players,value,difficulty),rank(teams,value,difficulty),now);
     }
 
