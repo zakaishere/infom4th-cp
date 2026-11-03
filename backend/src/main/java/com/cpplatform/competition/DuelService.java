@@ -210,6 +210,12 @@ public class DuelService {
         UUID member=winner!=null?winner:db.id("SELECT user_id FROM duel_players WHERE duel_id=? AND team=? AND left_at IS NULL LIMIT 1",id,team.shortValue());
         db.jdbc.update("UPDATE duel_rounds SET result='FORFEIT',winner_id=?,winner_team=?,decided_at=clock_timestamp() WHERE duel_id=? AND result IS NULL AND starts_at IS NOT NULL",
                 member,team==null?null:team.shortValue(),id);
+        // In races the forfeited round counts for the side that stayed, like a round won.
+        if(!"FFA".equals(db.one("SELECT mode FROM duels WHERE id=?",id).get("mode")))
+            db.jdbc.update("INSERT INTO duel_round_results(duel_id,number,user_id,place,points) SELECT r.duel_id,r.number,p.user_id,"
+                    +"CASE WHEN p.user_id=r.winner_id OR p.team=r.winner_team THEN 1 ELSE 2 END,CASE WHEN p.user_id=r.winner_id OR p.team=r.winner_team THEN 1 ELSE 0 END "
+                    +"FROM duel_rounds r JOIN duel_players p ON p.duel_id=r.duel_id WHERE r.duel_id=? AND r.result='FORFEIT' "
+                    +"AND NOT EXISTS(SELECT 1 FROM duel_round_results x WHERE x.duel_id=r.duel_id AND x.number=r.number)",id);
         finish(id,winner,team,"FORFEIT");
     }
 

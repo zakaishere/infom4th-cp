@@ -11,7 +11,7 @@
   "statement": "Count the pairs of positions **i < j** with **a[i] + a[j] = target**. Two pairs are different if they use different positions, even when the values are the same.",
   "inputFormat": "The first line contains n and target. The second line contains n integers.",
   "outputFormat": "Print the number of pairs.",
-  "constraints": "1 <= n <= 100000; -10^9 <= ai <= 10^9; -2 * 10^9 <= target <= 2 * 10^9. The answer can reach about 5 * 10^9: use a 64-bit counter.",
+  "constraints": "1 <= n <= 100000; -10^9 <= ai <= 10^9; -2·10^9 <= target <= 2·10^9. The answer can reach about 5·10^9: use a 64-bit counter.",
   "explanation": "Scan left to right with a hash map of how often each value appeared; each element adds the count of target - a[j] seen before it. O(n) expected.",
   "timeLimitMs": 2000,
   "memoryLimitMb": 256,

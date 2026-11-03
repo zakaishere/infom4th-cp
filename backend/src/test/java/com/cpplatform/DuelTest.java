@@ -223,6 +223,8 @@ class DuelTest {
         var r=room(room);
         assertEquals("FINISHED",r.get("status"));assertEquals("FORFEIT",r.get("end_reason"));
         assertEquals(2,team((Number)r.get("winner_team")));
+        assertEquals(2,points(room,d),"the forfeited round counts for the team that stayed");
+        assertEquals(0,points(room,c));
         var players=(List<Map<String,Object>>)((Map<String,Object>)duels.state(a,room).get("duel")).get("players");
         assertEquals(4,players.size());
     }

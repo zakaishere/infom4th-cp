@@ -545,12 +545,12 @@ function Finished({ state }: { state: RoomState }) {
       </div>
       <div className="card table-wrap" style={{ padding: 0 }}>
         <table>
-          <thead><tr><th>#</th><th>Player</th>{d.mode === "TEAMS" && <th>Team</th>}<th className="right">{d.mode === "FFA" ? "Points" : "Rounds won"}</th><th className="right">Round wins</th></tr></thead>
+          <thead><tr><th>#</th><th>Player</th>{d.mode === "TEAMS" && <th>Team</th>}<th className="right">{d.mode === "FFA" ? "Points" : "Rounds won"}</th>{d.mode === "FFA" && <th className="right">Round wins</th>}</tr></thead>
           <tbody>{standings.map((p, i) => (
             <tr key={p.handle} className={p.handle === me?.handle ? "row-solved" : ""}>
               <td>{i + 1}</td><td><strong>@{p.handle}</strong>{p.left_room && <span className="small muted"> (left)</span>}</td>
               {d.mode === "TEAMS" && <td>Team {p.team}</td>}
-              <td className="right mono">{p.points}</td><td className="right mono">{p.wins}</td>
+              <td className="right mono">{p.points}</td>{d.mode === "FFA" && <td className="right mono">{p.wins}</td>}
             </tr>
           ))}</tbody>
         </table>
