@@ -54,11 +54,11 @@ first start builds the language images (15–30 min); see [docs/DEPLOY_VPS.md](d
 - Community: global Sigma leaderboards for players and teams, player profiles (activity,
   skills, contest rating, medals and badges), head to head, private rivals, contest
   replays, team pages and a downloadable share card. All of it reads public results only.
-- Blitz duels: 1v1 challenges by link or from the open challenge list, best of 1/3/5 short
+- Blitz rooms: 1v1 duels, 2v2/3v3 teams and free-for-all rooms for up to 10 players, short
   rounds from a separate duel problem pool (Control room -> Duel problems, with its own bulk
-  import), first accepted answer wins a round, wrong-answer lockout,
-  live opponent verdicts, spectating. 12 duel problems (examples/duel-problems) are bundled
-  and install themselves once judges are online. See "Blitz duels" in [API](docs/API.md).
+  import), live verdicts, spectating, and twists drawn per round: blind, no `for`, no `+`,
+  code golf, fastest run, forced language. 12 duel problems (examples/duel-problems) are
+  bundled and install themselves once judges are online. See "Blitz rooms" in [API](docs/API.md).
 - Benchmark (Control room, super administrators): send up to 1000 submissions through the
   real queue and judges on a private problem, see every timing, and download an Excel report.
 

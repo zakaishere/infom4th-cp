@@ -140,31 +140,55 @@ ascending, deterministic entry-ID tie break. Only attempts before the first
 accepted submission count toward penalties; judge errors never penalize.
 Rehearsal submissions never enter the official result projection.
 
-## Blitz duels (V22, V23)
+## Blitz rooms: duels, teams and free-for-all (V22-V25)
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | /api/duels | The caller's duels (`mine`), open challenges from other players (`open`) and running duels (`live`) |
-| POST | /api/duels | `{bestOf: 1/3/5, roundMinutes: 1-30, lockoutSeconds: 0-120, difficulty?: EASY/MEDIUM/HARD}`. At most 3 open challenges per player, and none while playing a duel |
-| GET | /api/duels/{id} | Live state for players and spectators: duel, rounds, verdict feed, the caller's role and penalty seconds left |
-| POST | /api/duels/{id}/join | Accepts an open challenge; rounds are drawn from the duel problem pool, easiest first, and round 1 starts 5 seconds later |
-| POST | /api/duels/{id}/leave | Cancels the caller's open challenge, or forfeits a running duel |
-| GET | /api/duels/{id}/rounds/{number} | Statement of a round, once it has started |
+| GET | /api/duels | The caller's rooms (`mine`), open rooms (`open`) and running rooms (`live`), each with its `players` (handle, team, points, round wins) |
+| POST | /api/duels | `{mode: DUEL/TEAMS/FFA, bestOf: 1/3/5 (DUEL, TEAMS), teamSize: 2/3 (TEAMS), maxPlayers: 3-10 and rounds: 1-7 (FFA), roundMinutes: 1-30, lockoutSeconds: 0-120, difficulty?, modifiers?: [twists]}`. A player is in one open or running room at a time |
+| GET | /api/duels/{id} | Live state: room and players, rounds (twist from the countdown, problem from the start, places once decided), verdict feed, `role` (PLAYER/SPECTATOR), `host`, `myTeam`, penalty seconds left |
+| POST | /api/duels/{id}/join | Joins an open room; `{team: 1/2}` picks a team, otherwise the smaller one. A full room starts by itself |
+| POST | /api/duels/{id}/start | Host: starts before the room is full (TEAMS: one player per team; FFA: two players) |
+| POST | /api/duels/{id}/team | `{team: 1/2}` switches team while the room waits |
+| POST | /api/duels/{id}/leave | Open room: the host closes it, a guest frees the seat. Running room: forfeit (see below) |
+| GET | /api/duels/{id}/rounds/{number} | Statement of a round once it has started; blind rounds hide the examples, forced-language rounds list one language |
 | POST | /api/duels/{id}/submissions | Same body and `Idempotency-Key` header as practice; goes to the round that is open. `mode: "samples"` runs the examples only and never counts |
 | POST | /api/lab/problems/{versionId}/publish-duel | Organizers: adds an approved version to the duel pool (or replaces the problem's version there) |
 | GET | /api/manage/duel-problems | Organizers: the pool (`pool`, hidden ones too) and approved problems not in it (`candidates`) |
-| PATCH | /api/manage/duel-problems/{problemId} | Organizers: `{hidden: true/false}` removes a problem from new duels or brings it back |
+| PATCH | /api/manage/duel-problems/{problemId} | Organizers: `{hidden: true/false}` removes a problem from new rooms or brings it back |
 
-Rules. A round is won by the first accepted submission ordered by the database submission
-time; a submission still being judged holds the decision, so a slow judge never changes who
-was first. When the round clock ends, the most tests passed wins it (the earliest submission
-reaching that count breaks a tie), and nobody passing a test is a drawn round. The duel ends
-when a player wins `ceil(bestOf/2)` rounds; up to two drawn rounds are replayed, then an
-even score is a drawn duel. A player waits for each verdict before submitting again, and a
-rejected verdict other than a compilation error locks them out for `lockoutSeconds`.
-Opponents and spectators see verdicts and test counts, never code or submission IDs.
-Duel submissions (context `DUEL`) never count for practice statistics, Sigma or ratings,
-and they share the per-user admission limits. Challenges not accepted within an hour expire.
+Modes. DUEL (1v1) and TEAMS (2v2, 3v3) are races: a side wins a round, the first side to win
+`ceil(bestOf/2)` rounds wins the room, up to two drawn rounds are replayed, and an even score
+after that is a draw. Teammates share their team's rounds. FFA (3 to 10 players) plays
+`rounds` rounds; each round ranks every player and pays placement points (N players: N for
+first, N-1 for second, ...; nothing for no test passed). The most points wins, then the most
+round wins; otherwise a draw. Leaving a running room forfeits: in a 1v1 the opponent wins, a
+team with nobody left loses, and a free-for-all ends when one player remains (a player who
+left keeps their points but cannot win).
+
+Twists (`modifiers`). When the room starts, every round gets a twist drawn from the host's
+list (empty: CLASSIC). It is shown during the 6-second countdown.
+
+| Twist | Rule |
+|---|---|
+| CLASSIC | First accepted answer wins |
+| BLIND | The statement has no examples and "Run examples" is refused |
+| NO_FOR | Source containing the word `for` is refused, comments and strings included |
+| NO_PLUS | Source containing `+` is refused (even `#include <bits/stdc++.h>`) |
+| GOLF | Shortest accepted source (bytes, surrounding whitespace ignored) wins; the round runs to the clock and players may resubmit after an accepted answer |
+| FASTEST | Quickest accepted run (judge execution time) wins; runs to the clock, resubmitting allowed |
+| LANGUAGE | Everyone must use one language drawn from the problem's enabled languages |
+
+A refused submission costs nothing. Ranking: accepted submissions first (by submission time,
+or by length / run time for GOLF / FASTEST), then most tests passed, the earlier submission
+breaking every tie; nobody passing a test is a drawn round. Duel submissions are judged on
+every test (like IOI), so "most tests passed" counts all of them. A submission still being
+judged holds the decision, so a slow judge never changes the order. A player waits for each
+verdict before submitting again, and a rejected verdict other than a compilation error locks
+them out for `lockoutSeconds`. Players and spectators see verdicts, test counts, code length
+and run time, never code or submission IDs. Duel submissions (context `DUEL`) never count
+for practice statistics, Sigma or ratings, and they share the per-user admission limits. Rooms
+not started within an hour expire.
 
 Duel problems live in their own pool (`duel_problems`), separate from the practice set: a duel
 never draws a practice problem, and a duel problem is not shown on the Practice page unless an
