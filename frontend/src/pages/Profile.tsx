@@ -202,7 +202,7 @@ export default function Profile({ handle }: { handle: string }) {
       <div className="stack" style={{ gap: "1.25rem" }}>
         <section className="card">
           <h3>Activity</h3>
-          {s.submissions === 0 ? <Empty>No public activity yet.</Empty> : <Heatmap activity={s.activity} today={s.today} />}
+          <Heatmap activity={s.activity} today={s.today} />
         </section>
 
         <div className="grid grid-2" style={{ alignItems: "start" }}>

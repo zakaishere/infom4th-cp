@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useData } from "../../app";
-import { Badge, Empty, ErrorBox, Field, Loading, Stat, when } from "../../ui";
+import { Badge, Empty, ErrorBox, Field, Loading, Stat, UserList, UserLink, when } from "../../ui";
 
 type TeamRow = {
   id: string; name: string; created_at: string; captain: string; captain_id: string; members: string | null; member_count: number; contests: number; submissions: number;
@@ -40,7 +40,7 @@ export function Teams() {
           <tbody>{data.data.teams.map((t) => (
             <tr key={t.id}>
               <td><a href={"#/admin/teams/" + t.id}><strong>{t.name}</strong></a> {t.locked && <Badge tone="warn">Locked</Badge>}<div className="small muted">Captain <a href={"#/admin/users/" + t.captain_id}>@{t.captain}</a></div></td>
-              <td className="small">{t.member_count}<div className="muted">{t.members}</div></td>
+              <td className="small">{t.member_count}<div className="muted"><UserList handles={t.members} /></div></td>
               <td className="small">{t.contests}</td>
               <td className="small">{t.last_contest ? <><a href={"#/admin/contests/" + t.last_contest_id}>{t.last_contest}</a><div className="muted">{when(t.last_played_at)}</div></> : <span className="muted">Never</span>}</td>
               <td className="small">{t.submissions}</td>
@@ -82,7 +82,7 @@ export function TeamDetail({ id }: { id: string }) {
           <thead><tr><th>User</th><th>Status</th><th>Joined</th><th>Team submissions</th></tr></thead>
           <tbody>{t.members.map((m: any) => (
             <tr key={m.id}>
-              <td><a href={"#/admin/users/" + m.id}><strong>{m.display_name}</strong></a> {m.id === t.captain_id && <Badge tone="info">Captain</Badge>}<div className="small muted">@{m.handle}</div></td>
+              <td><a href={"#/admin/users/" + m.id}><strong>{m.display_name}</strong></a> {m.id === t.captain_id && <Badge tone="info">Captain</Badge>}<div className="small muted"><UserLink handle={m.handle} /></div></td>
               <td><Badge tone={m.status === "ACTIVE" ? "ok" : "bad"}>{m.status}</Badge></td>
               <td className="small">{when(m.joined_at)}</td><td className="small">{m.submissions}</td>
             </tr>
@@ -101,7 +101,7 @@ export function TeamDetail({ id }: { id: string }) {
                 <td className="small">{c.rank != null ? <><strong>{c.rank}</strong> of {c.entrants}</> : "—"}</td>
                 <td className="small">{c.solved ?? "—"} of {c.problems}</td>
                 <td className="small">{c.submissions}</td>
-                <td className="small">{c.display_name}<div className="muted">{c.members}</div></td>
+                <td className="small">{c.display_name}<div className="muted"><UserList handles={c.members} /></div></td>
               </tr>
             ))}</tbody>
           </table></div>

@@ -4,7 +4,7 @@ import { navigate, useAction, useData, useRoute, useServerClock, useToast } from
 import { FullscreenPanel, type FullscreenData } from "../../components/FullscreenLog";
 import { SubmissionModal } from "../../components/Problem";
 import Standings from "../../components/Standings";
-import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, LiveDot, Loading, ReasonDialog, Verdict, clock, timeOf, when } from "../../ui";
+import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, LiveDot, Loading, ReasonDialog, UserLink, Verdict, clock, timeOf, when } from "../../ui";
 import { runPhase } from "../Home";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -309,7 +309,7 @@ function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; p
               <tbody>{rows.map((s) => (
                 <tr key={s.id}>
                   <td className="small">{timeOf(s.submitted_at)}</td>
-                  <td>{s.entry_name}<div className="small muted">@{s.handle}</div></td>
+                  <td>{s.entry_name}<div className="small muted"><UserLink handle={s.handle} /></div></td>
                   <td><strong>{labels[s.problem_slot] ?? s.problem_slot}</strong></td>
                   <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>
                   <td><Verdict status={s.status} verdict={s.verdict} />{s.generation > 1 && <span className="small muted"> (rejudge {s.generation - 1})</span>}</td>
@@ -325,7 +325,7 @@ function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; p
           )}
         </>
       )}
-      {tab === "standings" && <Standings runId={r.id} labels={labels} jury />}
+      {tab === "standings" && <Standings runId={r.id} labels={labels} jury links />}
       {tab === "clarifications" && (
         <div className="stack">
           {(clar.data ?? []).length === 0 ? <Empty>No questions.</Empty> : (clar.data ?? []).map((c) => (
@@ -406,7 +406,7 @@ function Participants({ id, mode, status }: { id: string; mode: string; status: 
       {mode === "TEAM" && <span className="small muted">Team captains register their teams from the contest lobby.</span>}
       {open && (list.loading ? <Loading /> : !list.data?.length ? <Empty>No registrations yet.</Empty> : (
         <div className="table-wrap"><table><thead><tr><th>Participant</th><th>Email</th><th>Status</th><th>Registered</th></tr></thead>
-          <tbody>{list.data.map((p) => <tr key={p.id}><td>{p.team ?? p.display_name}<div className="small muted">{p.handle ? "@" + p.handle : ""}</div></td><td className="small">{p.email ?? ""}</td><td><Badge tone="ok">{p.status}</Badge></td><td className="small">{when((p as any).created_at)}</td></tr>)}</tbody></table></div>
+          <tbody>{list.data.map((p) => <tr key={p.id}><td>{p.team ?? p.display_name}<div className="small muted">{p.handle ? <UserLink handle={p.handle} /> : ""}</div></td><td className="small">{p.email ?? ""}</td><td><Badge tone="ok">{p.status}</Badge></td><td className="small">{when((p as any).created_at)}</td></tr>)}</tbody></table></div>
       ))}
     </section>
   );

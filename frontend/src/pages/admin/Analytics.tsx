@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth, useData } from "../../app";
-import { Badge, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Meter, Stat, VERDICTS, Verdict, ago, timeOf, when } from "../../ui";
+import { Badge, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Meter, Stat, UserLink, VERDICTS, Verdict, ago, timeOf, when } from "../../ui";
 
 type Count = { key: string; count: number; accepted?: number };
 type Num = number | null | undefined;
@@ -492,7 +492,7 @@ function Submissions() {
             <tbody>{rows.data.map((s) => (
               <tr key={s.id}>
                 <td className="small">{timeOf(s.submitted_at)}</td>
-                <td className="small">@{s.handle}</td>
+                <td className="small"><UserLink handle={s.handle} /></td>
                 <td className="small">{s.label ? <strong>{s.label} </strong> : null}{s.problem}<div className="muted">{s.contest ?? s.kind}</div></td>
                 <td className="small">{LANGUAGE_NAMES[s.language_code] ?? s.language_code}</td>
                 <td className="small"><Verdict status={s.status ?? undefined} verdict={s.verdict} />{s.total_tests ? <div className="muted mono">{s.passed_tests}/{s.total_tests} tests</div> : null}{(s.generation ?? 1) > 1 ? <div className="muted">rejudge</div> : null}{(s.attempt_count ?? 0) > 1 ? <div className="muted">×{s.attempt_count} attempts</div> : null}{s.status === "FAILED" && s.last_error_code ? <div className="muted mono">{s.last_error_code}</div> : null}</td>

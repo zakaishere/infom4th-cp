@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { download } from "../api";
 import { useAction, useData } from "../app";
-import { Badge, Empty, Loading, Stat, timeOf } from "../ui";
+import { Badge, Empty, Loading, Stat, UserLink, timeOf } from "../ui";
 
 export type FullscreenPerson = {
   handle: string; display_name: string; entry_name: string; is_team: boolean; left_count: number; focus_count: number; refused_count: number; reload_count: number;
@@ -55,7 +55,7 @@ export function FullscreenPanel({ runId, ended, data }: { runId: string; ended: 
               <thead><tr><th>Player</th><th>Team</th><th className="right">Left</th><th className="right">Other window</th><th className="right">Reloads</th><th className="right">Total away</th><th className="right">Longest</th><th>Last left</th></tr></thead>
               <tbody>{data.people.map((p) => (
                 <tr key={p.handle} className={p.away_now ? "fullscreen-away" : ""}>
-                  <td><strong>@{p.handle}</strong>{p.away_now && <> <Badge tone="bad">Away now</Badge></>}<div className="small muted">{p.display_name}</div></td>
+                  <td><strong><UserLink handle={p.handle} /></strong>{p.away_now && <> <Badge tone="bad">Away now</Badge></>}<div className="small muted">{p.display_name}</div></td>
                   <td className="small">{p.is_team ? p.entry_name : "–"}</td>
                   <td className="right mono">{p.left_count}</td><td className="right mono">{p.focus_count}</td><td className="right mono">{p.reload_count}</td>
                   <td className="right mono">{away(Number(p.total_away_ms))}</td><td className="right mono">{away(Number(p.longest_away_ms))}</td>
@@ -74,7 +74,7 @@ export function FullscreenPanel({ runId, ended, data }: { runId: string; ended: 
                   <td className="small mono">{e.returned_at ? timeOf(e.returned_at) : e.still_away && !ended ? "–" : "Never"}</td>
                   <td className="right mono">{away(Number(e.away_ms))}</td>
                   <td><Length ms={Number(e.away_ms)} still={e.still_away && !ended} /></td>
-                  <td className="small">@{e.handle}</td><td className="small">{e.is_team ? e.entry_name : "–"}</td>
+                  <td className="small"><UserLink handle={e.handle} /></td><td className="small">{e.is_team ? e.entry_name : "–"}</td>
                   <td className="small">{CAUSE[e.reason] ?? WHAT[e.kind] ?? e.kind}</td>
                   <td className="right small mono">{e.next_submission_seconds == null ? "–" : e.next_submission_seconds < 60 ? e.next_submission_seconds + " s" : Math.round(e.next_submission_seconds / 60) + " min"}</td>
                 </tr>
@@ -113,7 +113,7 @@ export function FullscreenAlertBanner({ alert, onDismiss }: { alert: FullscreenA
         <ul>
           {alert.latest.slice(0, 3).map((a) => (
             <li key={a.id}>
-              <strong>@{a.handle}</strong>{a.is_team ? ` (${a.entry_name})` : ""}: {CAUSE[a.reason] ?? WHAT[a.kind] ?? a.kind} at {timeOf(a.left_at)}{a.returned_at ? ", now back" : ", still away"}
+              <strong><UserLink handle={a.handle} className="quiet" /></strong>{a.is_team ? ` (${a.entry_name})` : ""}: {CAUSE[a.reason] ?? WHAT[a.kind] ?? a.kind} at {timeOf(a.left_at)}{a.returned_at ? ", now back" : ", still away"}
               <span className="fullscreen-alert-contest"> · {a.title}{a.run_kind === "REHEARSAL" ? " (rehearsal)" : ""}</span>
             </li>
           ))}

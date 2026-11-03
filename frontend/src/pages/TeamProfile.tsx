@@ -1,7 +1,7 @@
 import { useData } from "../app";
 import { Avatar, TierChip } from "../components/Avatar";
 import { SCORING_INFO } from "../components/Standings";
-import { Empty, ErrorBox, Loading, when } from "../ui";
+import { Empty, ErrorBox, Loading, UserList, when } from "../ui";
 import { MedalRow, type ContestRow } from "./Profile";
 
 type Data = {
@@ -57,7 +57,7 @@ export default function TeamProfile({ id }: { id: string }) {
                 <tbody>{t.contests.map((c) => (
                   <tr key={c.run_id}>
                     <td><strong>{c.title}</strong><div className="small muted">{when(c.starts_at)} · {SCORING_INFO[c.scoring_system]?.name ?? c.scoring_system}</div></td>
-                    <td className="small">{c.members}</td>
+                    <td className="small"><UserList handles={c.members} /></td>
                     <td className="right mono">#{c.rank} / {c.entrants}</td><td className="right mono">{c.solved}</td>
                   </tr>
                 ))}</tbody>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { post, put } from "../../api";
 import { useAction, useData } from "../../app";
-import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, ReasonDialog, Stat, ago, when } from "../../ui";
+import { Badge, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, ReasonDialog, Stat, UserLink, ago, when } from "../../ui";
 
 type ImportRow = { email: string; handle: string; displayName?: string; role?: string };
 type ImportResult = ImportRow & { status: string; error?: string; password?: string };
@@ -154,7 +154,7 @@ export function Users({ importOpen = false }: { importOpen?: boolean }) {
             const current = mainRole(u.roles);
             return (
               <tr key={u.id}>
-                <td><a href={"#/admin/users/" + u.id}><strong>{u.display_name}</strong></a><div className="small muted">@{u.handle} · {u.email}</div></td>
+                <td><a href={"#/admin/users/" + u.id}><strong>{u.display_name}</strong></a><div className="small muted"><UserLink handle={u.handle} /> · {u.email}</div></td>
                 <td><RoleBadge role={current} /></td>
                 <td><Badge tone={u.status === "ACTIVE" ? "ok" : "bad"}>{u.status}</Badge></td>
                 <td className="small">{u.submissions}</td>
@@ -184,8 +184,8 @@ function AuditTable({ rows, showActor = true }: { rows: AuditRow[]; showActor?: 
       <tbody>{rows.map((a) => (
         <tr key={a.id}>
           <td className="small">{when(a.created_at)}</td>
-          {showActor && <td className="small">{a.actor_handle ? "@" + a.actor_handle : "system"}</td>}
-          <td><strong className="small">{a.action}</strong><div className="small muted mono">{a.resource_type}{a.target_handle ? " · @" + a.target_handle : ""}</div></td>
+          {showActor && <td className="small">{a.actor_handle ? <UserLink handle={a.actor_handle} /> : "system"}</td>}
+          <td><strong className="small">{a.action}</strong><div className="small muted mono">{a.resource_type}{a.target_handle ? <> · <UserLink handle={a.target_handle} /></> : ""}</div></td>
           <td className="small">{a.reason}</td>
           <td className="small mono">{a.metadata && a.metadata !== "{}" ? <pre style={{ margin: 0 }}>{JSON.stringify(JSON.parse(a.metadata), null, 1)}</pre> : ""}</td>
         </tr>
@@ -209,7 +209,7 @@ export function UserDetail({ id }: { id: string }) {
     <div className="stack">
       <a href="#/admin/users" className="small">← All users</a>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><h1>{u.display_name}</h1><p>@{u.handle} · {u.email} · joined {when(u.created_at)}</p></div>
+        <div><h1>{u.display_name}</h1><p><UserLink handle={u.handle} className="quiet" /> · {u.email} · joined {when(u.created_at)}</p></div>
         <div className="row"><RoleBadge role={current} /><Badge tone={u.status === "ACTIVE" ? "ok" : "bad"}>{u.status}</Badge></div>
       </div>
       <div className="grid grid-2">

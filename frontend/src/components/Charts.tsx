@@ -81,10 +81,14 @@ const iso = (d: Date) => `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${p
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** A year of submissions per day, Monday at the top, in one hue from faint to full. */
-export function Heatmap({ activity, today }: { activity: { date: string; count: number }[]; today: string }) {
+/** A year of daily activity. Always draws the full grid, so a new account shows empty cells rather than nothing. */
+export function Heatmap({ activity, today }: { activity?: { date: string; count: number }[] | null; today?: string | null }) {
   const [tip, setTip] = useState<Tip>(null);
-  const counts = new Map(activity.map((a) => [a.date, a.count]));
-  const end = new Date(today + "T00:00:00Z");
+  const days = activity ?? [];
+  const counts = new Map(days.map((a) => [a.date, a.count]));
+  const total = days.reduce((s, a) => s + a.count, 0);
+  let end = new Date((today ?? "") + "T00:00:00Z");
+  if (Number.isNaN(end.getTime())) end = new Date(iso(new Date()) + "T00:00:00Z");
   const start = new Date(end);
   start.setUTCDate(end.getUTCDate() - 52 * 7 - ((end.getUTCDay() + 6) % 7));
   const CELL = 11, GAP = 2, LEFT = 26, TOP = 16, step = CELL + GAP;
@@ -101,7 +105,7 @@ export function Heatmap({ activity, today }: { activity: { date: string; count: 
   return (
     <div className="chart heatmap-scroll" onMouseLeave={() => setTip(null)}>
       <div className="chart" style={{ minWidth: 620 }}>
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Activity over the last year: ${activity.reduce((s, a) => s + a.count, 0)} submissions`}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Activity over the last year: ${total} submissions`}>
           {months.map((m) => <text key={m.column} x={LEFT + m.column * step} y={10} className="chart-axis small-axis">{m.label}</text>)}
           {["Mon", "Wed", "Fri"].map((d, i) => <text key={d} x={0} y={TOP + (i * 2 + 1) * step - 3} className="chart-axis small-axis">{d}</text>)}
           {cells.map((c) => (
@@ -110,6 +114,14 @@ export function Heatmap({ activity, today }: { activity: { date: string; count: 
           ))}
         </svg>
         <TipBox tip={tip} />
+      </div>
+      <div className="heatmap-caption small muted">
+        <span>{total === 0 ? "No submissions yet. Solve a problem to start filling the grid." : `${total.toLocaleString()} submission${total === 1 ? "" : "s"} in the last year`}</span>
+        <span className="heatmap-legend" aria-hidden>
+          Less
+          {[0, 1, 2, 3, 4].map((l) => <svg key={l} width={CELL} height={CELL}><rect width={CELL} height={CELL} rx="2" className={"heat-" + l} /></svg>)}
+          More
+        </span>
       </div>
     </div>
   );
