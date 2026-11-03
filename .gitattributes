@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Judge test data must stay byte-exact on every checkout (no CRLF on Windows).
+examples/duel-problems/** text eol=lf
+*.gz binary

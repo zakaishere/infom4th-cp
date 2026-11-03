@@ -1,0 +1,102 @@
+{
+  "slug": "blitz-digit-sum",
+  "title": "Digit Sum",
+  "difficulty": "EASY",
+  "tags": [
+    "math",
+    "strings",
+    "blitz"
+  ],
+  "statement": "Print the sum of the decimal digits of a non-negative integer **n**.",
+  "inputFormat": "One line with the integer n.",
+  "outputFormat": "Print one integer: the sum of the digits of n.",
+  "constraints": "0 <= n <= 10^18. The value does not fit in a 32-bit integer.",
+  "explanation": "Read n as a string (or a 64-bit integer) and add its digits. O(number of digits).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "Zero, a single digit, 10^18, all nines, or a random 64-bit value"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

@@ -1,0 +1,102 @@
+{
+  "slug": "blitz-first-missing",
+  "title": "First Missing Positive",
+  "difficulty": "MEDIUM",
+  "tags": [
+    "arrays",
+    "hashing",
+    "blitz"
+  ],
+  "statement": "Find the **smallest positive integer** (1, 2, 3, ...) that does not appear in the array. Values can be negative, zero, repeated, or very large.",
+  "inputFormat": "The first line contains n. The second line contains n integers.",
+  "outputFormat": "Print the smallest positive integer missing from the array.",
+  "constraints": "1 <= n <= 100000; -10^9 <= ai <= 10^9.",
+  "explanation": "The answer is at most n + 1, so mark which of the values 1..n occur in a boolean array and return the first unmarked one. O(n).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "Answer 1, answer n + 1, duplicates, negatives, or a full permutation"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

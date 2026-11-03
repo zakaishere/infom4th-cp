@@ -1,0 +1,101 @@
+{
+  "slug": "blitz-reverse-words",
+  "title": "Reverse the Words",
+  "difficulty": "EASY",
+  "tags": [
+    "strings",
+    "blitz"
+  ],
+  "statement": "A sentence is a list of words separated by single spaces. Print its words in **reverse order**. The letters inside each word stay as they are.",
+  "inputFormat": "One line containing the words, separated by single spaces.",
+  "outputFormat": "Print the words in reverse order on one line, separated by single spaces.",
+  "constraints": "1 <= number of words <= 1000. Each word has 1 to 20 lowercase English letters or digits.",
+  "explanation": "Split on whitespace and print the list backwards. O(total length).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "One word, two words, or up to 1000 words"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

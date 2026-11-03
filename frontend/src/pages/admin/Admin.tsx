@@ -9,6 +9,7 @@ import { ProblemEditor, ProblemList } from "./Problems";
 import { Audit, Languages, UserDetail, Users } from "./Platform";
 import { TeamDetail, Teams } from "./Teams";
 import PracticeSet from "./PracticeSet";
+import DuelProblems from "./DuelProblems";
 import Analytics from "./Analytics";
 import Benchmark from "./Benchmark";
 import { FullscreenAlertBanner, useFullscreenAlerts } from "../../components/FullscreenLog";
@@ -32,6 +33,7 @@ export default function Admin({ parts }: { parts: string[] }) {
     { title: "Build", items: [
       setter && { key: "problems", label: "Problem lab", icon: "✎", count: review || undefined },
       organizer && { key: "practice", label: "Practice set", icon: "★" },
+      organizer && { key: "duel-problems", label: "Duel problems", icon: "⚔" },
     ] },
     { title: "System", items: [
       superAdmin && { key: "judging", label: "Judges & capacity", icon: "⚙" },
@@ -54,6 +56,8 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "problems") page = <ProblemList />;
   else if (current === "analytics" && organizer) page = <Analytics />;
   else if (current === "practice" && organizer) page = <PracticeSet />;
+  else if (current === "duel-problems" && organizer && parts[1] === "import") page = <ProblemImport duel />;
+  else if (current === "duel-problems" && organizer) page = <DuelProblems />;
   else if (current === "judging" && superAdmin) page = <JudgingSettings />;
   else if (current === "benchmark" && superAdmin) page = <Benchmark />;
   else if (current === "languages" && superAdmin) page = <Languages />;
