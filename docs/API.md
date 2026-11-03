@@ -140,17 +140,20 @@ ascending, deterministic entry-ID tie break. Only attempts before the first
 accepted submission count toward penalties; judge errors never penalize.
 Rehearsal submissions never enter the official result projection.
 
-## Blitz duels (V22)
+## Blitz duels (V22, V23)
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | /api/duels | The caller's duels (`mine`), open challenges from other players (`open`) and running duels (`live`) |
 | POST | /api/duels | `{bestOf: 1/3/5, roundMinutes: 1-30, lockoutSeconds: 0-120, difficulty?: EASY/MEDIUM/HARD}`. At most 3 open challenges per player, and none while playing a duel |
 | GET | /api/duels/{id} | Live state for players and spectators: duel, rounds, verdict feed, the caller's role and penalty seconds left |
-| POST | /api/duels/{id}/join | Accepts an open challenge; rounds are drawn from the practice set, easiest first, and round 1 starts 5 seconds later |
+| POST | /api/duels/{id}/join | Accepts an open challenge; rounds are drawn from the duel problem pool, easiest first, and round 1 starts 5 seconds later |
 | POST | /api/duels/{id}/leave | Cancels the caller's open challenge, or forfeits a running duel |
 | GET | /api/duels/{id}/rounds/{number} | Statement of a round, once it has started |
-| POST | /api/duels/{id}/submissions | Same body and `Idempotency-Key` header as practice; goes to the round that is open |
+| POST | /api/duels/{id}/submissions | Same body and `Idempotency-Key` header as practice; goes to the round that is open. `mode: "samples"` runs the examples only and never counts |
+| POST | /api/lab/problems/{versionId}/publish-duel | Organizers: adds an approved version to the duel pool (or replaces the problem's version there) |
+| GET | /api/manage/duel-problems | Organizers: the pool (`pool`, hidden ones too) and approved problems not in it (`candidates`) |
+| PATCH | /api/manage/duel-problems/{problemId} | Organizers: `{hidden: true/false}` removes a problem from new duels or brings it back |
 
 Rules. A round is won by the first accepted submission ordered by the database submission
 time; a submission still being judged holds the decision, so a slow judge never changes who
@@ -161,8 +164,13 @@ even score is a drawn duel. A player waits for each verdict before submitting ag
 rejected verdict other than a compilation error locks them out for `lockoutSeconds`.
 Opponents and spectators see verdicts and test counts, never code or submission IDs.
 Duel submissions (context `DUEL`) never count for practice statistics, Sigma or ratings,
-and they share the per-user admission limits. "Run examples" in a round uses the practice
-endpoint with `mode: "samples"`. Challenges not accepted within an hour expire.
+and they share the per-user admission limits. Challenges not accepted within an hour expire.
+
+Duel problems live in their own pool (`duel_problems`), separate from the practice set: a duel
+never draws a practice problem, and a duel problem is not shown on the Practice page unless an
+organizer also publishes it there. Control room -> Duel problems lists the pool and has its own
+bulk import ("Validate, approve and add to Duels"). Deleting a problem in the lab hides it from
+duels too.
 
 ## Communications and operations
 

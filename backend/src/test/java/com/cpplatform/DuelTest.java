@@ -18,7 +18,7 @@ class DuelTest {
     static EmbeddedPostgres postgres;
     static ConfigurableApplicationContext context;
     static Database db;static AuthService auth;static LaboratoryService lab;static JudgeService judge;static DuelService duels;
-    static UUID worker;
+    static UUID worker,practiceOnly;static Actor owner;
     static final String IMAGE="sha256:"+"a".repeat(64);
     static final Map<String,Object> CODE=Map.of("language","CPP","sourceCode","int main() {}");
     @BeforeAll static void start() throws Exception {
@@ -35,8 +35,11 @@ class DuelTest {
                 "runtimes",Map.of("CPP",Map.of("verified",true,"imageId",IMAGE),"maxMemoryMb",1024,"lane","internal"))).get("workerId");
         db.jdbc.update("UPDATE languages SET enabled=true,runtime_image_id=? WHERE code='CPP'",IMAGE);
         db.jdbc.update("UPDATE judging_settings SET pending_submissions_per_user=50,submissions_per_minute=600 WHERE id=1");
-        Actor owner=user(true);
-        for(int i=0;i<3;i++)practiceProblem(owner);
+        owner=user(true);
+        for(int i=0;i<3;i++)lab.publishDuel(owner,approvedProblem(owner));
+        // A practice problem is never drawn for a duel.
+        practiceOnly=approvedProblem(owner);
+        lab.publishPractice(owner,practiceOnly);
     }
     @AfterAll static void stop() throws Exception {if(context!=null)context.close();if(postgres!=null)postgres.close();}
 
@@ -47,15 +50,15 @@ class DuelTest {
         if(admin)db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'SUPER_ADMIN')",id);
         return new Actor(id,admin?Set.of("SUPER_ADMIN","PARTICIPANT"):Set.of("PARTICIPANT"));
     }
-    /** An approved two-test problem published to practice, so duels can draw it. */
-    static void practiceProblem(Actor owner) {
+    /** An approved problem with one example and one hidden test. */
+    static UUID approvedProblem(Actor owner) {
         UUID version=lab.create(owner,Map.of("slug","duel-"+UUID.randomUUID(),"title","Sum","statement","Add two integers","languages",List.of("CPP")));
         lab.tests(owner,version,List.of(Map.of("input","2 3","expected","5","sample",true),Map.of("input","4 5","expected","9","sample",false)));
         lab.reference(owner,version,Map.of("label","Correct","language","CPP","sourceCode","int main() {}","expectedVerdict","ACCEPTED"));
         UUID validation=lab.validate(owner,version);
         verdict(db.id("SELECT s.id FROM submissions s WHERE s.validation_id=?",validation),"ACCEPTED",2);
         judge.finishValidations();lab.approve(owner,version,"Reference validation passed");
-        lab.publishPractice(owner,version);
+        return version;
     }
     /** Judges a submission: the first `passed` tests pass, and the rest get the verdict. */
     static void verdict(UUID submission,String verdict,int passed) {
@@ -106,6 +109,11 @@ class DuelTest {
         verdict(submit(a,duel),"WRONG_ANSWER",1);
         assertTrue(reason(()->submit(a,duel)).contains("penalty"));
         assertTrue(((Number)duels.state(a,duel).get("lockedSeconds")).intValue()>0);
+        // Running the examples is allowed during the penalty and never takes part in the race.
+        UUID run=duels.submit(a,duel,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}","mode","samples"));
+        verdict(run,"ACCEPTED",1);
+        duels.tick();
+        assertNull(round(duel,2).get("result"),"an accepted example run does not win the round");
         verdict(submit(b,duel),"COMPILATION_ERROR",0);
         verdict(submit(b,duel),"ACCEPTED",2);
         duels.tick();
@@ -132,7 +140,9 @@ class DuelTest {
         assertTrue(feed.stream().noneMatch(s->s.containsKey("id") || s.containsKey("submitted_by")));
         var mine=(List<Map<String,Object>>)duels.state(a,duel).get("feed");
         assertEquals(3,mine.stream().filter(s->s.containsKey("id")).count());
-        // Duel submissions never count as practice.
+        assertEquals(1,db.jdbc.queryForObject("SELECT count(*) FROM submissions WHERE duel_id=? AND samples_only",Integer.class,duel));
+        // Rounds come from the duel pool only, and duel submissions never count as practice.
+        assertEquals(0,db.jdbc.queryForObject("SELECT count(*) FROM duel_rounds WHERE duel_id=? AND problem_version_id NOT IN (SELECT problem_version_id FROM duel_problems)",Integer.class,duel));
         assertEquals(0,db.jdbc.queryForObject("SELECT count(*) FROM submissions WHERE duel_id=? AND context<>'DUEL'",Integer.class,duel));
     }
 
@@ -163,6 +173,22 @@ class DuelTest {
         assertTrue(reason(()->duels.create(c,Map.of())).contains("3 open challenges"));
         duels.leave(c,open);
         assertEquals("CANCELLED",db.one("SELECT status FROM duels WHERE id=?",open).get("status"));
-        assertTrue(reason(()->duels.create(c,Map.of("bestOf",5))).contains("Not enough practice problems"));
+        assertTrue(reason(()->duels.create(c,Map.of("bestOf",5))).contains("Not enough duel problems"));
+    }
+
+    @Test void organizersManageThePool() {
+        Actor player=user(false);
+        assertThrows(ResponseStatusException.class,()->duels.manage(player));
+        assertThrows(ResponseStatusException.class,()->lab.publishDuel(player,practiceOnly));
+        var pool=(List<Map<String,Object>>)duels.manage(owner).get("pool");
+        assertEquals(3,pool.size());
+        assertTrue(((List<Map<String,Object>>)duels.manage(owner).get("candidates")).stream().anyMatch(c->practiceOnly.equals(c.get("version_id"))));
+        // Hiding one of the three leaves too few for a best of 3; showing it again restores it.
+        UUID problem=(UUID)pool.get(0).get("problem_id");
+        duels.update(owner,problem,Map.of("hidden",true));
+        assertTrue(reason(()->duels.create(player,Map.of("bestOf",3))).contains("Not enough duel problems"));
+        duels.update(owner,problem,Map.of("hidden",false));
+        UUID duel=duels.create(player,Map.of("bestOf",3));
+        duels.leave(player,duel);
     }
 }

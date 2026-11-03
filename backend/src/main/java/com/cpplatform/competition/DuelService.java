@@ -8,12 +8,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 
 /**
- * 1v1 blitz duels on practice problems. A player creates a challenge, anyone with the link (or the
- * open challenge list) joins, and the rounds start a few seconds later. Each round is won by the
+ * 1v1 blitz duels on problems from the duel pool (duel_problems), kept apart from practice so duel
+ * problems stay private. A player creates a challenge, anyone with the link (or the open challenge list) joins, and the rounds start a few seconds later. Each round is won by the
  * first accepted submission in submission-time order; a submission still being judged holds the
  * decision, so judge speed never changes who was first. When the timer runs out, the most tests
  * passed wins the round (earliest such submission on a tie), and no test passed is a drawn round.
- * Opponents see each other's verdicts live but never each other's code.
+ * Opponents see each other's verdicts live but never each other's code. "Run examples" submissions
+ * (samples_only) are judged on the statement's examples and never take part in the race.
  */
 @Service
 public class DuelService {
@@ -24,15 +25,16 @@ public class DuelService {
     private static final Set<String> PENDING=Set.of("QUEUED","RUNNING","RETRY");
     private static final String PLAYERS="SELECT d.*,c.handle AS creator_handle,c.display_name AS creator_name,o.handle AS opponent_handle,o.display_name AS opponent_name,w.handle AS winner_handle "
             +"FROM duels d JOIN users c ON c.id=d.created_by LEFT JOIN users o ON o.id=d.opponent_id LEFT JOIN users w ON w.id=d.winner_id ";
-    /** Every submission of one round with its newest judging, in race order. */
+    /** Every counted submission of one round with its newest judging, in race order. */
     private static final String ROUND_SUBMISSIONS="SELECT s.id,s.submitted_by,s.submitted_at,s.language_code,latest.status,latest.verdict,latest.passed_tests,latest.total_tests,latest.completed_at "
             +"FROM submissions s LEFT JOIN LATERAL (SELECT j.status,j.completed_at,r.verdict,r.passed_tests,r.total_tests FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id "
-            +"WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) latest ON true WHERE s.duel_id=? AND s.duel_round=? ORDER BY s.submitted_at,s.id";
-    private final Database db;private final SubmissionService submissions;private final CompetitionQueries views;
-    public DuelService(Database db,SubmissionService submissions,CompetitionQueries views){this.db=db;this.submissions=submissions;this.views=views;}
+            +"WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) latest ON true WHERE s.duel_id=? AND s.duel_round=? AND NOT s.samples_only ORDER BY s.submitted_at,s.id";
+    private final Database db;private final SubmissionService submissions;private final CompetitionQueries views;private final Permissions access;
+    public DuelService(Database db,SubmissionService submissions,CompetitionQueries views,Permissions access){this.db=db;this.submissions=submissions;this.views=views;this.access=access;}
 
-    /** Practice problems a duel can draw: published, visible and judgeable in at least one language. */
-    private static final String POOL="FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id WHERE NOT pp.hidden AND (?::text IS NULL OR v.difficulty=?::text) "
+    /** Duel problems a duel can draw: in the pool, not hidden or deleted, and judgeable in at least one language. */
+    private static final String POOL="FROM duel_problems dp JOIN problem_versions v ON v.id=dp.problem_version_id JOIN problems p ON p.id=dp.problem_id "
+            +"WHERE NOT dp.hidden AND p.archived_at IS NULL AND (?::text IS NULL OR v.difficulty=?::text) "
             +"AND EXISTS(SELECT 1 FROM problem_version_languages pl JOIN languages l ON l.code=pl.language_code WHERE pl.problem_version_id=v.id AND l.enabled) "
             +"AND EXISTS(SELECT 1 FROM test_cases t WHERE t.problem_version_id=v.id) ";
 
@@ -48,7 +50,7 @@ public class DuelService {
                 HttpStatus.TOO_MANY_REQUESTS,"You already have 3 open challenges; cancel one first");
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM duels WHERE status='ACTIVE' AND ? IN (created_by,opponent_id))",actor.id()),HttpStatus.CONFLICT,"Finish your current duel first");
         Api.require(db.jdbc.queryForObject("SELECT count(*) "+POOL,Long.class,difficulty,difficulty)>=bestOf,
-                HttpStatus.CONFLICT,"Not enough practice problems"+(difficulty==null?"":" of this difficulty")+" for a best of "+bestOf);
+                HttpStatus.CONFLICT,"Not enough duel problems"+(difficulty==null?"":" of this difficulty")+" for a best of "+bestOf);
         return db.id("INSERT INTO duels(created_by,rounds_to_win,round_seconds,lockout_seconds,difficulty) VALUES (?,?,?,?,?) RETURNING id",
                 actor.id(),(bestOf+1)/2,roundSeconds,lockout,difficulty);
     }
@@ -67,7 +69,7 @@ public class DuelService {
         String difficulty=(String)d.get("difficulty");
         var picked=db.jdbc.queryForList("SELECT * FROM (SELECT v.id,v.difficulty "+POOL+"ORDER BY random() LIMIT ?) p "
                 +"ORDER BY CASE difficulty WHEN 'EASY' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,random()",difficulty,difficulty,maxRounds);
-        Api.require(picked.size()>=2*toWin-1,HttpStatus.CONFLICT,"Not enough practice problems are available for this duel");
+        Api.require(picked.size()>=2*toWin-1,HttpStatus.CONFLICT,"Not enough duel problems are available for this duel");
         db.jdbc.update("UPDATE duels SET opponent_id=?,status='ACTIVE',started_at=clock_timestamp()+make_interval(secs=>?) WHERE id=?",actor.id(),COUNTDOWN,id);
         for(int i=0;i<picked.size();i++)
             db.jdbc.update("INSERT INTO duel_rounds(duel_id,number,problem_version_id) VALUES (?,?,?)",id,i+1,picked.get(i).get("id"));
@@ -99,11 +101,13 @@ public class DuelService {
     @Transactional
     public UUID submit(Actor actor,UUID id,UUID key,Map<String,Object> body) {
         String source=Api.text(body,"sourceCode",262144),language=Api.text(body,"language",24);
+        // mode=samples: "run examples", judged on the statement's examples only and never counted.
+        boolean samples="samples".equals(body.get("mode"));
         submissions.lockUser(actor);
         var previous=db.jdbc.queryForList("SELECT * FROM submissions WHERE submitted_by=? AND idempotency_key=?",actor.id(),key);
         if(!previous.isEmpty()) {
             var p=previous.get(0);
-            Api.require(id.equals(p.get("duel_id")) && source.equals(p.get("source_code")) && language.equals(p.get("language_code")),HttpStatus.CONFLICT,"Idempotency key reused for different content");
+            Api.require(id.equals(p.get("duel_id")) && samples==Boolean.TRUE.equals(p.get("samples_only")) && source.equals(p.get("source_code")) && language.equals(p.get("language_code")),HttpStatus.CONFLICT,"Idempotency key reused for different content");
             return (UUID)p.get("id");
         }
         submissions.admit(actor,language);
@@ -114,13 +118,14 @@ public class DuelService {
         Api.require(!open.isEmpty(),HttpStatus.CONFLICT,"No round is open right now");
         int round=((Number)open.get(0).get("number")).intValue();UUID version=(UUID)open.get(0).get("problem_version_id");
         Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM problem_version_languages WHERE problem_version_id=? AND language_code=?)",version,language),HttpStatus.BAD_REQUEST,"This problem does not accept that language");
-        var mine=db.jdbc.queryForList(ROUND_SUBMISSIONS,id,round).stream().filter(s->actor.id().equals(s.get("submitted_by"))).toList();
+        if(samples)Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM test_cases WHERE problem_version_id=? AND is_sample)",version),HttpStatus.CONFLICT,"This problem has no example tests");
+        var mine=samples?List.<Map<String,Object>>of():db.jdbc.queryForList(ROUND_SUBMISSIONS,id,round).stream().filter(s->actor.id().equals(s.get("submitted_by"))).toList();
         Api.require(mine.stream().noneMatch(s->s.get("status")==null || PENDING.contains(s.get("status"))),HttpStatus.CONFLICT,"Your last submission is still being judged");
         Api.require(mine.stream().noneMatch(s->"ACCEPTED".equals(s.get("verdict"))),HttpStatus.CONFLICT,"You already solved this round");
         long locked=lockedSeconds(mine,((Number)d.get("lockout_seconds")).intValue());
         Api.require(locked<=0,HttpStatus.CONFLICT,"Wrong answer penalty: you can submit again in "+locked+" s");
-        UUID submission=db.id("INSERT INTO submissions(context,submitted_by,problem_version_id,language_code,source_code,idempotency_key,duel_id,duel_round) VALUES ('DUEL',?,?,?,?,?,?,?) RETURNING id",
-                actor.id(),version,language,source,key,id,round);
+        UUID submission=db.id("INSERT INTO submissions(context,submitted_by,problem_version_id,language_code,source_code,idempotency_key,duel_id,duel_round,samples_only) VALUES ('DUEL',?,?,?,?,?,?,?,?) RETURNING id",
+                actor.id(),version,language,source,key,id,round,samples);
         // Between practice (0) and contests (100): a duel is a live race.
         db.jdbc.update("INSERT INTO judging_jobs(submission_id,problem_version_id,priority) VALUES (?,?,50)",submission,version);
         return submission;
@@ -202,7 +207,7 @@ public class DuelService {
         var feed=new ArrayList<Map<String,Object>>();
         for(var s:db.jdbc.queryForList("SELECT s.id,s.duel_round,s.submitted_by,u.handle,s.submitted_at,s.language_code,latest.status,latest.verdict,latest.passed_tests,latest.total_tests,latest.completed_at "
                 +"FROM submissions s JOIN users u ON u.id=s.submitted_by LEFT JOIN LATERAL (SELECT j.status,j.completed_at,r.verdict,r.passed_tests,r.total_tests FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id "
-                +"WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) latest ON true WHERE s.duel_id=? ORDER BY s.submitted_at DESC LIMIT 200",id)) {
+                +"WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) latest ON true WHERE s.duel_id=? AND NOT s.samples_only ORDER BY s.submitted_at DESC LIMIT 200",id)) {
             boolean own=actor.id().equals(s.get("submitted_by"));
             s.put("mine",own);
             if(!own)s.remove("id");
@@ -234,5 +239,25 @@ public class DuelService {
         return Map.of("mine",db.jdbc.queryForList(select+"WHERE ? IN (d.created_by,d.opponent_id) AND d.status<>'CANCELLED' ORDER BY d.created_at DESC LIMIT 30",actor.id()),
                 "open",db.jdbc.queryForList(select+"WHERE d.status='WAITING' AND d.created_by<>? ORDER BY d.created_at DESC LIMIT 30",actor.id()),
                 "live",db.jdbc.queryForList(select+"WHERE d.status='ACTIVE' ORDER BY d.started_at DESC LIMIT 30"));
+    }
+
+    /** Organizer view of the pool: every duel problem (hidden ones too) and approved problems not yet in it. */
+    public Map<String,Object> manage(Actor actor) {
+        access.organizer(actor);
+        var pool=db.jdbc.queryForList("SELECT dp.problem_id,dp.problem_version_id AS id,v.title,p.slug,v.difficulty,v.version_number,dp.hidden,dp.published_at,"
+                +"(SELECT count(*) FROM duel_rounds r WHERE r.problem_version_id=dp.problem_version_id AND r.result IS NOT NULL) AS rounds_played "
+                +"FROM duel_problems dp JOIN problem_versions v ON v.id=dp.problem_version_id JOIN problems p ON p.id=dp.problem_id WHERE p.archived_at IS NULL ORDER BY dp.published_at DESC");
+        var candidates=db.jdbc.queryForList("SELECT v.id AS version_id,v.title,p.slug,v.difficulty,v.status,v.version_number FROM problem_versions v JOIN problems p ON p.id=v.problem_id "
+                +"WHERE v.status IN ('APPROVED','PUBLISHED') AND p.archived_at IS NULL AND NOT EXISTS(SELECT 1 FROM duel_problems dp WHERE dp.problem_version_id=v.id) ORDER BY v.created_at DESC LIMIT 500");
+        return Map.of("pool",pool,"candidates",candidates);
+    }
+
+    /** Hides a duel problem from new duels, or shows it again; duels already drawn keep their rounds. */
+    @Transactional
+    public void update(Actor actor,UUID problem,Map<String,Object> body) {
+        access.organizer(actor);
+        Api.require(body.get("hidden") instanceof Boolean,HttpStatus.BAD_REQUEST,"hidden must be true or false");
+        Api.require(db.jdbc.update("UPDATE duel_problems SET hidden=? WHERE problem_id=?",body.get("hidden"),problem)==1,HttpStatus.NOT_FOUND,"Not a duel problem");
+        db.audit(actor.id(),"DUEL_POOL_UPDATE","problem",problem,Boolean.TRUE.equals(body.get("hidden"))?"Hidden from duels":"Shown in duels");
     }
 }

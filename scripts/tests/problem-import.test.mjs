@@ -111,6 +111,11 @@ test('failed validation cannot approve or publish',async()=>{
   const f=fake({fail:true});await assert.rejects(importProblem(parsedProblem(),'publish',f.transport,()=>{},()=>false),/Validation failed/);
   assert.ok(!f.calls.includes('approve')&&!f.calls.includes('publish-practice'));
 });
+test('duel import approves and adds to the duel pool, never to practice',async()=>{
+  const f=fake();await importProblem(parsedProblem(),'duel',f.transport,()=>{},()=>false);
+  assert.ok(f.calls.indexOf('approve')<f.calls.indexOf('publish-duel'));
+  assert.ok(!f.calls.includes('publish-practice'));
+});
 test('retry resumes the saved version and never imports it a second time',async()=>{
   const f=fake({initial:'READY_FOR_REVIEW'});await importProblem(parsedProblem(),'publish',f.transport,()=>{},()=>false,'v1');
   assert.deepEqual(f.calls,['status','approve','publish-practice']);

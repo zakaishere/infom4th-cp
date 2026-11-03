@@ -12,10 +12,11 @@ const transport: ImportTransport = {
   wait: () => new Promise(resolve => setTimeout(resolve, 2000)),
 };
 
-export default function ProblemImport() {
+/** Bulk import for the Problem lab, or (duel) straight into the duel problem pool. */
+export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   const { organizer } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
-  const [mode, setMode] = useState<ImportMode>("validate");
+  const [mode, setMode] = useState<ImportMode>(duel && organizer ? "duel" : "validate");
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false), [reading, setReading] = useState(false);
   const stop = useRef(false), active = useRef(false), mounted = useRef(true);
@@ -60,8 +61,9 @@ export default function ProblemImport() {
   const samples = rows.reduce((n, r) => n + r.problem.tests.filter(t => t.sample).length, 0);
   return (
     <div className="stack" style={{ gap: "1.25rem" }}>
-      <a href="#/admin/problems" className="small">Back to problems</a>
-      <div className="page-head"><div><h1>Bulk import problems</h1><p>Load a complete bank: statements, limits, samples, hidden tests and reference solutions.</p></div></div>
+      <a href={duel ? "#/admin/duel-problems" : "#/admin/problems"} className="small">{duel ? "Back to duel problems" : "Back to problems"}</a>
+      <div className="page-head"><div><h1>{duel ? "Bulk import duel problems" : "Bulk import problems"}</h1>
+        <p>{duel ? "Load a bank of short problems for duels. They go to the duel pool only, never to the public Practice page." : "Load a complete bank: statements, limits, samples, hidden tests and reference solutions."}</p></div></div>
       <section className="card stack">
         <Field label="Problem bank file (.json or .json.gz)" hint="Choose problem-bank.import.json.gz for the smaller download; the original JSON also works.">
           <input type="file" accept=".json,.json.gz,.gz,application/json,application/gzip,application/x-gzip" disabled={busy || reading} onChange={e => { const file = e.target.files?.[0]; if (file) void read(file); e.target.value = ""; }} />
@@ -71,8 +73,9 @@ export default function ProblemImport() {
           <select disabled={busy || reading} value={mode} onChange={e => setMode(e.target.value as ImportMode)}>
             <option value="draft">Save drafts only</option>
             <option value="validate">Validate reference solutions</option>
-            {organizer && <option value="approve">Validate and approve for contests</option>}
-            {organizer && <option value="publish">Validate, approve and publish to Practice</option>}
+            {organizer && !duel && <option value="approve">Validate and approve for contests</option>}
+            {organizer && !duel && <option value="publish">Validate, approve and publish to Practice</option>}
+            {organizer && duel && <option value="duel">Validate, approve and add to Duels</option>}
           </select>
         </Field>
         <p className="small muted">Existing slugs are skipped. Validation runs one problem at a time on your internal judge; all allowed languages need a verified online worker. Failed problems remain in the lab for review.</p>

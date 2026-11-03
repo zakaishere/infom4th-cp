@@ -297,7 +297,7 @@ function RoundWorkspace({ duelId, round, state, player, onSubmitted }: { duelId:
     return () => clearTimeout(timer);
   }, [scope, language, source, loaded]);
 
-  // "Run examples" goes through practice (round problems are practice problems) and never counts.
+  // "Run examples" is judged on the statement's examples only and never counts in the duel.
   const runId = run?.id, runDone = Boolean(run?.detail?.judging[0]?.verdict) || run?.detail?.judging[0]?.status === "FAILED";
   useEffect(() => {
     if (!runId || runDone) return;
@@ -318,7 +318,7 @@ function RoundWorkspace({ duelId, round, state, player, onSubmitted }: { duelId:
     setBusy(kind);
     try {
       if (kind === "run") {
-        const r = await post<{ submissionId: string }>("/api/practice/" + round.problem_version_id + "/submissions", { language, sourceCode: source, mode: "samples" }, keys.current.run);
+        const r = await post<{ submissionId: string }>("/api/duels/" + duelId + "/submissions", { language, sourceCode: source, mode: "samples" }, keys.current.run);
         setRun({ id: r.submissionId });
       } else {
         await post("/api/duels/" + duelId + "/submissions", { language, sourceCode: source }, keys.current.submit);
@@ -412,7 +412,7 @@ function FinishedDuel({ state }: { state: DuelState }) {
           <thead><tr><th>Round</th><th>Problem</th><th>Winner</th><th>How</th><th className="right">Submissions</th></tr></thead>
           <tbody>
             {rounds.filter((r) => r.result).map((r) => (
-              <tr key={r.number} onClick={() => r.problem_version_id && navigate("/practice/" + r.problem_version_id)} style={{ cursor: "pointer" }} title="Open in practice">
+              <tr key={r.number}>
                 <td>{r.number}</td>
                 <td><strong>{r.title}</strong> {r.difficulty && <DifficultyPill value={r.difficulty} />}</td>
                 <td>{r.winner_handle ? "@" + r.winner_handle : "—"}</td>

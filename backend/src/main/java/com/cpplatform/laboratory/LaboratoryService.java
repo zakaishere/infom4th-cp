@@ -237,6 +237,7 @@ public class LaboratoryService {
                 +"JOIN competitions c ON c.id=cv.competition_id WHERE cp.problem_id=? AND c.status NOT IN ('FINISHED','ARCHIVED') ORDER BY 1",String.class,problem);
         Api.require(contests.isEmpty(),HttpStatus.CONFLICT,"Used by a contest that has not finished: "+String.join(", ",contests)+". Remove it from that contest first.");
         db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=?",problem);
+        db.jdbc.update("UPDATE duel_problems SET hidden=true WHERE problem_id=?",problem);
         String suffix="-deleted-"+UUID.randomUUID().toString().substring(0,6);
         String slug=((String)p.get("slug"));
         slug=slug.substring(0,Math.min(slug.length(),120-suffix.length())).replaceAll("-+$","")+suffix;
@@ -261,6 +262,17 @@ public class LaboratoryService {
         if("APPROVED".equals(row.get("status"))) db.jdbc.update("UPDATE problem_versions SET status='PUBLISHED' WHERE id=?",version);
         db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by) VALUES (?,?,?) ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now()",row.get("problem_id"),version,actor.id());
         db.audit(actor.id(),"PRACTICE_PUBLISH","problem_version",version,null);
+    }
+    /** Adds an approved version to the duel pool, or replaces the problem's version there. Independent of practice. */
+    @Transactional
+    public void publishDuel(Actor actor,UUID version) {
+        access.organizer(actor);access.problem(actor,version,false);
+        var row=db.one("SELECT problem_id,status FROM problem_versions WHERE id=? FOR UPDATE",version);
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problems WHERE id=? AND archived_at IS NOT NULL)",row.get("problem_id")),HttpStatus.CONFLICT,"Restore the problem before publishing it");
+        Api.require(List.of("APPROVED","PUBLISHED").contains(row.get("status")),HttpStatus.CONFLICT,"Approve the problem first");
+        if("APPROVED".equals(row.get("status"))) db.jdbc.update("UPDATE problem_versions SET status='PUBLISHED' WHERE id=?",version);
+        db.jdbc.update("INSERT INTO duel_problems(problem_id,problem_version_id,published_by) VALUES (?,?,?) ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now(),hidden=false",row.get("problem_id"),version,actor.id());
+        db.audit(actor.id(),"DUEL_PUBLISH","problem_version",version,null);
     }
 
     /** Grants or changes a user's access to the problem (EDITOR, REVIEWER or MANAGER); only the owner or a super administrator delegates. */

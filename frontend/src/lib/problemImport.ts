@@ -1,6 +1,6 @@
 export const BANK_FORMAT = "infom4th.problem-bank";
 export const MAX_BANK_BYTES = 64 * 1024 * 1024;
-export type ImportMode = "draft" | "validate" | "approve" | "publish";
+export type ImportMode = "draft" | "validate" | "approve" | "publish" | "duel";
 export type BankProblem = {
   slug: string; title: string; statement: string; inputFormat: string; outputFormat: string;
   constraints: string; explanation: string; setterNotes: string; difficulty: string; checker: string;
@@ -161,6 +161,11 @@ export async function importProblem(
     update({ message: "Publishing to Practice", versionId: id });
     await transport.action(id, "publish-practice");
   }
-  update({ message: mode === "publish" ? "Published to Practice" : "Approved; available for contests", versionId: id });
+  // A version can already be PUBLISHED through practice; adding it to the duel pool is idempotent.
+  if (mode === "duel") {
+    update({ message: "Adding to the duel problems", versionId: id });
+    await transport.action(id, "publish-duel");
+  }
+  update({ message: mode === "publish" ? "Published to Practice" : mode === "duel" ? "Added to the duel problems" : "Approved; available for contests", versionId: id });
   return "done";
 }
