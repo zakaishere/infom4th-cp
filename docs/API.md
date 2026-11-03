@@ -140,6 +140,30 @@ ascending, deterministic entry-ID tie break. Only attempts before the first
 accepted submission count toward penalties; judge errors never penalize.
 Rehearsal submissions never enter the official result projection.
 
+## Blitz duels (V22)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | /api/duels | The caller's duels (`mine`), open challenges from other players (`open`) and running duels (`live`) |
+| POST | /api/duels | `{bestOf: 1/3/5, roundMinutes: 1-30, lockoutSeconds: 0-120, difficulty?: EASY/MEDIUM/HARD}`. At most 3 open challenges per player, and none while playing a duel |
+| GET | /api/duels/{id} | Live state for players and spectators: duel, rounds, verdict feed, the caller's role and penalty seconds left |
+| POST | /api/duels/{id}/join | Accepts an open challenge; rounds are drawn from the practice set, easiest first, and round 1 starts 5 seconds later |
+| POST | /api/duels/{id}/leave | Cancels the caller's open challenge, or forfeits a running duel |
+| GET | /api/duels/{id}/rounds/{number} | Statement of a round, once it has started |
+| POST | /api/duels/{id}/submissions | Same body and `Idempotency-Key` header as practice; goes to the round that is open |
+
+Rules. A round is won by the first accepted submission ordered by the database submission
+time; a submission still being judged holds the decision, so a slow judge never changes who
+was first. When the round clock ends, the most tests passed wins it (the earliest submission
+reaching that count breaks a tie), and nobody passing a test is a drawn round. The duel ends
+when a player wins `ceil(bestOf/2)` rounds; up to two drawn rounds are replayed, then an
+even score is a drawn duel. A player waits for each verdict before submitting again, and a
+rejected verdict other than a compilation error locks them out for `lockoutSeconds`.
+Opponents and spectators see verdicts and test counts, never code or submission IDs.
+Duel submissions (context `DUEL`) never count for practice statistics, Sigma or ratings,
+and they share the per-user admission limits. "Run examples" in a round uses the practice
+endpoint with `mode: "samples"`. Challenges not accepted within an hour expire.
+
 ## Communications and operations
 
 | Method | Route | Body / access |

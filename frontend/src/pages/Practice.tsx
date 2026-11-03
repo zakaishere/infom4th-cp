@@ -228,7 +228,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
     } finally { setBusy(null); }
   }, [busy, source, language, versionId, toast, reloadHistory]);
 
-  const mine = (history.data ?? []).filter((s) => s.problem_version_id === versionId && s.problem_slot == null);
+  const mine = (history.data ?? []).filter((s) => s.problem_version_id === versionId && s.problem_slot == null && s.context !== "DUEL");
   const list = catalog.data?.problems ?? [];
   const index = list.findIndex((p) => p.id === versionId);
   const neighbour = (step: number) => list[index + step];

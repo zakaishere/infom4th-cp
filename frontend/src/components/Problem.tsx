@@ -23,7 +23,7 @@ export function templateFor(language: string, signature: Signature | null) {
 export type SubmissionRow = {
   id: string; problem_slot: number | null; problem_version_id: string; language_code: string; submitted_at: string;
   status: string | null; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null;
-  passed_tests: number | null; total_tests: number | null; submitted_by_handle?: string; samples_only?: boolean;
+  passed_tests: number | null; total_tests: number | null; submitted_by_handle?: string; samples_only?: boolean; context?: string;
 };
 
 export const pending = (s: { status: string | null }) => s.status === "QUEUED" || s.status === "RUNNING" || s.status === "RETRY";
