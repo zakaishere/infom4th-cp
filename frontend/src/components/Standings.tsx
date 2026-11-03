@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useData } from "../app";
-import { Badge, Empty, ErrorBox, Loading } from "../ui";
+import { Badge, Empty, ErrorBox, Loading, UserLink, UserList } from "../ui";
 
 export type Cell = { slot: number; solved: boolean; attempts: number; solveSeconds: number; frozen: boolean; score: number };
 export type Row = { rank: number; entry: string; solved: number; score: number; penaltySeconds: number | null; problems: Cell[] };
@@ -60,7 +60,10 @@ function CellView({ cell, scoring, points, first }: { cell: Cell; scoring: Board
   );
 }
 
-function Podium({ b, names }: { b: Board; names: Record<string, { display_name: string; members: string | null }> }) {
+/** The handle behind an entry played by one person, so its name can link to the profile. */
+const soloHandle = (members?: string | null) => (members && !members.includes(",") ? members : null);
+
+function Podium({ b, names, links }: { b: Board; names: Record<string, { display_name: string; members: string | null }>; links?: boolean }) {
   const top = b.standings.filter((r) => (b.scoring === "ICPC" ? r.solved : r.score) > 0).slice(0, 3);
   if (top.length === 0) return null;
   const order = [top[1], top[0], top[2]];
@@ -70,7 +73,7 @@ function Podium({ b, names }: { b: Board; names: Record<string, { display_name: 
       {order.map((row, i) => row ? (
         <div key={row.entry} className={"place rise " + cls[i]}>
           <div className="medal">{row.rank}</div>
-          <div className="name" title={names[row.entry]?.display_name}>{names[row.entry]?.display_name ?? "—"}</div>
+          <div className="name" title={names[row.entry]?.display_name}>{links && soloHandle(names[row.entry]?.members) ? <UserLink handle={soloHandle(names[row.entry]?.members)!} className="quiet">{names[row.entry]?.display_name}</UserLink> : names[row.entry]?.display_name ?? "—"}</div>
           <div className="score">{totalOf(b, row)}<span className="small muted"> {b.scoring === "ICPC" ? "solved" : "pts"}</span></div>
           {b.scoring === "ICPC" && <div className="small muted">{minutes(row.penaltySeconds ?? 0)} min penalty</div>}
         </div>
@@ -132,7 +135,7 @@ export default function Standings({ runId, jury, me, poll = 5000, compactPodium,
         </div>
       )}
 
-      {!compactPodium && <Podium b={b} names={names} />}
+      {!compactPodium && <Podium b={b} names={names} links={links} />}
 
       {b.standings.length === 0 ? <Empty>No entrants yet. Registered {team ? "teams" : "contestants"} appear here as soon as the contest starts.</Empty> : (
         <div className="table-wrap">
@@ -158,9 +161,9 @@ export default function Standings({ runId, jury, me, poll = 5000, compactPodium,
                   <tr key={row.entry} className={[row.entry === me ? "me" : "", isRival(entry?.members) ? "rival" : "", row.rank <= 3 && (b.scoring === "ICPC" ? row.solved : row.score) > 0 ? "r" + row.rank : "", changed.has(row.entry) ? "flash" : ""].join(" ")}>
                     <td className="rank">{row.rank}</td>
                     {/* The arena leaves links out: following one would leave the contest screen. */}
-                    <td className="who"><strong>{links && entry?.members && !entry.members.includes(",") ? <a href={"#/u/" + entry.members}>{entry.display_name}</a> : entry?.display_name ?? "—"}</strong>{row.entry === me && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
+                    <td className="who"><strong>{links && soloHandle(entry?.members) ? <UserLink handle={soloHandle(entry?.members)!}>{entry!.display_name}</UserLink> : entry?.display_name ?? "—"}</strong>{row.entry === me && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
                       {isRival(entry?.members) && <span className="tag rival-tag" style={{ marginLeft: 6 }}>★ rival</span>}
-                      {entry?.members && entry.members.includes(",") && <div className="small muted">{entry.members}</div>}</td>
+                      {entry?.members && entry.members.includes(",") && <div className="small muted">{links ? <UserList handles={entry.members} /> : entry.members}</div>}</td>
                     <td className="right total">{totalOf(b, row)}</td>
                     {b.scoring === "ICPC" || b.scoring === "ATCODER" ? <td className="right mono">{minutes(row.penaltySeconds ?? 0)}</td> : null}
                     {row.problems.map((c) => <CellView key={c.slot} cell={c} scoring={b.scoring} points={b.problems.find((p) => p.slot === c.slot)?.points ?? 0} first={c.solved && first[c.slot] === c.solveSeconds} />)}

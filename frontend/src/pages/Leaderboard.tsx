@@ -1,6 +1,6 @@
 import { navigate, useData, useRoute } from "../app";
 import { Avatar, TierChip } from "../components/Avatar";
-import { Empty, ErrorBox, Loading, when } from "../ui";
+import { Empty, ErrorBox, Loading, UserList, when } from "../ui";
 
 type Totals = { rank: number; score: number; solved: number; easy: number; medium: number; hard: number; last_solved_at: string | null };
 type Player = Totals & { handle: string; display_name: string; tier: string };
@@ -10,7 +10,7 @@ type Data = {
   me: Player | null; myTeams: Team[]; values: { EASY: number; MEDIUM: number; HARD: number }; tiers: { name: string; from: number }[];
 };
 /** One row of either board, so both share the same podium and table. */
-type Line = { key: string; title: string; subtitle?: string | null; mine: boolean; rival?: boolean; href: string; avatar: string; tier?: string; totals: Totals };
+type Line = { key: string; title: string; subtitle?: string | null; members?: string | null; mine: boolean; rival?: boolean; href: string; avatar: string; tier?: string; totals: Totals };
 
 const sigma = (n: number) => "Σ " + n.toLocaleString();
 
@@ -22,7 +22,7 @@ function Podium({ lines }: { lines: Line[] }) {
         <div key={line.key} className={"place rise " + cls[i]}>
           <div className="medal">{line.totals.rank}</div>
           <a href={line.href} className="podium-person"><Avatar handle={line.avatar} size={44} tier={line.tier} /><div className="name" title={line.title}>{line.title}</div></a>
-          {line.subtitle && <div className="small muted sigma-subtitle" title={line.subtitle}>{line.subtitle}</div>}
+          {line.subtitle && <div className="small muted sigma-subtitle" title={line.subtitle}>{line.members ? <UserList handles={line.members} /> : line.subtitle}</div>}
           <div className="score">{sigma(line.totals.score)}</div>
           <div className="small muted">{line.totals.solved} solved</div>
         </div>
@@ -42,7 +42,7 @@ function Board({ lines, who }: { lines: Line[]; who: string }) {
           </tr>
         </thead>
         <tbody>
-          {lines.map(({ key, title, subtitle, mine, rival, href, avatar, tier, totals: t }) => (
+          {lines.map(({ key, title, subtitle, members, mine, rival, href, avatar, tier, totals: t }) => (
             <tr key={key} className={[mine ? "me" : "", rival ? "rival" : "", t.rank <= 3 && t.score > 0 ? "r" + t.rank : ""].join(" ")}>
               <td className="rank">{t.rank}</td>
               <td className="who">
@@ -52,7 +52,7 @@ function Board({ lines, who }: { lines: Line[]; who: string }) {
                     <strong><a href={href}>{title}</a></strong>{mine && <span className="tag" style={{ marginLeft: 6 }}>you</span>}
                     {rival && <span className="tag rival-tag" style={{ marginLeft: 6 }}>★ rival</span>}
                     {tier && <span style={{ marginLeft: 8 }}><TierChip tier={tier} /></span>}
-                    {subtitle && <div className="small muted">{subtitle}</div>}
+                    {subtitle && <div className="small muted">{members ? <UserList handles={members} /> : subtitle}</div>}
                   </div>
                 </div>
               </td>
@@ -90,7 +90,7 @@ export default function Leaderboard() {
   const myTeamIds = new Set((d?.myTeams ?? []).map((t) => t.id));
   const lines: Line[] = !d ? [] : tab === "players"
     ? d.players.map((p) => ({ key: p.handle, title: p.display_name, subtitle: "@" + p.handle, mine: p.handle === d.me?.handle, rival: rivals.data?.includes(p.handle), href: "#/u/" + p.handle, avatar: p.handle, tier: p.tier, totals: p }))
-    : d.teams.map((t) => ({ key: t.id, title: t.name, subtitle: t.members, mine: myTeamIds.has(t.id), href: "#/team/" + t.id, avatar: "team:" + t.id, totals: t }));
+    : d.teams.map((t) => ({ key: t.id, title: t.name, subtitle: t.members, members: t.members, mine: myTeamIds.has(t.id), href: "#/team/" + t.id, avatar: "team:" + t.id, totals: t }));
   const above = (rank: number) => (tab === "players" ? d?.players : d?.teams)?.[rank - 2];
   return (
     <main className="page">

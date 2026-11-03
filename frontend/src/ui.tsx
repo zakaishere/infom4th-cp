@@ -31,6 +31,22 @@ export function Verdict({ status, verdict }: { status?: string | null; verdict?:
   return <span className="badge neutral">Pending</span>;
 }
 
+/** Links a handle to its profile. The click stops here, so a clickable table row around it does not also fire. */
+export function UserLink({ handle, children, className, title }: { handle: string; children?: ReactNode; className?: string; title?: string }) {
+  return (
+    <a href={"#/u/" + encodeURIComponent(handle)} className={"user-link" + (className ? " " + className : "")} title={title} onClick={(e) => e.stopPropagation()}>
+      {children ?? "@" + handle}
+    </a>
+  );
+}
+
+/** A comma separated list of handles, such as a team's members, each linking to its profile. */
+export function UserList({ handles }: { handles?: string | null }) {
+  if (!handles) return null;
+  const list = handles.split(",").map((h) => h.trim()).filter(Boolean);
+  return <>{list.map((h, i) => <span key={h}>{i > 0 && ", "}<UserLink handle={h}>{h}</UserLink></span>)}</>;
+}
+
 export function Badge({ tone = "neutral", children }: { tone?: string; children: ReactNode }) {
   return <span className={"badge " + tone}>{children}</span>;
 }

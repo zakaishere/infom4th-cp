@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { post } from "../api";
 import { useAction, useAuth, useData } from "../app";
-import { Badge, Empty, Field, Loading } from "../ui";
+import { Badge, Empty, Field, Loading, UserList } from "../ui";
 
 export default function Teams() {
   const { me } = useAuth();
@@ -20,7 +20,7 @@ export default function Teams() {
           {teams.loading ? <Loading /> : !teams.data?.length ? <Empty>You are not in a team yet.</Empty> : teams.data.map((t) => (
             <div key={t.id} className="row-between card-flat">
               <div><a href={"#/team/" + t.id}><strong>{t.name}</strong></a> {t.captain_id === me?.id && <Badge tone="info">Captain</Badge>} {t.locked && <Badge tone="warn">Locked for a contest</Badge>}
-                <div className="small muted">Members: {t.members}</div></div>
+                <div className="small muted">Members: <UserList handles={t.members} /></div></div>
               {t.captain_id === me?.id && (
                 <button className="small" disabled={busy} onClick={() => run(async () => {
                   const r = await post("/api/teams/" + t.id + "/invite");

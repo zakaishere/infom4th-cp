@@ -2,7 +2,7 @@ import { useState } from "react";
 import { post } from "../api";
 import { navigate, useAction, useAuth, useData, useServerClock } from "../app";
 import Standings, { SCORING_INFO } from "../components/Standings";
-import { Badge, ErrorBox, Field, Loading, Markdown, clock, when } from "../ui";
+import { Badge, ErrorBox, Field, Loading, Markdown, UserList, clock, when } from "../ui";
 import { runPhase } from "./Home";
 
 export type RunDetail = {
@@ -52,7 +52,7 @@ export default function Lobby({ runId }: { runId: string }) {
           <h3>Your entry</h3>
           {entry ? (
             <>
-              <div className="notice ok">{cfg.mode === "TEAM" ? <>You are registered as team <strong>{entry.entry_name}</strong> ({entry.members}). Every member can submit; results are shared.</> : "You are registered."}</div>
+              <div className="notice ok">{cfg.mode === "TEAM" ? <>You are registered as team <strong>{entry.entry_name}</strong> (<UserList handles={entry.members} />). Every member can submit; results are shared.</> : "You are registered."}</div>
               {phase.phase === "live" && <button className="primary" onClick={() => navigate("/arena/" + runId)}>Enter the arena (full screen) ▸</button>}
               {phase.phase === "upcoming" && <p className="muted">The arena opens automatically at the start. Keep this page open; the countdown follows the server clock.</p>}
               {phase.phase === "upcoming" && <button onClick={() => navigate("/arena/" + runId)}>Wait in the arena</button>}
