@@ -202,14 +202,15 @@ class ContestLifecycleTest {
         db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=(SELECT problem_id FROM problem_versions WHERE id=?)",version);
         assertEquals(0,sigma(leaderboard,sampler),"a hidden practice problem stops paying");
 
-        // Someone who only ran the examples is not listed; a real attempt lists them on Σ 0.
+        // Every account is listed, on Σ 0 until a solve counts; running the examples is not a solve.
         User examples=user(false),tried=user(false);
         db.jdbc.update("UPDATE practice_publications SET hidden=false WHERE problem_id=(SELECT problem_id FROM problem_versions WHERE id=?)",version);
         accept(submissions.submit(examples.actor,null,null,version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}","mode","samples")),internal);
         submissions.submit(tried.actor,null,null,version,UUID.randomUUID(),Map.of("language","CPP","sourceCode","int main() {}"));
         var listed=leaderboard.compute().players().stream().map(LeaderboardService.Row::key).toList();
         assertTrue(listed.contains(tried.actor.id()));
-        assertFalse(listed.contains(examples.actor.id()));
+        assertTrue(listed.contains(examples.actor.id()));
+        assertEquals(0,sigma(leaderboard,examples));
         assertFalse(listed.contains(owner.actor.id()),"staff are never listed");
         assertEquals(0,sigma(leaderboard,tried));
         db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=(SELECT problem_id FROM problem_versions WHERE id=?)",version);
@@ -304,7 +305,7 @@ class ContestLifecycleTest {
         var profile=json(http("GET","/api/profiles/"+handle(entrant),viewer.token,null));
         assertEquals(0,profile.get("contests").size());
         assertEquals(0,profile.get("stats").get("submissions").asInt());
-        assertTrue(profile.get("sigma").isNull(),"a private contest does not list anyone on the board");
+        assertEquals(0,profile.get("sigma").get("score").asLong(),"a private contest never pays Sigma");
         assertEquals(404,http("GET","/api/profiles/"+handle(entrant)+"/contests/"+run+"/replay",viewer.token,null).statusCode());
     }
 
