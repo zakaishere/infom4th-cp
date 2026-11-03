@@ -1,0 +1,102 @@
+{
+  "slug": "blitz-rotate-right",
+  "title": "Rotate Right",
+  "difficulty": "EASY",
+  "tags": [
+    "arrays",
+    "math",
+    "blitz"
+  ],
+  "statement": "Rotate an array **k** steps to the right: each step moves the last element to the front. Print the array after all k steps.",
+  "inputFormat": "The first line contains n and k. The second line contains n integers.",
+  "outputFormat": "Print the rotated array on one line, separated by spaces.",
+  "constraints": "1 <= n <= 20000; 0 <= k <= 10^9; -10^9 <= ai <= 10^9. Simulating every step is too slow for large k.",
+  "explanation": "Only k mod n matters. Element i moves to position (i + k) mod n. O(n).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "k = 0, k a multiple of n, k > n, k = 10^9, or maximum length"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

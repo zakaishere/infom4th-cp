@@ -1,0 +1,102 @@
+{
+  "slug": "blitz-collatz-steps",
+  "title": "Collatz Steps",
+  "difficulty": "EASY",
+  "tags": [
+    "math",
+    "simulation",
+    "blitz"
+  ],
+  "statement": "Start from **n** and repeat: if the number is even, halve it; if it is odd, replace it by 3 times the number plus 1. Count the steps until the number becomes 1.",
+  "inputFormat": "One line with the integer n.",
+  "outputFormat": "Print the number of steps (0 when n = 1).",
+  "constraints": "1 <= n <= 10^6. Intermediate values can exceed 2^31, so use 64-bit integers.",
+  "explanation": "Simulate with a 64-bit value. The longest chain below 10^6 starts at 837799 (524 steps) and peaks near 5.7 * 10^10.",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "n = 1, small chains, 27, the longest chain under 10^6, or 64-bit peaks"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

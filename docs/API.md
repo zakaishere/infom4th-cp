@@ -172,6 +172,14 @@ organizer also publishes it there. Control room -> Duel problems lists the pool 
 bulk import ("Validate, approve and add to Duels"). Deleting a problem in the lab hides it from
 duels too.
 
+Bundled duel problems (V24). The backend ships `seed/duel-problems.json.gz`, built from
+`examples/duel-problems`, and installs it by itself every 20 seconds until done: import as the
+first super administrator, validate the reference on the judge, approve, add to the duel pool.
+It waits while there is no administrator or no verified judge for the problem's languages.
+`seeded_problems` records every short name, so nothing is imported twice, including after a
+restart or after an administrator deletes a seeded problem; a short name that already exists
+is skipped. `CP_SEED_DUEL_PROBLEMS=false` turns it off.
+
 ## Communications and operations
 
 | Method | Route | Body / access |

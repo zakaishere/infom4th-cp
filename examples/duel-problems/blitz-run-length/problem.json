@@ -1,0 +1,101 @@
+{
+  "slug": "blitz-run-length",
+  "title": "Run-Length Encoding",
+  "difficulty": "EASY",
+  "tags": [
+    "strings",
+    "blitz"
+  ],
+  "statement": "Compress a string by replacing every block of equal consecutive letters with the letter followed by the block length. For example, **aaabccdddd** becomes **a3b1c2d4**.",
+  "inputFormat": "One line with a string of lowercase English letters.",
+  "outputFormat": "Print the encoded string.",
+  "constraints": "1 <= length <= 20000. A block can be longer than 9 letters.",
+  "explanation": "Scan once, count each block of equal letters and append letter + count. Build the output with a string builder. O(length).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "Single letter, no repeats, blocks of 10 or more, or maximum length"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

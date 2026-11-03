@@ -57,7 +57,8 @@ first start builds the language images (15–30 min); see [docs/DEPLOY_VPS.md](d
 - Blitz duels: 1v1 challenges by link or from the open challenge list, best of 1/3/5 short
   rounds from a separate duel problem pool (Control room -> Duel problems, with its own bulk
   import), first accepted answer wins a round, wrong-answer lockout,
-  live opponent verdicts, spectating. See "Blitz duels" in [API](docs/API.md).
+  live opponent verdicts, spectating. 12 duel problems (examples/duel-problems) are bundled
+  and install themselves once judges are online. See "Blitz duels" in [API](docs/API.md).
 - Benchmark (Control room, super administrators): send up to 1000 submissions through the
   real queue and judges on a private problem, see every timing, and download an Excel report.
 

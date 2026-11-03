@@ -1,0 +1,101 @@
+{
+  "slug": "blitz-second-largest",
+  "title": "Second Largest Value",
+  "difficulty": "EASY",
+  "tags": [
+    "arrays",
+    "blitz"
+  ],
+  "statement": "Find the **second largest different value** in an array: the largest value that is strictly smaller than the maximum. If every element is equal, there is no such value.",
+  "inputFormat": "The first line contains n. The second line contains n integers.",
+  "outputFormat": "Print the second largest different value, or NONE if all elements are equal.",
+  "constraints": "2 <= n <= 20000; -10^9 <= ai <= 10^9.",
+  "explanation": "One pass keeping the largest and the largest value below it; equal values never become the second. O(n).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "Duplicated maximum, all equal, negatives, extremes or maximum length"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

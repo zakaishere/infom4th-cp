@@ -1,0 +1,102 @@
+{
+  "slug": "blitz-best-trade",
+  "title": "Best Single Trade",
+  "difficulty": "MEDIUM",
+  "tags": [
+    "arrays",
+    "greedy",
+    "blitz"
+  ],
+  "statement": "You know the price of a coin on each of n days. Buy it on one day and sell it on a **later** day to maximize the profit (sell price minus buy price). If no trade makes money, do not trade and earn 0.",
+  "inputFormat": "The first line contains n. The second line contains the n prices in day order.",
+  "outputFormat": "Print the maximum profit.",
+  "constraints": "1 <= n <= 100000; 1 <= price <= 10^9. Trying every pair of days is too slow.",
+  "explanation": "Scan left to right keeping the lowest price so far; the best sale today earns price - lowest. O(n).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "One day, falling prices, flat prices, extremes, or maximum length"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}

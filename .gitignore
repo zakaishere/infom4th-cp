@@ -17,4 +17,9 @@ dist/
 
 # Personal scratch copies of work in progress (never committed).
 draft/
-examples/
+# Problem banks hold private tests and solutions. Only the duel bank is tracked, because the
+# backend installs it by itself (backend/src/main/resources/seed/duel-problems.json.gz).
+examples/*
+!examples/duel-problems/
+examples/duel-problems/problem-bank.import.json*
+backend/src/main/resources/seed/*.json

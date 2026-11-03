@@ -1,0 +1,103 @@
+{
+  "slug": "blitz-count-primes",
+  "title": "Count the Primes",
+  "difficulty": "MEDIUM",
+  "tags": [
+    "math",
+    "number-theory",
+    "sieve",
+    "blitz"
+  ],
+  "statement": "Count the prime numbers that are less than or equal to **n**. A prime is an integer greater than 1 whose only divisors are 1 and itself.",
+  "inputFormat": "One line with the integer n.",
+  "outputFormat": "Print the number of primes p with p <= n.",
+  "constraints": "0 <= n <= 10^6. Testing every number by trial division up to n is too slow in some languages; use a sieve.",
+  "explanation": "Sieve of Eratosthenes up to n: for every prime p, cross out p*p, p*p+p, ... Count what remains. O(n log log n).",
+  "timeLimitMs": 2000,
+  "memoryLimitMb": 256,
+  "checker": "TOKENS",
+  "languages": [
+    "C",
+    "CPP",
+    "JAVA",
+    "PYTHON"
+  ],
+  "tests": [
+    {
+      "input": "tests/01.in",
+      "expected": "tests/01.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/02.in",
+      "expected": "tests/02.out",
+      "sample": true,
+      "purpose": "Example"
+    },
+    {
+      "input": "tests/03.in",
+      "expected": "tests/03.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/04.in",
+      "expected": "tests/04.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/05.in",
+      "expected": "tests/05.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/06.in",
+      "expected": "tests/06.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/07.in",
+      "expected": "tests/07.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/08.in",
+      "expected": "tests/08.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/09.in",
+      "expected": "tests/09.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/10.in",
+      "expected": "tests/10.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/11.in",
+      "expected": "tests/11.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    },
+    {
+      "input": "tests/12.in",
+      "expected": "tests/12.out",
+      "sample": false,
+      "purpose": "n = 0, 1, 2, a prime or its neighbour, a power of two, or 10^6"
+    }
+  ],
+  "referenceLanguage": "JAVA",
+  "referenceFile": "Main.java",
+  "independentReferenceFile": "solution.js",
+  "source": "Original InfoM4th blitz problem"
+}
