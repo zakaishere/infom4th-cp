@@ -41,6 +41,9 @@ export default function ProblemWizard() {
   const setTest = (i: number, change: Partial<Test>) => set({ tests: d.tests.map((t, j) => (i === j ? { ...t, ...change } : t)) });
 
   const problems: string[] = [];
+  const encoder = new TextEncoder();
+  const largestOutput = d.tests.reduce((largest, test) => Math.max(largest, encoder.encode(test.expected).byteLength), 0);
+  const outputLimitKb = Math.max(1, Math.ceil(largestOutput / (1024 * 1024))) * 1024;
   if (!d.title.trim()) problems.push("Title is required");
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) problems.push("Slug must be lowercase letters, digits and dashes");
   if (!d.statement.trim()) problems.push("Statement is empty");
@@ -48,6 +51,7 @@ export default function ProblemWizard() {
   if (!d.tests.some((t) => t.sample)) problems.push("Mark at least one test as a sample");
   if (!d.tests.some((t) => !t.sample)) problems.push("Add at least one hidden (non-sample) test");
   if (d.tests.some((t) => !t.expected.trim() && !t.input.trim())) problems.push("Remove empty tests");
+  if (outputLimitKb > 65536) problems.push("Expected output must be at most 64 MiB per test");
   if (!d.referenceCode.trim()) problems.push("Add a correct reference solution");
   const signature = d.functionSignature;
   if (signature) {
@@ -93,7 +97,7 @@ export default function ProblemWizard() {
       await runStep("Saving statement and limits", () => patch("/api/lab/problems/" + id, {
         title: d.title, statement: d.statement, inputFormat: d.inputFormat, outputFormat: d.outputFormat, constraints: d.constraints,
         explanation: d.explanation, difficulty: d.difficulty, checker: d.checker, timeLimitMs: d.timeLimitMs, memoryLimitMb: d.memoryLimitMb, languages: d.languages,
-        functionSignature: d.functionSignature,
+        functionSignature: d.functionSignature, outputLimitKb,
       }));
       await runStep(`Uploading ${d.tests.length} tests`, () => put("/api/lab/problems/" + id + "/tests", d.tests));
       const existing = await get<{ references: unknown[] }>("/api/lab/problems/" + id);
