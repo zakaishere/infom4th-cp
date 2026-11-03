@@ -162,7 +162,7 @@ console.log(r.join(' '));`)},cases,input=>{
     statement:'Start from **n** and repeat: if the number is even, halve it; if it is odd, replace it by 3 times the number plus 1. Count the steps until the number becomes 1.',
     inputFormat:'One line with the integer n.',outputFormat:'Print the number of steps (0 when n = 1).',
     constraints:'1 <= n <= 10^6. Intermediate values can exceed 2^31, so use 64-bit integers.',
-    explanation:'Simulate with a 64-bit value. The longest chain below 10^6 starts at 837799 (524 steps) and peaks near 5.7 * 10^10.',
+    explanation:'Simulate with a 64-bit value. The longest chain below 10^6 starts at 837799 (524 steps) and peaks near 5.7·10^10.',
     solutionJava:java(`public static void main(String[] args) throws IOException {
     long x = Long.parseLong(new BufferedReader(new InputStreamReader(System.in)).readLine().trim());
     int steps = 0;
@@ -300,7 +300,7 @@ console.log(answer);`)},cases,input=>{const s=new Set(input.trim().split(/\s+/).
   add({slug:'blitz-pair-sums',title:'Count Pair Sums',difficulty:'MEDIUM',tags:['arrays','hashing','counting','blitz'],
     statement:'Count the pairs of positions **i < j** with **a[i] + a[j] = target**. Two pairs are different if they use different positions, even when the values are the same.',
     inputFormat:'The first line contains n and target. The second line contains n integers.',outputFormat:'Print the number of pairs.',
-    constraints:'1 <= n <= 100000; -10^9 <= ai <= 10^9; -2 * 10^9 <= target <= 2 * 10^9. The answer can reach about 5 * 10^9: use a 64-bit counter.',
+    constraints:'1 <= n <= 100000; -10^9 <= ai <= 10^9; -2·10^9 <= target <= 2·10^9. The answer can reach about 5·10^9: use a 64-bit counter.',
     explanation:'Scan left to right with a hash map of how often each value appeared; each element adds the count of target - a[j] seen before it. O(n) expected.',
     solutionJava:java(`${READ}
 public static void main(String[] args) throws IOException {

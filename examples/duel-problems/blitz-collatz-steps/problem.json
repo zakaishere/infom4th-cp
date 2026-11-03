@@ -11,7 +11,7 @@
   "inputFormat": "One line with the integer n.",
   "outputFormat": "Print the number of steps (0 when n = 1).",
   "constraints": "1 <= n <= 10^6. Intermediate values can exceed 2^31, so use 64-bit integers.",
-  "explanation": "Simulate with a 64-bit value. The longest chain below 10^6 starts at 837799 (524 steps) and peaks near 5.7 * 10^10.",
+  "explanation": "Simulate with a 64-bit value. The longest chain below 10^6 starts at 837799 (524 steps) and peaks near 5.7·10^10.",
   "timeLimitMs": 2000,
   "memoryLimitMb": 256,
   "checker": "TOKENS",

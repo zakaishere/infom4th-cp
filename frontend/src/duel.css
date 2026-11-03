@@ -52,3 +52,45 @@ a.duel-row:hover { text-decoration: none; border-color: var(--primary); }
   .duel-board { grid-template-columns: 1fr; justify-items: center; }
   .duel-player.right { flex-direction: row; text-align: left; }
 }
+
+/* Twists */
+.twist-chips, .twist-picker { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.twist-chip { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.78rem; padding: 0.12rem 0.55rem; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--line)); background: color-mix(in srgb, var(--primary) 6%, var(--card)); color: var(--fg); white-space: nowrap; }
+button.twist-chip { cursor: pointer; font-weight: 500; }
+.twist-chip.on, button.twist-chip.on:hover:not(:disabled) { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
+button.twist-chip:not(.on):hover:not(:disabled) { border-color: var(--primary); }
+.twist-reveal { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; text-align: center; max-width: 520px; padding: 1rem 1.5rem;
+  background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--warn); animation: twist-spin 0.6s ease-out; }
+.twist-reveal strong { font-size: 1.6rem; font-family: var(--font-display); }
+.twist-icon { font-size: 2.6rem; line-height: 1; }
+@keyframes twist-spin { from { transform: rotateX(90deg); opacity: 0; } to { transform: none; opacity: 1; } }
+.twist-banner { border-left: 4px solid var(--warn); margin-bottom: 0.75rem; }
+
+/* Lobby */
+.lobby-seats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.5rem; }
+.lobby-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.lobby-team { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem; border: 1px solid var(--line); border-top: 4px solid var(--primary); }
+.lobby-team.team-2 { border-top-color: var(--warn); }
+.lobby-seat { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem; border: 1px solid var(--line); background: var(--card); }
+.lobby-seat.empty { color: var(--muted); border-style: dashed; justify-content: center; font-size: 0.85rem; }
+@media (max-width: 600px) { .lobby-teams { grid-template-columns: 1fr; } }
+
+/* Scoreboards for teams and free-for-all */
+.duel-board-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; flex: 1; min-width: 0; }
+.duel-board-wrap > .duel-board { width: 100%; }
+.duel-members { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.duel-members > span { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; }
+.duel-player.right .duel-members { align-items: flex-end; }
+.left-room { opacity: 0.45; text-decoration: line-through; }
+.duel-ffa { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; width: 100%; }
+.ffa-board { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.35rem; }
+.ffa-player { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.5rem; border: 1px solid var(--line); background: var(--card); font-size: 0.85rem; }
+.ffa-player.me { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.duel-event.mate { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 6%, transparent); }
+.page > .duel-board-wrap { padding: 1rem; background: var(--card); border: 1px solid var(--line); }
+@media (max-width: 900px) {
+  /* Phones: back link and forfeit on one row, the scoreboard below them. */
+  .duel-top { justify-content: space-between; }
+  .duel-top > .duel-board-wrap { order: 3; flex-basis: 100%; }
+}
