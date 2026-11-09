@@ -69,8 +69,10 @@ export function ContestList() {
 type Run = { id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean; final_standings_released_at: string | null };
 type Detail = Competition & {
   rated: boolean;
-  version: { id: string; sealed_at: string | null; duration_seconds: number; mode: string; description_md: string; rules_md: string; freeze_before_end_seconds: number; wrong_attempt_penalty_seconds: number };
-  problems: { slot: number; label: string; problem_version_id: string }[];
+  version: { id: string; sealed_at: string | null; duration_seconds: number; mode: string; description_md: string; rules_md: string; freeze_before_end_seconds: number; wrong_attempt_penalty_seconds: number;
+    contest_format?: "STANDARD" | "WARMUP"; publish_to_practice?: boolean };
+  problems: { slot: number; label: string; problem_version_id: string; release_day?: number }[];
+  practice_published_at?: string | null;
   runs: Run[];
 };
 
@@ -78,7 +80,7 @@ export function ContestDetail({ id }: { id: string }) {
   const d = useData<Detail>("/api/manage/competitions/" + id, 15000);
   const readiness = useData<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness", 15000);
   const lab = useData<{ version_id: string; title: string; slug: string; status: string }[]>("/api/lab/problems");
-  const [attach, setAttach] = useState({ versionId: "", label: "" });
+  const [attach, setAttach] = useState({ versionId: "", label: "", day: 1 });
   const [startsAt, setStartsAt] = useState("");
   const [visibility, setVisibility] = useState("PUBLIC");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -88,6 +90,9 @@ export function ContestDetail({ id }: { id: string }) {
   if (d.loading) return <Loading />;
   if (!d.data) return <ErrorBox error={d.error} />;
   const c = d.data, sealed = Boolean(c.version.sealed_at);
+  const warmup = c.version.contest_format === "WARMUP", days = Math.max(1, Math.round(c.version.duration_seconds / 86400));
+  const length = warmup ? `${days} day${days === 1 ? "" : "s"}` : `${Math.round(c.version.duration_seconds / 60)} minutes`;
+  const dayOptions = Array.from({ length: days }, (_, i) => <option key={i} value={i + 1}>Day {i + 1}</option>);
   const approved = (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
   const titles = Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p.title]));
   const official = c.runs.find((r) => r.kind === "OFFICIAL");
@@ -102,8 +107,11 @@ export function ContestDetail({ id }: { id: string }) {
         <section className="card stack">
           <h3>Problems</h3>
           {c.problems.length === 0 ? <Empty>Attach approved problems.</Empty> : (
-            <table><tbody>{c.problems.map((p) => (
+            <table><tbody>{[...c.problems].sort((a, b) => (a.release_day ?? 1) - (b.release_day ?? 1) || a.slot - b.slot).map((p) => (
               <tr key={p.slot}><td><span className="problem-letter">{p.label}</span></td><td>{titles[p.problem_version_id] ?? <span className="mono small">{p.problem_version_id}</span>}</td>
+                {warmup && <td>{sealed ? <span className="small muted">Day {p.release_day ?? 1}</span> : (
+                  <select aria-label={"Day for problem " + p.label} value={p.release_day ?? 1} style={{ width: "auto" }} disabled={busy}
+                    onChange={(e) => run(async () => { await patch("/api/manage/competitions/" + id + "/problems/" + p.slot, { releaseDay: Number(e.target.value) }); refresh(); }, "Day changed")}>{dayOptions}</select>)}</td>}
                 <td className="right">{!sealed && <button className="small danger" onClick={() => run(async () => { await del("/api/manage/competitions/" + id + "/problems/" + p.slot); refresh(); })}>Remove</button>}</td></tr>
             ))}</tbody></table>
           )}
@@ -111,10 +119,11 @@ export function ContestDetail({ id }: { id: string }) {
             <form className="row" style={{ alignItems: "flex-end" }} onSubmit={(e) => {
               e.preventDefault();
               const slot = (c.problems.reduce((m, p) => Math.max(m, p.slot), 0)) + 1;
-              run(async () => { await post("/api/manage/competitions/" + id + "/problems", { versionId: attach.versionId, slot, label: attach.label || String.fromCharCode(64 + slot) }); setAttach({ versionId: "", label: "" }); refresh(); }, "Problem attached");
+              run(async () => { await post("/api/manage/competitions/" + id + "/problems", { versionId: attach.versionId, slot, label: attach.label || String.fromCharCode(64 + slot), ...(warmup ? { releaseDay: attach.day } : {}) }); setAttach({ versionId: "", label: "", day: attach.day }); refresh(); }, "Problem attached");
             }}>
               <Field label="Approved problem"><select required value={attach.versionId} onChange={(e) => setAttach({ ...attach, versionId: e.target.value })}>
                 <option value="">Choose…</option>{approved.map((p) => <option key={p.version_id} value={p.version_id}>{p.title} ({p.slug})</option>)}</select></Field>
+              {warmup && <Field label="Opens on"><select value={attach.day} onChange={(e) => setAttach({ ...attach, day: Number(e.target.value) })} style={{ width: "auto" }}>{dayOptions}</select></Field>}
               <Field label="Label"><input maxLength={8} placeholder="auto" value={attach.label} onChange={(e) => setAttach({ ...attach, label: e.target.value })} style={{ width: 80 }} /></Field>
               <button disabled={busy}>Attach</button>
             </form>
@@ -151,7 +160,7 @@ export function ContestDetail({ id }: { id: string }) {
             }}>
               <div className="launch">
                 <button type="button" className={"option" + (launchNow ? " active" : "")} onClick={() => setLaunchNow(true)}>
-                  <strong>▶ Start now</strong><span className="small muted">Opens immediately and ends after {Math.round(c.version.duration_seconds / 60)} minutes. People can still join while it runs.</span>
+                  <strong>▶ Start now</strong><span className="small muted">Opens immediately and ends after {length}. People can still join while it runs.</span>
                 </button>
                 <button type="button" className={"option" + (!launchNow ? " active" : "")} onClick={() => setLaunchNow(false)}>
                   <strong>🗓 Schedule for later</strong><span className="small muted">Publish now with a countdown; contestants register before the start.</span>
@@ -196,7 +205,7 @@ export function ContestDetail({ id }: { id: string }) {
       <a href="#/admin/contests" className="small">← Contests</a>
       <div className="page-head" style={{ marginBottom: 0 }}>
         <div><h1>{c.title}</h1>
-          <div className="row"><Badge tone={c.status === "RUNNING" ? "ok" : "info"}>{STATUS_LABEL[c.status] ?? c.status}</Badge><span className="tag">{c.version.mode === "TEAM" ? "Teams" : "Individual"}</span>{sealed && <span className="tag">Locked</span>}<span className="small muted">{Math.round(c.version.duration_seconds / 60)} min · {c.problems.length} problems</span></div></div>
+          <div className="row"><Badge tone={c.status === "RUNNING" ? "ok" : "info"}>{STATUS_LABEL[c.status] ?? c.status}</Badge><span className="tag">{c.version.mode === "TEAM" ? "Teams" : "Individual"}</span>{warmup && <span className="tag">Warmup</span>}{sealed && <span className="tag">Locked</span>}<span className="small muted">{length} · {c.problems.length} problems{warmup && c.version.publish_to_practice ? (c.practice_published_at ? " · in Practice since " + when(c.practice_published_at) : " · goes to Practice when it ends") : ""}</span></div></div>
         {sealed && !official && <button disabled={busy} onClick={() => run(async () => { await post("/api/manage/competitions/" + id + "/clone-version"); refresh(); }, "Editable configuration created")}>Clone configuration to edit</button>}
       </div>
 
@@ -218,22 +227,36 @@ export function ContestDetail({ id }: { id: string }) {
 }
 
 function SettingsForm({ d, onSaved }: { d: Detail; onSaved: () => void }) {
+  const warmup = d.version.contest_format === "WARMUP";
   const [f, setF] = useState({ title: d.title, description: d.version.description_md, rules: d.version.rules_md,
+    days: Math.max(1, Math.round(d.version.duration_seconds / 86400)), publishToPractice: Boolean(d.version.publish_to_practice),
     durationMinutes: Math.round(d.version.duration_seconds / 60), freezeMinutes: Math.round(d.version.freeze_before_end_seconds / 60), penaltyMinutes: Math.round(d.version.wrong_attempt_penalty_seconds / 60) });
   const { busy, run } = useAction();
   return (
     <form className="stack" onSubmit={(e) => {
       e.preventDefault();
-      run(async () => { await patch("/api/manage/competitions/" + d.id, { title: f.title, description: f.description, rules: f.rules, durationSeconds: f.durationMinutes * 60, freezeBeforeEndSeconds: f.freezeMinutes * 60, wrongAttemptPenaltySeconds: f.penaltyMinutes * 60 }); onSaved(); }, "Contest settings saved");
+      run(async () => {
+        await patch("/api/manage/competitions/" + d.id, { title: f.title, description: f.description, rules: f.rules, ...(warmup
+          ? { days: f.days, publishToPractice: f.publishToPractice }
+          : { durationSeconds: f.durationMinutes * 60, freezeBeforeEndSeconds: f.freezeMinutes * 60, wrongAttemptPenaltySeconds: f.penaltyMinutes * 60 }) });
+        onSaved();
+      }, "Contest settings saved");
     }}>
       <hr style={{ margin: "0.5rem 0" }} />
       <h3>Settings</h3>
       <Field label="Title"><input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
+      {warmup ? (
+        <div className="stack">
+          <Field label="Number of days"><input type="number" min={1} max={31} value={f.days} onChange={(e) => setF({ ...f, days: Number(e.target.value) })} /></Field>
+          <label className="check small"><input type="checkbox" checked={f.publishToPractice} onChange={(e) => setF({ ...f, publishToPractice: e.target.checked })} />Publish the problems in Practice when the warmup ends</label>
+        </div>
+      ) : (
       <div className="grid grid-3">
         <Field label="Duration (min)"><input type="number" min={1} value={f.durationMinutes} onChange={(e) => setF({ ...f, durationMinutes: Number(e.target.value) })} /></Field>
         <Field label="Freeze before end (min)"><input type="number" min={0} value={f.freezeMinutes} onChange={(e) => setF({ ...f, freezeMinutes: Number(e.target.value) })} /></Field>
         <Field label="Penalty per rejection (min)"><input type="number" min={0} value={f.penaltyMinutes} onChange={(e) => setF({ ...f, penaltyMinutes: Number(e.target.value) })} /></Field>
       </div>
+      )}
       <Field label="Description (Markdown)"><textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
       <Field label="Rules (Markdown)"><textarea rows={3} value={f.rules} onChange={(e) => setF({ ...f, rules: e.target.value })} /></Field>
       <div><button disabled={busy}>Save settings</button></div>

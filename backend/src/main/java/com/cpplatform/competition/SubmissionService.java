@@ -30,6 +30,7 @@ public class SubmissionService {
             var r=contests.runAccess(actor,run,true);
             Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM contest_runs WHERE id=? AND starts_at<=clock_timestamp() AND ends_at>clock_timestamp() AND status IN ('PENDING','RUNNING') AND NOT submissions_paused)",run),
                     HttpStatus.CONFLICT,"Contest is not accepting submissions");
+            Api.require(contests.released(r,slot) || access.jury(actor,(UUID)r.get("competition_id")),HttpStatus.FORBIDDEN,"This problem opens on a later day");
             var member=db.one("SELECT entry_id FROM run_entry_members WHERE run_id=? AND user_id=?",run,actor.id());
             var problem=db.one("SELECT cp.problem_version_id FROM competition_problems cp WHERE cp.competition_version_id=? AND slot=?",r.get("competition_version_id"),slot);
             version=(UUID)problem.get("problem_version_id");

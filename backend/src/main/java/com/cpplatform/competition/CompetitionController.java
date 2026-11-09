@@ -36,7 +36,12 @@ public class CompetitionController {
     @PostMapping("/api/manage/competitions/{id}/problems")
     Object attach(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body) {
         Integer points=body.get("points")==null?null:Api.number(body,"points",100,1,100000);
-        contests.attach(Actor.of(auth),id,Api.uuid(body.get("versionId")),Api.number(body,"slot",1,1,100),Api.text(body,"label",8),points);return Map.of("ok",true);
+        contests.attach(Actor.of(auth),id,Api.uuid(body.get("versionId")),Api.number(body,"slot",1,1,100),Api.text(body,"label",8),points,
+                Api.number(body,"releaseDay",1,1,CompetitionService.MAX_WARMUP_DAYS));return Map.of("ok",true);
+    }
+    @PatchMapping("/api/manage/competitions/{id}/problems/{slot}")
+    Object setReleaseDay(Authentication auth,@PathVariable UUID id,@PathVariable int slot,@RequestBody Map<String,Object> body) {
+        contests.setReleaseDay(Actor.of(auth),id,slot,Api.number(body,"releaseDay",1,1,CompetitionService.MAX_WARMUP_DAYS));return Map.of("ok",true);
     }
     @GetMapping("/api/manage/competitions/{id}/readiness")
     Object readiness(Authentication auth,@PathVariable UUID id) {

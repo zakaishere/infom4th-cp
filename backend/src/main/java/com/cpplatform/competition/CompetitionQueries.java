@@ -3,6 +3,7 @@ package com.cpplatform.competition;
 import com.cpplatform.common.*;
 import com.cpplatform.identity.*;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
 import java.util.*;
 import java.time.Instant;
 
@@ -46,15 +47,31 @@ public class CompetitionQueries {
     /** A run, its configuration and, once it has started (or for the jury), its problems. */
     public Map<String,Object> run(Actor actor,UUID run) {
         var r=contests.runAccess(actor,run,false);
-        var v=db.one("SELECT c.title,v.description_md,v.rules_md,v.mode,v.duration_seconds,v.scoring_system,v.wrong_attempt_penalty_seconds,v.freeze_before_end_seconds,v.max_team_size FROM competition_versions v JOIN competitions c ON c.id=v.competition_id WHERE v.id=?",r.get("competition_version_id"));
+        var v=db.one("SELECT c.title,v.description_md,v.rules_md,v.mode,v.duration_seconds,v.scoring_system,v.wrong_attempt_penalty_seconds,v.freeze_before_end_seconds,v.max_team_size,v.contest_format,v.publish_to_practice FROM competition_versions v JOIN competitions c ON c.id=v.competition_id WHERE v.id=?",r.get("competition_version_id"));
         var result=new LinkedHashMap<String,Object>();result.put("run",r);result.put("configuration",v);result.put("serverTime",Instant.now());
-        if(!Instant.now().isBefore(Api.time(r.get("starts_at"))) || access.jury(actor,(UUID)r.get("competition_id")))
-            result.put("problems",db.jdbc.queryForList("SELECT cp.slot,cp.label,cp.points,v.title,v.time_limit_ms,v.memory_limit_mb FROM competition_problems cp JOIN problem_versions v ON v.id=cp.problem_version_id WHERE cp.competition_version_id=? ORDER BY cp.slot",r.get("competition_version_id")));
+        boolean jury=access.jury(actor,(UUID)r.get("competition_id"));
+        Instant now=Instant.now(),start=Api.time(r.get("starts_at"));
+        if(!now.isBefore(start) || jury) {
+            var all=db.jdbc.queryForList("SELECT cp.slot,cp.label,cp.points,cp.release_day,v.title,v.time_limit_ms,v.memory_limit_mb FROM competition_problems cp JOIN problem_versions v ON v.id=cp.problem_version_id WHERE cp.competition_version_id=? ORDER BY cp.release_day,cp.slot",r.get("competition_version_id"));
+            // A warmup problem stays hidden (title included) until its day; only the count per day is shown.
+            var open=new ArrayList<Map<String,Object>>();var upcoming=new TreeMap<Integer,Map<String,Object>>();
+            for(var p:all) {
+                Instant opens=CompetitionService.opensAt(start,p.get("release_day"));
+                p.put("opens_at",opens);
+                boolean released=!now.isBefore(opens);p.put("released",released);
+                if(released || jury)open.add(p);
+                if(!released)upcoming.computeIfAbsent(((Number)p.get("release_day")).intValue(),d->new LinkedHashMap<>(Map.of("day",d,"opensAt",opens,"count",0)))
+                        .merge("count",1,(a,b)->(Integer)a+(Integer)b);
+            }
+            result.put("problems",open);
+            result.put("upcomingDays",List.copyOf(upcoming.values()));
+        }
         return result;
     }
     /** A released problem of a run, with only the languages both the problem and the contest allow. */
     public Map<String,Object> runProblem(Actor actor,UUID run,int slot) {
         var r=contests.runAccess(actor,run,true);
+        Api.require(contests.released(r,slot) || access.jury(actor,(UUID)r.get("competition_id")),HttpStatus.FORBIDDEN,"This problem opens on a later day");
         UUID version=(UUID)db.one("SELECT problem_version_id FROM competition_problems WHERE competition_version_id=? AND slot=?",r.get("competition_version_id"),slot).get("problem_version_id");
         var result=problem(version);
         result.put("languages",db.jdbc.queryForList("SELECT p.language_code FROM problem_version_languages p JOIN competition_version_languages c ON c.language_code=p.language_code JOIN languages l ON l.code=p.language_code WHERE p.problem_version_id=? AND c.competition_version_id=? AND l.enabled",String.class,version,r.get("competition_version_id")));return result;
