@@ -23,3 +23,6 @@ examples/*
 !examples/duel-problems/
 examples/duel-problems/problem-bank.import.json*
 backend/src/main/resources/seed/*.json
+
+# Language documentation installed by frontend/scripts/install-docs.mjs (large, downloaded).
+frontend/public/refdocs/

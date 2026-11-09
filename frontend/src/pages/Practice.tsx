@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, post } from "../api";
 import { navigate, useData, useToast } from "../app";
-import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey, readDraft, templateFor, uuid,
+import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey, readDraft, templateFor, useDocs, useDraftSaver, uuid,
   type ProblemDetail, type SubmissionDetail, type SubmissionRow } from "../components/Problem";
 import { submissionAccepted, verdictShown } from "../lib/latency";
 import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Ring, VERDICTS } from "../ui";
@@ -170,7 +170,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState<"run" | "submit" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [docs, setDocs] = useState(false);
+  const docs = useDocs();
   const [split, setSplit] = useState(() => { try { return Number(localStorage.getItem("cp.practice.split")) || 46; } catch { return 46; } });
   const keys = useRef<{ run: string; submit: string }>({ run: uuid(), submit: uuid() });
   const scope = "practice." + versionId;
@@ -186,11 +186,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
   const loaded = Boolean(problem.data);
   const template = templateFor(language, parseSignature(problem.data?.function_signature));
   useEffect(() => { if (loaded) setSource(readDraft(scope, language) ?? template); }, [scope, language, template, loaded]);
-  useEffect(() => {
-    if (!loaded) return;
-    const timer = setTimeout(() => { try { localStorage.setItem(draftKey(scope, language), source); } catch { /* ignore */ } }, 400);
-    return () => clearTimeout(timer);
-  }, [scope, language, source, loaded]);
+  useDraftSaver(loaded ? draftKey(scope, language) : null, source);
 
   // Follow the latest run/submission until it has a verdict.
   const outcomeId = outcome?.id;
@@ -287,7 +283,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
             {languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l] ?? l}</option>)}
           </select>
           <button className="ghost small" onClick={() => { if (confirm("Replace your code with the starter template?")) setSource(template); }} title="Reset to the starter template">↺ Reset</button>
-          <button className="small" onClick={() => setDocs((value) => !value)} aria-expanded={docs}>Reference</button>
+          <button className="small" onClick={docs.toggle} aria-expanded={docs.open} title="Language reference (F1 in the editor looks up the word under the cursor)">Reference</button>
           <span className="spacer" />
           <span className="small muted hide-narrow">Draft saved</span>
           <button onClick={() => send("run")} disabled={Boolean(busy) || !source.trim() || !p.samples.length} title={p.samples.length ? "Judge on the examples only (Ctrl+')" : "This problem has no examples"}>
@@ -298,8 +294,8 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
           </button>
         </div>
         {languages.length === 0 && <div className="notice warn small">No language is currently available for this problem.</div>}
-        <div className="ws-editor"><CodeEditor value={source} onChange={setSource} language={language} onSubmit={() => send("submit")} onRun={() => send("run")} /></div>
-        {docs && <DocsPanel language={language} onClose={() => setDocs(false)} />}
+        <div className="ws-editor"><CodeEditor value={source} onChange={setSource} language={language} onSubmit={() => send("submit")} onRun={() => send("run")} onLookup={docs.onLookup} /></div>
+        {docs.open && <DocsPanel language={language} onClose={docs.close} lookup={docs.lookup} />}
         <div className={"ws-console" + (result?.verdict ? " has-result" : "")}>
           {!outcome ? (
             <div className="small muted">Write your solution, then <strong>▶ Run examples</strong> to check it on the statement's examples, or <strong>Submit</strong> to be judged on every test. {p.function_signature ? "Complete the function; the judge calls it on every test." : <>Read from standard input, print to standard output{languages.includes("JAVA") ? "; Java classes must be named Main" : ""}.</>}</div>

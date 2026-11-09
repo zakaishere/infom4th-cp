@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { post } from "../api";
 import { useData, useToast } from "../app";
 import { submissionAccepted } from "../lib/latency";
-import { DocsPanel } from "./DocsPanel";
+import { DocsPanel, type DocsLookup } from "./DocsPanel";
 import { describe, labelInput, parseSignature, starter, type Signature } from "../lib/functionMode";
 import { CodeEditor, ErrorBox, LANGUAGE_NAMES, Loading, Markdown, Modal, TEMPLATES, VERDICTS, Verdict, timeOf, when } from "../ui";
 
@@ -78,6 +78,54 @@ export function readDraft(scope: string, language: string) {
   try { return localStorage.getItem(draftKey(scope, language)); } catch { return null; }
 }
 
+/**
+ * Keeps the code saved as a draft in this browser: shortly after typing stops, and at once when the
+ * tab is hidden or closed, the page is left, or the problem or language changes. Pass a null key
+ * until the draft for the current key has been loaded into `source`.
+ */
+export function useDraftSaver(key: string | null, source: string) {
+  const pending = useRef<{ key: string; value: string } | null>(null);
+  const last = useRef({ key, source });
+  const flush = useCallback(() => {
+    const draft = pending.current;
+    pending.current = null;
+    if (draft) try { localStorage.setItem(draft.key, draft.value); } catch { /* storage full or blocked */ }
+  }, []);
+  useEffect(() => {
+    const previous = last.current;
+    last.current = { key, source };
+    // On a switch, `source` still holds the old code until the new draft loads: save the old one only.
+    if (previous.key !== key) { flush(); return; }
+    if (!key || previous.source === source) return;
+    pending.current = { key, value: source };
+    const timer = setTimeout(flush, 400);
+    return () => clearTimeout(timer);
+  }, [key, source, flush]);
+  useEffect(() => {
+    const hidden = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    window.addEventListener("hashchange", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("hashchange", flush);
+      document.removeEventListener("visibilitychange", hidden);
+      flush();
+    };
+  }, [flush]);
+}
+
+/** Opens the reference, and F1 in the editor looks a word up in it. */
+export function useDocs() {
+  const [open, setOpen] = useState(false);
+  const [lookup, setLookup] = useState<DocsLookup | null>(null);
+  const onLookup = useCallback((word: string) => { setOpen(true); setLookup({ word, n: Date.now() }); }, []);
+  const close = useCallback(() => { setOpen(false); setLookup(null); }, []);
+  return { open, lookup, onLookup, toggle: () => (open ? close() : setOpen(true)), close };
+}
+
 /** Editor with language choice, autosaved drafts and idempotent submission. */
 export function SubmitPanel({ scope, languages, path, disabled, disabledReason, onSubmitted, signature = null }: {
   scope: string; languages: string[]; path: string; disabled?: boolean; disabledReason?: string; onSubmitted: () => void; signature?: Signature | null;
@@ -89,7 +137,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
   });
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
-  const [docs, setDocs] = useState(false);
+  const docs = useDocs();
   // One key per attempt; it is reused if the network fails so the server never duplicates a submission.
   const [attemptKey, setAttemptKey] = useState(uuid);
   useEffect(() => {
@@ -97,10 +145,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
   }, [languages, language]);
   const template = templateFor(language, signature);
   useEffect(() => { setSource(readDraft(scope, language) ?? template); }, [scope, language]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const timer = setTimeout(() => { try { localStorage.setItem(draftKey(scope, language), source); } catch { /* ignore */ } }, 400);
-    return () => clearTimeout(timer);
-  }, [scope, language, source]);
+  useDraftSaver(draftKey(scope, language), source);
 
   async function submit() {
     if (disabled || busy || !source.trim()) return;
@@ -126,7 +171,7 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
             {languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l] ?? l}</option>)}
           </select>
           <button className="ghost small" onClick={() => { if (confirm("Replace your code with the template?")) setSource(template); }}>Reset</button>
-          <button className="small" onClick={() => setDocs((open) => !open)} aria-expanded={docs}>Reference</button>
+          <button className="small" onClick={docs.toggle} aria-expanded={docs.open} title="Language reference (F1 in the editor looks up the word under the cursor)">Reference</button>
         </div>
         <button className="primary" disabled={disabled || busy || !source.trim() || languages.length === 0} onClick={submit} title="Ctrl+Enter">
           {busy ? "Submitting…" : "Submit ▸"}
@@ -134,9 +179,9 @@ export function SubmitPanel({ scope, languages, path, disabled, disabledReason, 
       </div>
       {disabled && disabledReason && <div className="notice warn small">{disabledReason}</div>}
       {languages.length === 0 && <div className="notice warn small">No language is currently enabled for this problem.</div>}
-      <CodeEditor value={source} onChange={setSource} onSubmit={submit} language={language} />
+      <CodeEditor value={source} onChange={setSource} onSubmit={submit} onLookup={docs.onLookup} language={language} />
       <div className="small muted">{signature ? "Complete the function; the judge calls it on every test." : "Read from standard input, write to standard output. Java classes must be named Main."} Drafts are saved in this browser. Press Tab to accept a suggestion.</div>
-      {docs && <DocsPanel language={language} onClose={() => setDocs(false)} />}
+      {docs.open && <DocsPanel language={language} onClose={docs.close} lookup={docs.lookup} />}
     </div>
   );
 }
