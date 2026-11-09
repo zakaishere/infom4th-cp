@@ -56,16 +56,18 @@ const theme = EditorView.theme({
   ".cm-panels input, .cm-panels button": { width: "auto", padding: "2px 6px" },
 }, { dark: true });
 
-export function CodeEditor({ value, onChange, onSubmit, onRun, readOnly, language }: {
+export function CodeEditor({ value, onChange, onSubmit, onRun, onLookup, readOnly, language }: {
   value: string; onChange?: (v: string) => void; onSubmit?: () => void; onRun?: () => void; readOnly?: boolean; language?: string;
+  /** F1: look up the word under the cursor in the reference. */
+  onLookup?: (word: string) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const languageSlot = useRef(new Compartment());
   const readOnlySlot = useRef(new Compartment());
   // Latest callbacks without recreating the editor.
-  const callbacks = useRef({ onChange, onSubmit, onRun });
-  callbacks.current = { onChange, onSubmit, onRun };
+  const callbacks = useRef({ onChange, onSubmit, onRun, onLookup });
+  callbacks.current = { onChange, onSubmit, onRun, onLookup };
   const suggestions = useRef(completionsFor(language));
   useEffect(() => { suggestions.current = completionsFor(language); }, [language]);
 
@@ -85,6 +87,14 @@ export function CodeEditor({ value, onChange, onSubmit, onRun, readOnly, languag
           Prec.highest(keymap.of([
             { key: "Mod-Enter", run: () => { callbacks.current.onSubmit?.(); return true; } },
             { key: "Mod-'", run: () => { callbacks.current.onRun?.(); return true; } },
+            { key: "F1", run: (v) => {
+              const lookup = callbacks.current.onLookup;
+              if (!lookup) return false;
+              const range = v.state.selection.main;
+              const word = range.empty ? v.state.wordAt(range.head) : range;
+              lookup(word ? v.state.sliceDoc(word.from, word.to).trim().slice(0, 80) : "");
+              return true;
+            } },
           ])),
           // Tab takes a suggestion; Enter always starts a new line, so typing fast never inserts one by accident.
           Prec.high(keymap.of([

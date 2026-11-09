@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { get, post, serverNow } from "../api";
 import { navigate, useAction, useAuth, useData, useServerClock, useToast } from "../app";
-import { ProblemStatement, SubmissionModal, TestCases, draftKey, readDraft, templateFor, uuid,
+import { ProblemStatement, SubmissionModal, TestCases, draftKey, readDraft, templateFor, useDraftSaver, uuid,
   type ProblemDetail, type SubmissionDetail } from "../components/Problem";
 import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, Loading, VERDICTS, Verdict, ago } from "../ui";
 import { parseSignature } from "../lib/functionMode";
@@ -415,11 +415,7 @@ function RoundWorkspace({ duelId, round, state, player, onSubmitted }: { duelId:
   const loaded = Boolean(problem.data);
   const template = templateFor(language, parseSignature(problem.data?.function_signature));
   useEffect(() => { if (loaded) setSource(readDraft(scope, language) ?? template); }, [scope, language, template, loaded]);
-  useEffect(() => {
-    if (!loaded) return;
-    const timer = setTimeout(() => { try { localStorage.setItem(draftKey(scope, language), source); } catch { /* ignore */ } }, 400);
-    return () => clearTimeout(timer);
-  }, [scope, language, source, loaded]);
+  useDraftSaver(loaded ? draftKey(scope, language) : null, source);
 
   // "Run examples" is judged on the statement's examples only and never counts in the room.
   const runId = run?.id, runDone = Boolean(run?.detail?.judging[0]?.verdict) || run?.detail?.judging[0]?.status === "FAILED";
