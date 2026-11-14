@@ -78,3 +78,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .tag-editor input { width: 140px; padding: 0.2rem 0.45rem; font-size: 0.85rem; }
 .tag-chip .x { margin-left: 0.3rem; opacity: 0.7; }
 tr.hidden-row td { opacity: 0.55; }
+
+/* TD (academic) section */
+.td-group { margin-bottom: 1.6rem; scroll-margin-top: 80px; }
+.td-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.td-head h2 { margin: 0; font-size: 1.2rem; }
+.td-head h2 .muted { font-weight: 500; }

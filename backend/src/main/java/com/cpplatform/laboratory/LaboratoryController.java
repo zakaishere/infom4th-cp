@@ -45,7 +45,7 @@ public class LaboratoryController {
     @PostMapping("/{version}/approve")
     Object approve(Authentication auth,@PathVariable UUID version,@RequestBody Map<String,Object> body){lab.approve(Actor.of(auth),version,Api.text(body,"reason",2000));return Map.of("ok",true);}
     @PostMapping("/{version}/publish-practice")
-    Object practice(Authentication auth,@PathVariable UUID version){lab.publishPractice(Actor.of(auth),version);return Map.of("ok",true);}
+    Object practice(Authentication auth,@PathVariable UUID version,@RequestBody(required=false) Map<String,Object> body){lab.publishPractice(Actor.of(auth),version,body==null?Map.of():body);return Map.of("ok",true);}
     @PostMapping("/{version}/publish-duel")
     Object duel(Authentication auth,@PathVariable UUID version){lab.publishDuel(Actor.of(auth),version);return Map.of("ok",true);}
 }

@@ -10,7 +10,7 @@ import { DocsPanel } from "../components/DocsPanel";
 
 export type PracticeProblem = {
   problem_id: string; id: string; title: string; slug: string; difficulty: "EASY" | "MEDIUM" | "HARD";
-  tags: string[]; published_at: string; time_limit_ms: number; memory_limit_mb: number;
+  tags: string[]; published_at: string; time_limit_ms: number; memory_limit_mb: number; td_number: number | null; td_position: number;
   solved_by: number; tried_by: number; submissions: number; accepted: number; my_status: "SOLVED" | "TRIED" | null;
 };
 type Catalog = { problems: PracticeProblem[]; tags: string[] };
@@ -24,7 +24,7 @@ export function DifficultyPill({ value }: { value: string }) {
   return <span className={"difficulty " + value.toLowerCase()}>{DIFFICULTY[value]?.label ?? value}</span>;
 }
 
-function StatusIcon({ status }: { status: PracticeProblem["my_status"] }) {
+export function StatusIcon({ status }: { status: PracticeProblem["my_status"] }) {
   if (status === "SOLVED") return <span className="status-icon solved" title="Solved">✓</span>;
   if (status === "TRIED") return <span className="status-icon tried" title="Attempted, not solved yet">●</span>;
   return <span className="status-icon" title="Not attempted" />;
@@ -158,15 +158,16 @@ export function PracticeList() {
 type Practice = ProblemDetail & { stats: PracticeProblem };
 type Outcome = { kind: "run" | "submit"; id: string; detail?: SubmissionDetail };
 
-/** Split-screen workspace: statement on the left, colourful editor and results on the right. */
-export function PracticeProblem({ versionId }: { versionId: string }) {
+/** Split-screen workspace: statement on the left, colourful editor and results on the right.
+ *  TD problems (the academic section) open here too, under #/td/..., and step through their own list. */
+export function PracticeProblem({ versionId, section = "practice" }: { versionId: string; section?: "practice" | "td" }) {
   const problem = useData<Practice>("/api/practice/" + versionId);
-  const catalog = useData<Catalog>("/api/practice");
+  const catalog = useData<Catalog>(section === "td" ? "/api/td" : "/api/practice");
   const history = useData<SubmissionRow[]>("/api/submissions");
   const toast = useToast();
   const [tab, setTab] = useState<"statement" | "submissions">("statement");
   const [open, setOpen] = useState<string | null>(null);
-  const [language, setLanguage] = useState("CPP");
+  const [language, setLanguage] = useState(section === "td" ? "C" : "CPP");
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState<"run" | "submit" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -243,7 +244,7 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
   }, [split]);
 
   if (problem.loading) return <Loading label="Opening the problem…" />;
-  if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href="#/practice">← Practice problems</a></main>;
+  if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href={"#/" + section}>{section === "td" ? "← TD" : "← Practice problems"}</a></main>;
   const p = problem.data, stats = p.stats, rate = acceptance(stats);
   const result = outcome?.detail?.judging[0];
 
@@ -251,10 +252,10 @@ export function PracticeProblem({ versionId }: { versionId: string }) {
     <div className="workspace" style={{ gridTemplateColumns: `${split}% 6px minmax(0, 1fr)` }}>
       <section className="ws-left">
         <div className="ws-bar">
-          <a href="#/practice" className="small">← Problems</a>
+          <a href={"#/" + section} className="small">{section === "td" ? "← TD" : "← Problems"}</a>
           <span className="spacer" />
-          <button className="ghost small" disabled={!neighbour(-1)} onClick={() => neighbour(-1) && navigate("/practice/" + neighbour(-1).id)} title="Previous problem">‹ Prev</button>
-          <button className="ghost small" disabled={!neighbour(1)} onClick={() => neighbour(1) && navigate("/practice/" + neighbour(1).id)} title="Next problem">Next ›</button>
+          <button className="ghost small" disabled={!neighbour(-1)} onClick={() => neighbour(-1) && navigate("/" + section + "/" + neighbour(-1).id)} title="Previous problem">‹ Prev</button>
+          <button className="ghost small" disabled={!neighbour(1)} onClick={() => neighbour(1) && navigate("/" + section + "/" + neighbour(1).id)} title="Next problem">Next ›</button>
         </div>
         <div className="ws-tabs">
           <button className={tab === "statement" ? "active" : ""} onClick={() => setTab("statement")}>Description</button>

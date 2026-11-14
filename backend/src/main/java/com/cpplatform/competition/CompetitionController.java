@@ -101,6 +101,9 @@ public class CompetitionController {
     /** Practice catalog with community statistics and the caller's own status per problem. */
     @GetMapping("/api/practice")
     Object practiceCatalog(Authentication auth){return Map.of("problems",practice.catalog(Actor.of(auth)),"tags",practice.allTags());}
+    /** Academic section: TD problems grouped by TD number; they are solved through the practice routes. */
+    @GetMapping("/api/td")
+    Object tdCatalog(Authentication auth){return Map.of("problems",practice.tdCatalog(Actor.of(auth)));}
     @GetMapping("/api/practice/{version}")
     Object practiceProblem(Authentication auth,@PathVariable UUID version) {
         var stats=practice.stats(Actor.of(auth),version);

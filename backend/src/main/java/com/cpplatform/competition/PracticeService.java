@@ -9,6 +9,7 @@ import java.util.*;
 
 /**
  * Public practice set: the catalog with community statistics and the caller's own status,
+ * the academic TD section (practice problems with a TD number, listed on their own page),
  * plus organizer management (tags, visibility). Statistics count real submissions only:
  * "run examples" submissions (samples_only) and rejudged generations never inflate them.
  */
@@ -22,7 +23,7 @@ public class PracticeService {
             +"JOIN problem_versions v2 ON v2.id=s.problem_version_id "
             +"JOIN LATERAL (SELECT j.id FROM judging_jobs j WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) j ON true "
             +"JOIN judging_results r ON r.job_id=j.id WHERE s.context='PRACTICE' AND NOT s.samples_only) ";
-    private static final String COLUMNS="pp.problem_id,v.id,v.title,p.slug,v.difficulty,pp.tags,pp.hidden,pp.published_at,v.time_limit_ms,v.memory_limit_mb,"
+    private static final String COLUMNS="pp.problem_id,v.id,v.title,p.slug,v.difficulty,pp.tags,pp.hidden,pp.published_at,pp.td_number,pp.td_position,v.time_limit_ms,v.memory_limit_mb,"
             +"(SELECT count(DISTINCT submitted_by) FROM res WHERE res.problem_id=pp.problem_id AND verdict='ACCEPTED') AS solved_by,"
             +"(SELECT count(DISTINCT submitted_by) FROM res WHERE res.problem_id=pp.problem_id) AS tried_by,"
             +"(SELECT count(*) FROM res WHERE res.problem_id=pp.problem_id) AS submissions,"
@@ -39,7 +40,13 @@ public class PracticeService {
 
     public List<Map<String,Object>> catalog(Actor actor) {
         return plain(db.jdbc.queryForList(RESULTS+"SELECT "+COLUMNS+"FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id "
-                +"JOIN problems p ON p.id=pp.problem_id WHERE NOT pp.hidden ORDER BY pp.published_at DESC LIMIT 1000",actor.id()));
+                +"JOIN problems p ON p.id=pp.problem_id WHERE NOT pp.hidden AND pp.td_number IS NULL ORDER BY pp.published_at DESC LIMIT 1000",actor.id()));
+    }
+
+    /** The academic section: TD problems, by TD number then position inside the TD. */
+    public List<Map<String,Object>> tdCatalog(Actor actor) {
+        return plain(db.jdbc.queryForList(RESULTS+"SELECT "+COLUMNS+"FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id "
+                +"JOIN problems p ON p.id=pp.problem_id WHERE NOT pp.hidden AND pp.td_number IS NOT NULL ORDER BY pp.td_number,pp.td_position,v.title LIMIT 1000",actor.id()));
     }
 
     public Map<String,Object> stats(Actor actor,UUID version) {
@@ -60,7 +67,7 @@ public class PracticeService {
     }
 
     public List<String> allTags() {
-        return db.jdbc.queryForList("SELECT DISTINCT unnest(tags) AS tag FROM practice_publications WHERE NOT hidden ORDER BY 1",String.class);
+        return db.jdbc.queryForList("SELECT DISTINCT unnest(tags) AS tag FROM practice_publications WHERE NOT hidden AND td_number IS NULL ORDER BY 1",String.class);
     }
 
     @Transactional
@@ -78,6 +85,14 @@ public class PracticeService {
             }
             Api.require(tags.size()<=8,HttpStatus.BAD_REQUEST,"At most 8 tags");
             db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=?",tags.toArray(new String[0]),problem);
+        }
+        if(body.containsKey("td")) {
+            // null moves the problem back to the general practice list; a number puts it in that TD.
+            Object td=body.get("td");
+            Api.require(td==null || (td instanceof Number n && n.doubleValue()==Math.rint(n.doubleValue()) && n.intValue()>=1 && n.intValue()<=99),HttpStatus.BAD_REQUEST,"td must be a TD number from 1 to 99, or null");
+            Object position=body.getOrDefault("tdPosition",0);
+            Api.require(position instanceof Number p && p.intValue()>=0 && p.intValue()<=999,HttpStatus.BAD_REQUEST,"tdPosition must be from 0 to 999");
+            db.jdbc.update("UPDATE practice_publications SET td_number=?,td_position=? WHERE problem_id=?",td==null?null:((Number)td).intValue(),((Number)position).intValue(),problem);
         }
         if(body.containsKey("hidden"))
             db.jdbc.update("UPDATE practice_publications SET hidden=? WHERE problem_id=?",Boolean.TRUE.equals(body.get("hidden")),problem);

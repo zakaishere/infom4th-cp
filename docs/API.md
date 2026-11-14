@@ -204,6 +204,15 @@ It waits while there is no administrator or no verified judge for the problem's 
 restart or after an administrator deletes a seeded problem; a short name that already exists
 is skipped. `CP_SEED_DUEL_PROBLEMS=false` turns it off.
 
+Academic TD section (V27). Practice publications may carry a TD number (`td_number`, 1-99) and a
+position inside it. `GET /api/td` lists them by TD then position, with the same fields and statistics as
+`GET /api/practice`, which no longer lists them; they are solved through the practice routes. An organizer
+moves a problem with `PATCH /api/manage/practice/{problem}` and `{"td": 3, "tdPosition": 2}` (`null` moves it
+back to Practice). `POST /api/lab/problems/{version}/publish-practice` also accepts
+`{"td":{"number":3,"position":2},"tags":[]}`, which Bulk import sends for bank problems that name a TD. The C TD
+exercises are a local bank (`examples/td-problems`, not committed): load it through Bulk import, or place it at
+`seed/td-problems.json.gz` before building and the backend installs it like the duel bank. `CP_SEED_TD_PROBLEMS=false` turns it off.
+
 ## Communications and operations
 
 | Method | Route | Body / access |

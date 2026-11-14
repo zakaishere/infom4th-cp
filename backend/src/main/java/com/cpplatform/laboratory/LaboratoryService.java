@@ -263,6 +263,16 @@ public class LaboratoryService {
         db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by) VALUES (?,?,?) ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now()",row.get("problem_id"),version,actor.id());
         db.audit(actor.id(),"PRACTICE_PUBLISH","problem_version",version,null);
     }
+    /** Publishes to practice and, when the bank names a TD, places it there at its position with its topics. */
+    @Transactional
+    public void publishPractice(Actor actor,UUID version,Map<String,Object> placement) {
+        publishPractice(actor,version);
+        if(!(placement.get("td") instanceof Map<?,?> td))return;
+        int number=td.get("number") instanceof Number n?Math.max(1,Math.min(99,n.intValue())):1;
+        int position=td.get("position") instanceof Number n?Math.max(0,Math.min(999,n.intValue())):0;
+        var tags=placement.get("tags") instanceof List<?> l?l.stream().map(String::valueOf).limit(8).toArray(String[]::new):new String[0];
+        db.jdbc.update("UPDATE practice_publications SET td_number=?,td_position=?,tags=?::text[] WHERE problem_version_id=?",number,position,tags,version);
+    }
     /** Adds an approved version to the duel pool, or replaces the problem's version there. Independent of practice. */
     @Transactional
     public void publishDuel(Actor actor,UUID version) {
