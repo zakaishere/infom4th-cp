@@ -26,7 +26,7 @@ class DatabaseFoundationTest {
                 .setServerConfig("listen_addresses", "127.0.0.1").start();
         flyway = Flyway.configure().dataSource(postgres.getPostgresDatabase())
                 .locations("classpath:db/migration").cleanDisabled(true).load();
-        assertEquals(27, flyway.migrate().migrationsExecuted);
+        assertEquals(28, flyway.migrate().migrationsExecuted);
     }
 
     @AfterAll

@@ -14,6 +14,7 @@ import Lobby from "./pages/Lobby";
 import Arena from "./pages/Arena";
 import { PracticeList, PracticeProblem } from "./pages/Practice";
 import TdList from "./pages/Td";
+import { MissionList, MissionPage, MissionCard } from "./pages/Missions";
 import { DuelHub, DuelRoom } from "./pages/Duels";
 import Teams from "./pages/Teams";
 import Leaderboard from "./pages/Leaderboard";
@@ -42,6 +43,10 @@ function Shell() {
   else if (parts[0] === "practice") page = <PracticeList />;
   else if (parts[0] === "td" && parts[1]) page = <PracticeProblem key={parts[1]} versionId={parts[1]} section="td" />;
   else if (parts[0] === "td") page = <TdList />;
+  else if (parts[0] === "missions" && parts[1] && parts[2] === "card" && parts[3]) page = <MissionCard key={parts[1] + parts[3]} slug={parts[1]} handle={parts[3]} />;
+  else if (parts[0] === "missions" && parts[1] && parts[2]) page = <PracticeProblem key={parts[2]} versionId={parts[2]} section="mission" mission={parts[1]} />;
+  else if (parts[0] === "missions" && parts[1]) page = <MissionPage key={parts[1]} slug={parts[1]} />;
+  else if (parts[0] === "missions") page = <MissionList />;
   else if (parts[0] === "duel" && parts[1]) page = <DuelRoom key={parts[1]} id={parts[1]} />;
   else if (parts[0] === "duels") page = <DuelHub />;
   else if (parts[0] === "teams") page = <Teams />;
@@ -68,6 +73,7 @@ function Shell() {
               {link("/contests", "Contests")}
               {link("/practice", "Practice")}
               {link("/td", "TD")}
+              {link("/missions", "Missions")}
               {link("/duels", "Duels")}
               {link("/leaderboard", "Leaderboard")}
             </>
@@ -76,6 +82,7 @@ function Shell() {
               {link("/", "Contests")}
               {link("/practice", "Practice")}
               {link("/td", "TD")}
+              {link("/missions", "Missions")}
               {link("/duels", "Duels")}
               {link("/leaderboard", "Leaderboard")}
               {link("/teams", "Teams")}

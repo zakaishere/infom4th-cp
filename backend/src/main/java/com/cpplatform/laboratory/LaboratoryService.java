@@ -267,11 +267,27 @@ public class LaboratoryService {
     @Transactional
     public void publishPractice(Actor actor,UUID version,Map<String,Object> placement) {
         publishPractice(actor,version);
+        if(placement.get("mission") instanceof Map<?,?> mission) placeInMission(version,mission,placement);
         if(!(placement.get("td") instanceof Map<?,?> td))return;
         int number=td.get("number") instanceof Number n?Math.max(1,Math.min(99,n.intValue())):1;
         int position=td.get("position") instanceof Number n?Math.max(0,Math.min(999,n.intValue())):0;
         var tags=placement.get("tags") instanceof List<?> l?l.stream().map(String::valueOf).limit(8).toArray(String[]::new):new String[0];
         db.jdbc.update("UPDATE practice_publications SET td_number=?,td_position=?,tags=?::text[] WHERE problem_version_id=?",number,position,tags,version);
+    }
+    /** Puts the problem in a mission, creating the mission on first use; an existing mission keeps its title and window. */
+    private void placeInMission(UUID version,Map<?,?> mission,Map<String,Object> placement) {
+        String slug=String.valueOf(mission.get("slug")),title=String.valueOf(mission.get("title"));
+        Api.require(slug.matches("^[a-z0-9][a-z0-9-]{1,63}$"),HttpStatus.BAD_REQUEST,"Invalid mission short name");
+        Api.require(!title.isBlank() && title.length()<=120,HttpStatus.BAD_REQUEST,"Invalid mission title");
+        String description=mission.get("description")==null?"":String.valueOf(mission.get("description"));
+        db.jdbc.update("INSERT INTO missions(slug,title,description) VALUES (?,?,?) ON CONFLICT(slug) DO NOTHING",slug,title,description);
+        UUID id=(UUID)db.one("SELECT id FROM missions WHERE slug=?",slug).get("id");
+        UUID problem=(UUID)db.one("SELECT problem_id FROM problem_versions WHERE id=?",version).get("problem_id");
+        int position=mission.get("position") instanceof Number n?Math.max(0,Math.min(999,n.intValue())):0;
+        double weight=mission.get("weight") instanceof Number n?Math.max(0.01,Math.min(1000,n.doubleValue())):10;
+        db.jdbc.update("INSERT INTO mission_problems(mission_id,problem_id,position,weight) VALUES (?,?,?,?) ON CONFLICT(problem_id) DO UPDATE SET mission_id=excluded.mission_id,position=excluded.position,weight=excluded.weight",id,problem,position,weight);
+        var tags=placement.get("tags") instanceof List<?> l?l.stream().map(String::valueOf).limit(8).toArray(String[]::new):new String[0];
+        db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_version_id=?",tags,version);
     }
     /** Adds an approved version to the duel pool, or replaces the problem's version there. Independent of practice. */
     @Transactional

@@ -160,14 +160,17 @@ type Outcome = { kind: "run" | "submit"; id: string; detail?: SubmissionDetail }
 
 /** Split-screen workspace: statement on the left, colourful editor and results on the right.
  *  TD problems (the academic section) open here too, under #/td/..., and step through their own list. */
-export function PracticeProblem({ versionId, section = "practice" }: { versionId: string; section?: "practice" | "td" }) {
+export function PracticeProblem({ versionId, section = "practice", mission }: { versionId: string; section?: "practice" | "td" | "mission"; mission?: string }) {
   const problem = useData<Practice>("/api/practice/" + versionId);
-  const catalog = useData<Catalog>(section === "td" ? "/api/td" : "/api/practice");
+  const catalog = useData<Catalog>(section === "td" ? "/api/td" : section === "practice" ? "/api/practice" : null);
+  const missionData = useData<{ title: string; me: { problems: { version: string }[] } }>(section === "mission" ? "/api/missions/" + mission : null);
+  const base = section === "mission" ? "/missions/" + mission : "/" + section;
+  const backLabel = section === "td" ? "← TD" : section === "mission" ? "← " + (missionData.data?.title ?? "Mission") : "← Problems";
   const history = useData<SubmissionRow[]>("/api/submissions");
   const toast = useToast();
   const [tab, setTab] = useState<"statement" | "submissions">("statement");
   const [open, setOpen] = useState<string | null>(null);
-  const [language, setLanguage] = useState(section === "td" ? "C" : "CPP");
+  const [language, setLanguage] = useState(section === "td" ? "C" : section === "mission" ? "PYTHON" : "CPP");
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState<"run" | "submit" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -226,7 +229,7 @@ export function PracticeProblem({ versionId, section = "practice" }: { versionId
   }, [busy, source, language, versionId, toast, reloadHistory]);
 
   const mine = (history.data ?? []).filter((s) => s.problem_version_id === versionId && s.problem_slot == null && s.context !== "DUEL");
-  const list = catalog.data?.problems ?? [];
+  const list: { id: string }[] = section === "mission" ? (missionData.data?.me.problems ?? []).map((m) => ({ id: m.version })) : catalog.data?.problems ?? [];
   const index = list.findIndex((p) => p.id === versionId);
   const neighbour = (step: number) => list[index + step];
 
@@ -244,7 +247,7 @@ export function PracticeProblem({ versionId, section = "practice" }: { versionId
   }, [split]);
 
   if (problem.loading) return <Loading label="Opening the problem…" />;
-  if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href={"#/" + section}>{section === "td" ? "← TD" : "← Practice problems"}</a></main>;
+  if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href={"#" + base}>{section === "practice" ? "← Practice problems" : backLabel}</a></main>;
   const p = problem.data, stats = p.stats, rate = acceptance(stats);
   const result = outcome?.detail?.judging[0];
 
@@ -252,10 +255,10 @@ export function PracticeProblem({ versionId, section = "practice" }: { versionId
     <div className="workspace" style={{ gridTemplateColumns: `${split}% 6px minmax(0, 1fr)` }}>
       <section className="ws-left">
         <div className="ws-bar">
-          <a href={"#/" + section} className="small">{section === "td" ? "← TD" : "← Problems"}</a>
+          <a href={"#" + base} className="small">{backLabel}</a>
           <span className="spacer" />
-          <button className="ghost small" disabled={!neighbour(-1)} onClick={() => neighbour(-1) && navigate("/" + section + "/" + neighbour(-1).id)} title="Previous problem">‹ Prev</button>
-          <button className="ghost small" disabled={!neighbour(1)} onClick={() => neighbour(1) && navigate("/" + section + "/" + neighbour(1).id)} title="Next problem">Next ›</button>
+          <button className="ghost small" disabled={!neighbour(-1)} onClick={() => neighbour(-1) && navigate(base + "/" + neighbour(-1).id)} title="Previous problem">‹ Prev</button>
+          <button className="ghost small" disabled={!neighbour(1)} onClick={() => neighbour(1) && navigate(base + "/" + neighbour(1).id)} title="Next problem">Next ›</button>
         </div>
         <div className="ws-tabs">
           <button className={tab === "statement" ? "active" : ""} onClick={() => setTab("statement")}>Description</button>

@@ -84,3 +84,9 @@ tr.hidden-row td { opacity: 0.55; }
 .td-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
 .td-head h2 { margin: 0; font-size: 1.2rem; }
 .td-head h2 .muted { font-weight: 500; }
+
+/* Missions */
+.mission-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+.mission-tile { display: flex; flex-direction: column; gap: 0.6rem; text-decoration: none; color: inherit; }
+.mission-meta { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+.mission-card { max-width: 820px; }

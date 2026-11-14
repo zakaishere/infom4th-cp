@@ -1,0 +1,52 @@
+[
+  {
+    "slug": "py-tp2-1a-operations",
+    "title": "Ex 1a · Opérations de base",
+    "weight": 5
+  },
+  {
+    "slug": "py-tp2-1b-cercle",
+    "title": "Ex 1b · Surface d'un cercle",
+    "weight": 5
+  },
+  {
+    "slug": "py-tp2-2-moyenne",
+    "title": "Ex 2 · Moyenne de trois notes",
+    "weight": 8
+  },
+  {
+    "slug": "py-tp2-3-pair-impair",
+    "title": "Ex 3 · Pair ou impair",
+    "weight": 8
+  },
+  {
+    "slug": "py-tp2-4-duree",
+    "title": "Ex 4 · Convertir une durée",
+    "weight": 10
+  },
+  {
+    "slug": "py-tp2-5-maximum",
+    "title": "Ex 5 · Le plus grand de trois nombres",
+    "weight": 10
+  },
+  {
+    "slug": "py-tp2-6-reduction",
+    "title": "Ex 6 · Réduction sur les achats",
+    "weight": 14
+  },
+  {
+    "slug": "py-tp2-7-bissextile",
+    "title": "Ex 7 · Année bissextile",
+    "weight": 12
+  },
+  {
+    "slug": "py-tp2-8-compte-a-rebours",
+    "title": "Ex 8 · Compte à rebours",
+    "weight": 14
+  },
+  {
+    "slug": "py-tp2-9-nombre-secret",
+    "title": "Ex 9 · Deviner le nombre secret",
+    "weight": 14
+  }
+]
