@@ -9,6 +9,8 @@ export type BankProblem = {
   reference: { label: string; language: string; sourceCode: string };
   /** A function problem's signature (see lib/functionMode.ts); the server checks it and the tests. */
   functionSignature?: ObjectValue;
+  /** TD problems: the TD and position they take in the academic section when published, and their topics. */
+  td?: { number: number; position: number }; tags?: string[];
 };
 type ObjectValue = Record<string, unknown>;
 const bytes = (text: string) => new TextEncoder().encode(text).length;
@@ -159,7 +161,7 @@ export async function importProblem(
   check();
   if (mode === "publish" && current.status !== "PUBLISHED") {
     update({ message: "Publishing to Practice", versionId: id });
-    await transport.action(id, "publish-practice");
+    await transport.action(id, "publish-practice", problem.td ? { td: problem.td, tags: problem.tags ?? [] } : undefined);
   }
   // A version can already be PUBLISHED through practice; adding it to the duel pool is idempotent.
   if (mode === "duel") {

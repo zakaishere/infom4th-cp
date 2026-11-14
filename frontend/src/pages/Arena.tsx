@@ -84,8 +84,11 @@ export default function Arena({ runId }: { runId: string }) {
   const entry = mine.data?.find((m) => m.run_id === runId);
   const isTeam = detail.data?.configuration.mode === "TEAM";
   const scoring = (detail.data?.configuration.scoring_system ?? "ICPC") as keyof typeof SCORING_INFO;
-  const mustStayFullscreen = phase === "live" && Boolean(entry);
+  // A warmup runs for days: it is open all the time and never asks for full screen.
+  const warmup = detail.data?.configuration.contest_format === "WARMUP";
+  const mustStayFullscreen = phase === "live" && Boolean(entry) && !warmup;
   const fullscreen = useFullscreen(mustStayFullscreen, runId);
+  const showFullscreen = fullscreen.supported && !fullscreen.active && !warmup;
 
   // Problems are withheld until the start; refetch the run as soon as the clock passes it.
   const reloadRun = detail.reload;
@@ -96,6 +99,16 @@ export default function Arena({ runId }: { runId: string }) {
     const timer = setInterval(reloadRun, 1000);
     return () => clearInterval(timer);
   }, [phase, detail.data?.problems, reloadRun]);
+  // The next warmup day opens on the server clock: fetch its problems as soon as it does.
+  const nextDay = detail.data?.upcomingDays?.[0];
+  const nextOpens = nextDay ? new Date(nextDay.opensAt).getTime() : 0;
+  const nextDayDue = phase === "live" && nextOpens > 0 && now >= nextOpens;
+  useEffect(() => {
+    if (!nextDayDue) return;
+    reloadRun();
+    const timer = setInterval(reloadRun, 2000);
+    return () => clearInterval(timer);
+  }, [nextDayDue, reloadRun]);
   const slot = view.kind === "problem" ? view.slot : null;
   useEffect(() => {
     if (slot === null || problems[slot] || phase === "upcoming") return;
@@ -169,6 +182,12 @@ export default function Arena({ runId }: { runId: string }) {
   if (!detail.data || !r) return <main className="page"><ErrorBox error={detail.error} /><a href="#/">Back</a></main>;
   const remaining = end - now;
   const problemList = detail.data.problems ?? [];
+  const totalDays = Math.max(1, Math.round(detail.data.configuration.duration_seconds / 86400));
+  const upcomingDays = detail.data.upcomingDays ?? [];
+  // Warmup problems grouped by their day (a single group in other contests).
+  const days = warmup
+    ? [...new Set(problemList.map((p) => p.release_day ?? 1))].sort((a, b) => a - b).map((day) => ({ day, problems: problemList.filter((p) => (p.release_day ?? 1) === day) }))
+    : [{ day: 0, problems: problemList }];
   const solvedCount = Object.values(status).filter((s) => s.solved).length;
   const exit = () => {
     // Reported first: leaving the arena takes the full screen listener away with it.
@@ -187,13 +206,14 @@ export default function Arena({ runId }: { runId: string }) {
         </div>
         {r.kind === "REHEARSAL" && <Badge tone="warn">Rehearsal</Badge>}
         {r.submissions_paused && <Badge tone="warn">Submissions paused</Badge>}
-        {fullscreen.denied && !fullscreen.active && <Badge tone="warn">Full screen blocked by this browser</Badge>}
+        {fullscreen.denied && !fullscreen.active && !warmup && <Badge tone="warn">Full screen blocked by this browser</Badge>}
+        {warmup && phase !== "upcoming" && <Badge tone="info">Day {Math.min(totalDays, Math.floor((Math.min(now, end - 1) - start) / 86_400_000) + 1)} of {totalDays}</Badge>}
         <div className="spacer" />
         {phase === "live" && <span className={"clock" + (remaining < 15 * 60_000 ? " low" : "")} title="Time remaining (server clock)">{clock(remaining)}</span>}
         {phase === "ended" && <span className="clock">Contest over</span>}
         <div className="spacer" />
         {phase !== "upcoming" && <span className="small">{scoring === "ICPC" ? `${solvedCount}/${problemList.length} solved` : `${myRow ? Number(myRow.score.toFixed(2)) : 0} points`}{myRow ? ` · rank ${myRow.rank}` : ""}</span>}
-        {fullscreen.supported && !fullscreen.active && <button className="small" onClick={fullscreen.enter}>Full screen</button>}
+        {showFullscreen && <button className="small" onClick={fullscreen.enter}>Full screen</button>}
         <button className="small" onClick={exit}>Exit</button>
       </header>
 
@@ -204,7 +224,8 @@ export default function Arena({ runId }: { runId: string }) {
             <div className="countdown">{clock(start - now)}</div>
             <p style={{ maxWidth: 560 }}>Problems appear automatically at {when(r.starts_at)}. Scoring: <strong>{SCORING_INFO[scoring]?.name}</strong> — {SCORING_INFO[scoring]?.summary}</p>
             {entry ? <p>{isTeam ? <>You compete as team <strong>{entry.entry_name}</strong> ({entry.members}). Everyone in the team can submit; results are shared.</> : "You are registered."}</p> : <p>You are not registered for this contest.</p>}
-            {fullscreen.supported && !fullscreen.active && entry && <button className="primary" onClick={fullscreen.enter}>Enter full screen now</button>}
+            {warmup && <p>This is a <strong>{totalDays}-day warmup</strong>: new problems open every day at this time, earlier days stay open, and there is no full screen.</p>}
+            {showFullscreen && entry && <button className="primary" onClick={fullscreen.enter}>Enter full screen now</button>}
           </div>
         </div>
       ) : (
@@ -225,10 +246,13 @@ export default function Arena({ runId }: { runId: string }) {
             <section className="arena-page">
              <div className="arena-split">
              <div>
+              {days.map(({ day, problems: dayProblems }) => (
+              <div key={day} className={warmup ? "warmup-day" : undefined}>
+              {warmup && <h3>Day {day}<span className="small muted">{dayProblems.length} problem{dayProblems.length === 1 ? "" : "s"}</span></h3>}
               <table className="problem-table">
                 <thead><tr><th>#</th><th>Problem</th><th>Limits</th>{scoring !== "ICPC" && <th className="right">Points</th>}<th>Solved by</th><th>{isTeam ? "Your team" : "You"}</th></tr></thead>
                 <tbody>
-                  {problemList.map((p) => {
+                  {dayProblems.map((p) => {
                     const st = status[p.slot];
                     const stat = board.data?.problemStats.find((x) => x.slot === p.slot);
                     const cell = myRow?.problems.find((c) => c.slot === p.slot);
@@ -256,7 +280,17 @@ export default function Arena({ runId }: { runId: string }) {
                   })}
                 </tbody>
               </table>
-              <p className="small muted">Click a problem to open it. {SCORING_INFO[scoring]?.summary} “Solved by” counts {isTeam ? "teams" : "contestants"} that solved / tried the problem{board.data?.frozen ? " (frozen near the end)" : ""}.</p>
+              </div>
+              ))}
+              {warmup && upcomingDays.map((u) => (
+                <div key={u.day} className="warmup-day">
+                  <div className="warmup-locked">
+                    <span><strong>Day {u.day}</strong> · {u.count} problem{u.count === 1 ? "" : "s"}</span>
+                    <span className="small mono" title={when(u.opensAt)}>🔒 opens in {clock(new Date(u.opensAt).getTime() - now)}</span>
+                  </div>
+                </div>
+              ))}
+              <p className="small muted">Click a problem to open it.{warmup ? " Earlier days stay open until the end of the warmup." : ""} {SCORING_INFO[scoring]?.summary} “Solved by” counts {isTeam ? "teams" : "contestants"} that solved / tried the problem{board.data?.frozen ? " (frozen near the end)" : ""}.</p>
              </div>
              <ContestPulse board={board.data} me={entry?.entry_id} start={start} end={end} now={now} labels={labels}
                attempts={(submissions.data ?? []).filter((s) => s.verdict && s.verdict !== "JUDGE_ERROR").length} onScoreboard={() => setView({ kind: "scoreboard" })} />
@@ -299,7 +333,7 @@ export default function Arena({ runId }: { runId: string }) {
         </div>
       )}
 
-      {phase === "live" && entry && fullscreen.supported && !fullscreen.active && !fullscreen.denied && (
+      {phase === "live" && entry && showFullscreen && !fullscreen.denied && (
         <div className="lock-screen">
           <div className="card stack" style={{ alignItems: "center" }}>
             <h2>Full screen required</h2>

@@ -7,8 +7,12 @@ import { runPhase } from "./Home";
 
 export type RunDetail = {
   run: { id: string; competition_id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean };
-  configuration: { title?: string; description_md: string; rules_md: string; mode: string; duration_seconds: number; scoring_system?: string; wrong_attempt_penalty_seconds?: number; freeze_before_end_seconds?: number; max_team_size?: number };
-  problems?: { slot: number; label: string; title: string; time_limit_ms: number; memory_limit_mb: number; points?: number | null }[];
+  configuration: { title?: string; description_md: string; rules_md: string; mode: string; duration_seconds: number; scoring_system?: string; wrong_attempt_penalty_seconds?: number; freeze_before_end_seconds?: number; max_team_size?: number;
+    /** WARMUP: problems open day by day, no full screen (see the backend V26 migration). */
+    contest_format?: "STANDARD" | "WARMUP"; publish_to_practice?: boolean };
+  problems?: { slot: number; label: string; title: string; time_limit_ms: number; memory_limit_mb: number; points?: number | null; release_day?: number; opens_at?: string; released?: boolean }[];
+  /** Warmup days still locked: only how many problems each holds, never their titles. */
+  upcomingDays?: { day: number; opensAt: string; count: number }[];
 };
 
 export default function Lobby({ runId }: { runId: string }) {
@@ -37,7 +41,9 @@ export default function Lobby({ runId }: { runId: string }) {
         <div>
           <div className="eyebrow">{r.kind === "REHEARSAL" ? "Rehearsal" : "Official contest"} · {cfg.mode === "TEAM" ? "Team" : "Individual"}</div>
           <h1>{cfg.title ?? "Contest lobby"}</h1>
-          <p>{when(r.starts_at)} → {when(r.ends_at)} · {Math.round(cfg.duration_seconds / 60)} minutes</p>
+          <p>{when(r.starts_at)} → {when(r.ends_at)} · {cfg.contest_format === "WARMUP"
+            ? `${Math.round(cfg.duration_seconds / 86400)}-day warmup: new problems every day, earlier days stay open`
+            : `${Math.round(cfg.duration_seconds / 60)} minutes`}</p>
         </div>
         <div className="stack" style={{ alignItems: "flex-end" }}>
           {phase.phase === "upcoming" && <div className="countdown">{clock(phase.ms)}</div>}

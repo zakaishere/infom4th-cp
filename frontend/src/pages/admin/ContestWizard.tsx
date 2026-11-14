@@ -12,8 +12,11 @@ type Draft = {
   freezeMinutes: number; penaltyMinutes: number; penalizeCompilationErrors: boolean; languages: string[];
   description: string; rules: string; problems: string[]; participants: string; startsAt: string; visibility: string;
   scoring: "ICPC" | "IOI" | "CODEFORCES" | "ATCODER"; points: Record<string, number>;
+  /** WARMUP: a multi-day contest whose problems open day by day (see the backend V26 migration). */
+  kind: "STANDARD" | "WARMUP"; days: number; dayOf: Record<string, number>; publishToPractice: boolean;
 };
 const KEY = "cp.contest-wizard";
+const WARMUP_RULES = "- A new set of problems opens every day at the start time.\n- Earlier days stay open until the end: you can catch up any time.\n- Each problem counts your best submission (points for the tests it passes).\n- No time penalty and no full screen: solve at your own pace.\n- Do not share code until the warmup ends; the problems then move to Practice.";
 const RULES = "- Standard ICPC scoring: most problems solved, then least total time.\n- Each rejected attempt before acceptance adds the penalty below.\n- Ask questions about statements through Clarifications.\n- Do not share code during the contest.";
 /** The next full hour in the platform's time zone, as a datetime-local value. */
 function nextHour() {
@@ -25,6 +28,7 @@ const EMPTY: Draft = {
   title: "", slug: "", mode: "INDIVIDUAL", maxTeamSize: 3, hours: 3, minutes: 0, freezeMinutes: 60, penaltyMinutes: 20,
   penalizeCompilationErrors: false, languages: ["CPP", "C", "JAVA", "PYTHON"], description: "", rules: RULES,
   problems: [], participants: "", startsAt: nextHour(), visibility: "PUBLIC", scoring: "ICPC", points: {},
+  kind: "STANDARD", days: 7, dayOf: {}, publishToPractice: true,
 };
 const defaultPoints = (scoring: Draft["scoring"], i: number) => (scoring === "IOI" ? 100 : scoring === "CODEFORCES" ? 500 * (i + 1) : scoring === "ATCODER" ? 100 * (i + 1) : 1);
 const STEPS = ["Details", "Problems", "Participants", "Schedule"];
@@ -43,15 +47,21 @@ export default function ContestWizard() {
   const set = (change: Partial<Draft>) => setD((old) => ({ ...old, ...change }));
   const approved = (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
   const titles = Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p.title]));
-  const duration = d.hours * 3600 + d.minutes * 60;
+  const warmup = d.kind === "WARMUP";
+  const duration = warmup ? d.days * 86400 : d.hours * 3600 + d.minutes * 60;
+  const dayOf = (version: string) => Math.min(d.days, Math.max(1, d.dayOf[version] ?? 1));
+  // A warmup's letters follow its days: day 1 problems first, then day 2, and so on.
+  const ordered = warmup ? [...d.problems].sort((a, b) => dayOf(a) - dayOf(b)) : d.problems;
   const handles = d.participants.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
   const issues: string[] = [];
   if (!d.title.trim()) issues.push("Title is required");
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) issues.push("Short name must be lowercase letters, digits and dashes");
-  if (duration < 60) issues.push("Duration must be at least one minute");
-  if (d.freezeMinutes * 60 >= duration) issues.push("Freeze must be shorter than the contest");
+  if (warmup && !(d.days >= 1 && d.days <= 31)) issues.push("A warmup lasts 1 to 31 days");
+  if (!warmup && duration < 60) issues.push("Duration must be at least one minute");
+  if (!warmup && d.freezeMinutes * 60 >= duration) issues.push("Freeze must be shorter than the contest");
   if (d.problems.length === 0) issues.push("Choose at least one problem");
   if (d.languages.length === 0) issues.push("Choose at least one language");
+  const emptyDays = warmup ? Array.from({ length: d.days }, (_, i) => i + 1).filter((day) => !d.problems.some((v) => dayOf(v) === day)) : [];
 
   async function run(text: string, action: () => Promise<unknown>) {
     setLog((l) => [...l, { text, state: "running" }]);
@@ -71,16 +81,21 @@ export default function ContestWizard() {
       let id = created;
       if (!id) {
         const r = await run("Creating contest", () => post<{ competitionId: string }>("/api/manage/competitions", {
-          slug: d.slug, title: d.title, durationSeconds: duration, mode: d.mode, maxTeamSize: d.mode === "TEAM" ? d.maxTeamSize : 1, scoringSystem: d.scoring,
-          languages: d.languages, freezeBeforeEndSeconds: d.freezeMinutes * 60,
+          slug: d.slug, title: d.title, mode: d.mode, maxTeamSize: d.mode === "TEAM" ? d.maxTeamSize : 1, languages: d.languages,
+          ...(warmup
+            ? { format: "WARMUP", days: d.days, publishToPractice: d.publishToPractice }
+            : { durationSeconds: duration, scoringSystem: d.scoring, freezeBeforeEndSeconds: d.freezeMinutes * 60 }),
           // The API rejects blank optional text; leave it out instead.
           ...(d.description.trim() ? { description: d.description } : {}), ...(d.rules.trim() ? { rules: d.rules } : {}),
           wrongAttemptPenaltySeconds: d.penaltyMinutes * 60, penalizeCompilationErrors: d.penalizeCompilationErrors,
         }));
         id = (r as { competitionId: string }).competitionId;
         setCreated(id);
-        for (const [i, version] of d.problems.entries())
-          await run(`Adding problem ${label(i)}: ${titles[version] ?? version}`, () => post("/api/manage/competitions/" + id + "/problems", { versionId: version, slot: i + 1, label: label(i), ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }) }));
+        for (const [i, version] of ordered.entries())
+          await run(`Adding problem ${label(i)}${warmup ? ` (day ${dayOf(version)})` : ""}: ${titles[version] ?? version}`, () => post("/api/manage/competitions/" + id + "/problems", {
+            versionId: version, slot: i + 1, label: label(i),
+            ...(warmup ? { releaseDay: dayOf(version) } : d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }),
+          }));
       }
       if (handles.length && d.mode === "INDIVIDUAL") {
         const result = await run(`Registering ${handles.length} participant(s)`, () => post<{ user: string; status: string }[]>("/api/manage/competitions/" + id + "/participants", { users: handles }));
@@ -111,7 +126,8 @@ export default function ContestWizard() {
     navigate("/admin/contests/" + id);
   }
   const move = (i: number, delta: number) => {
-    const list = [...d.problems]; const j = i + delta;
+    // Indexes are those of the list as shown (sorted by day in a warmup).
+    const list = [...ordered]; const j = i + delta;
     if (j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]]; set({ problems: list });
   };
@@ -126,27 +142,44 @@ export default function ContestWizard() {
       <section className="card">
         {step === 0 && (
           <div className="stack">
+            <div className="contest-kinds" role="radiogroup" aria-label="Contest type">
+              {([["STANDARD", "Standard contest", "A timed contest of a few hours. Full screen in the arena."],
+                 ["WARMUP", "Warmup (several days)", "New problems open every day. Best submission counts, no time penalty, no full screen."]] as const).map(([kind, name, text]) => (
+                <button key={kind} type="button" role="radio" aria-checked={d.kind === kind} disabled={Boolean(created)} className={"card-flat" + (d.kind === kind ? " active" : "")}
+                  onClick={() => set({ kind, rules: d.rules === RULES || d.rules === WARMUP_RULES ? (kind === "WARMUP" ? WARMUP_RULES : RULES) : d.rules })}>
+                  <strong>{name}</strong><span className="small muted">{text}</span>
+                </button>
+              ))}
+            </div>
             <div className="grid grid-2">
               <Field label="Contest name"><input autoFocus value={d.title} onChange={(e) => set({ title: e.target.value, slug: created ? d.slug : slugify(e.target.value) })} placeholder="InfoM4th Spring Cup" /></Field>
               <Field label="Short name (URL)"><input value={d.slug} disabled={Boolean(created)} onChange={(e) => set({ slug: e.target.value })} /></Field>
               <Field label="Format"><select value={d.mode} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}><option value="INDIVIDUAL">Individual</option><option value="TEAM">Teams</option></select></Field>
               {d.mode === "TEAM" && <Field label="Max team size"><input type="number" min={1} max={10} value={d.maxTeamSize} onChange={(e) => set({ maxTeamSize: Number(e.target.value) })} /></Field>}
-              <Field label="Duration"><div className="row" style={{ flexWrap: "nowrap" }}>
-                <input type="number" min={0} max={24} value={d.hours} onChange={(e) => set({ hours: Number(e.target.value) })} /><span>h</span>
-                <input type="number" min={0} max={59} value={d.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} /><span>min</span></div></Field>
-              <Field label="Freeze scoreboard before the end (minutes)" hint="0 = never freeze"><input type="number" min={0} value={d.freezeMinutes} onChange={(e) => set({ freezeMinutes: Number(e.target.value) })} /></Field>
-              <Field label="Scoring system" hint={SCORING_INFO[d.scoring].summary}>
+              {warmup ? (
+                <Field label="Number of days" hint="Day N's problems open N − 1 days after the start, at the same time of day.">
+                  <input type="number" min={1} max={31} value={d.days} onChange={(e) => set({ days: Number(e.target.value) })} />
+                </Field>
+              ) : (
+                <Field label="Duration"><div className="row" style={{ flexWrap: "nowrap" }}>
+                  <input type="number" min={0} max={24} value={d.hours} onChange={(e) => set({ hours: Number(e.target.value) })} /><span>h</span>
+                  <input type="number" min={0} max={59} value={d.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} /><span>min</span></div></Field>
+              )}
+              {warmup && <Field label="Scoring" hint={SCORING_INFO.IOI.summary}><input value="Best submission on each problem" disabled /></Field>}
+              {!warmup && <Field label="Freeze scoreboard before the end (minutes)" hint="0 = never freeze"><input type="number" min={0} value={d.freezeMinutes} onChange={(e) => set({ freezeMinutes: Number(e.target.value) })} /></Field>}
+              {!warmup && <Field label="Scoring system" hint={SCORING_INFO[d.scoring].summary}>
                 <select value={d.scoring} onChange={(e) => set({ scoring: e.target.value as Draft["scoring"], points: {} })}>
                   <option value="ICPC">ICPC — solved count, then time + penalty</option>
                   <option value="IOI">IOI — partial points per test passed</option>
                   <option value="CODEFORCES">Codeforces — points decrease over time</option>
                   <option value="ATCODER">AtCoder — fixed points, time tie-break</option>
                 </select>
-              </Field>
-              {d.scoring === "ICPC" && <Field label="Penalty per rejected attempt (minutes)"><input type="number" min={0} value={d.penaltyMinutes} onChange={(e) => set({ penaltyMinutes: Number(e.target.value) })} /></Field>}
+              </Field>}
+              {!warmup && d.scoring === "ICPC" && <Field label="Penalty per rejected attempt (minutes)"><input type="number" min={0} value={d.penaltyMinutes} onChange={(e) => set({ penaltyMinutes: Number(e.target.value) })} /></Field>}
               <Field label="Languages"><LanguagePicker value={d.languages} onChange={(languages) => set({ languages })} /></Field>
             </div>
-            {d.scoring !== "IOI" && <label className="check small"><input type="checkbox" checked={d.penalizeCompilationErrors} onChange={(e) => set({ penalizeCompilationErrors: e.target.checked })} />Compilation errors also count as rejected attempts</label>}
+            {warmup && <label className="check small"><input type="checkbox" checked={d.publishToPractice} onChange={(e) => set({ publishToPractice: e.target.checked })} />When the warmup ends, publish its problems in Practice so everyone can keep solving them</label>}
+            {!warmup && d.scoring !== "IOI" && <label className="check small"><input type="checkbox" checked={d.penalizeCompilationErrors} onChange={(e) => set({ penalizeCompilationErrors: e.target.checked })} />Compilation errors also count as rejected attempts</label>}
             <Field label="Description shown in the lobby (Markdown)"><textarea rows={3} value={d.description} onChange={(e) => set({ description: e.target.value })} /></Field>
             <Field label="Rules (Markdown)"><textarea rows={4} value={d.rules} onChange={(e) => set({ rules: e.target.value })} /></Field>
           </div>
@@ -165,10 +198,14 @@ export default function ContestWizard() {
             </div>
             <div className="stack">
               <strong>Contest problem set ({d.problems.length})</strong>
-              {d.problems.length === 0 ? <Empty>Tick problems on the left. Order them here; letters are assigned automatically.</Empty> : d.problems.map((v, i) => (
+              {warmup && d.problems.length > 0 && emptyDays.length > 0 && <div className="notice warn small">No problems on day {emptyDays.join(", ")} yet.</div>}
+              {d.problems.length === 0 ? <Empty>Tick problems on the left. Order them here; letters are assigned automatically.</Empty> : ordered.map((v, i) => (
                 <div key={v} className="row-between card-flat">
                   <span className="row"><span className="problem-letter">{label(i)}</span>{titles[v] ?? v}</span>
-                  {d.scoring !== "ICPC" && <label className="row small" style={{ flexWrap: "nowrap" }}>points <input type="number" min={1} max={100000} style={{ width: 90 }} disabled={Boolean(created)}
+                  {warmup && <label className="row small" style={{ flexWrap: "nowrap" }}>Day <select style={{ width: "auto" }} disabled={Boolean(created)} value={dayOf(v)}
+                    onChange={(e) => set({ dayOf: { ...d.dayOf, [v]: Number(e.target.value) } })} aria-label={"Day for " + (titles[v] ?? v)}>
+                    {Array.from({ length: d.days }, (_, k) => <option key={k} value={k + 1}>{k + 1}</option>)}</select></label>}
+                  {!warmup && d.scoring !== "ICPC" && <label className="row small" style={{ flexWrap: "nowrap" }}>points <input type="number" min={1} max={100000} style={{ width: 90 }} disabled={Boolean(created)}
                     value={d.points[v] ?? defaultPoints(d.scoring, i)} onChange={(e) => set({ points: { ...d.points, [v]: Number(e.target.value) } })} /></label>}
                   {!created && <span className="row"><button className="small ghost" onClick={() => move(i, -1)} disabled={i === 0}>↑</button><button className="small ghost" onClick={() => move(i, 1)} disabled={i === d.problems.length - 1}>↓</button></span>}
                 </div>
@@ -194,7 +231,7 @@ export default function ContestWizard() {
                 <option value="PUBLIC">Public — listed, anyone can register</option><option value="UNLISTED">Unlisted — link only</option><option value="PRIVATE">Private — only added participants</option></select></Field>
             </div>
             <div className="card-flat small">
-              <strong>{d.title || "Untitled"}</strong> · {SCORING_INFO[d.scoring].name} scoring · {d.mode === "TEAM" ? "teams" : "individual"} · {d.hours}h {d.minutes}m · {d.problems.length} problems ({d.problems.map((_, i) => label(i)).join(", ")}) ·
+              <strong>{d.title || "Untitled"}</strong> · {warmup ? `Warmup · ${d.days} days · best submission scoring` : `${SCORING_INFO[d.scoring].name} scoring`} · {d.mode === "TEAM" ? "teams" : "individual"}{warmup ? "" : ` · ${d.hours}h ${d.minutes}m`} · {d.problems.length} problems ({d.problems.map((_, i) => label(i)).join(", ")}) ·
               {" "}{handles.length} pre-registered · starts {!Number.isNaN(fromZoneInput(d.startsAt)) ? when(startIso(d.startsAt)) : "—"} · ends {!Number.isNaN(fromZoneInput(d.startsAt)) ? when(new Date(fromZoneInput(d.startsAt) + duration * 1000).toISOString()) : "—"}
             </div>
             {issues.length > 0 && <div className="notice warn"><ul className="small" style={{ margin: 0 }}>{issues.map((i) => <li key={i}>{i}</li>)}</ul></div>}

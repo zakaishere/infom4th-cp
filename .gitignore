@@ -19,10 +19,16 @@ dist/
 draft/
 # Problem banks hold private tests and solutions. Only the duel bank is tracked, because the
 # backend installs it by itself (backend/src/main/resources/seed/duel-problems.json.gz).
+# The TD bank is NOT tracked: build it locally and load it through Problem lab > Bulk import
+# (see examples/td-problems/README.md).
 examples/*
 !examples/duel-problems/
+!examples/td-problems/
 examples/duel-problems/problem-bank.import.json*
+examples/td-problems/td[0-9]*/
+examples/td-problems/problem-bank.import.json*
 backend/src/main/resources/seed/*.json
+backend/src/main/resources/seed/td-problems.json.gz
 
 # Language documentation installed by frontend/scripts/install-docs.mjs (large, downloaded).
 frontend/public/refdocs/

@@ -89,19 +89,24 @@ export default function PracticeSet() {
         </div>
         {published.length === 0 ? <Empty>Nothing published yet.</Empty> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Problem</th><th>Difficulty</th><th>Topics</th><th className="right">Solved by</th><th className="right">Acceptance</th><th>Visibility</th><th /></tr></thead>
+            <thead><tr><th>Problem</th><th>Difficulty</th><th>Section</th><th>Topics</th><th className="right">Solved by</th><th className="right">Acceptance</th><th>Visibility</th><th /></tr></thead>
             <tbody>{shown.map((p) => {
               const rate = acceptance(p);
               return (
                 <tr key={p.problem_id} className={p.hidden ? "hidden-row" : ""}>
                   <td><strong>{p.title}</strong><div className="small muted mono">{p.slug}</div></td>
                   <td><DifficultyPill value={p.difficulty} /></td>
+                  <td><select value={p.td_number ?? ""} disabled={busy} style={{ width: "auto" }} title="Practice list, or a TD of the academic section"
+                    onChange={(e) => save(p, { td: e.target.value ? Number(e.target.value) : null, tdPosition: p.td_position }, e.target.value ? "Moved to TD " + e.target.value : "Moved to the practice list")}>
+                    <option value="">Practice</option>
+                    {Array.from({ length: Math.max(12, p.td_number ?? 0) }, (_, i) => <option key={i + 1} value={i + 1}>TD {i + 1}</option>)}
+                  </select></td>
                   <td style={{ minWidth: 240 }}><TagEditor tags={p.tags} suggestions={suggestions} onSave={(next) => save(p, { tags: next }, "Topics saved")} /></td>
                   <td className="right mono">{p.solved_by}<span className="small muted"> / {p.tried_by}</span></td>
                   <td className="right mono">{rate == null ? "—" : rate + "%"}</td>
                   <td>{p.hidden ? <span className="badge neutral">Hidden</span> : <span className="badge ok">Public</span>}</td>
                   <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
-                    {!p.hidden && <a className="btn small ghost" href={"#/practice/" + p.id}>Open</a>}
+                    {!p.hidden && <a className="btn small ghost" href={(p.td_number ? "#/td/" : "#/practice/") + p.id}>Open</a>}
                     <button className="small" disabled={busy} onClick={() => save(p, { hidden: !p.hidden, reason: p.hidden ? "Shown again" : "Hidden from practice" }, p.hidden ? "Visible in practice again" : "Hidden from practice")}>{p.hidden ? "Show" : "Hide"}</button>
                   </div></td>
                 </tr>
@@ -109,7 +114,7 @@ export default function PracticeSet() {
             })}</tbody>
           </table></div>
         )}
-        <span className="small muted">Topics appear as filters on the Practice page (up to 8 per problem). Press Enter to add one. Hidden problems keep their statistics.</span>
+        <span className="small muted">Topics appear as filters on the Practice page (up to 8 per problem). Press Enter to add one. Hidden problems keep their statistics. Problems in a TD are listed on the TD page (academic section) instead of Practice.</span>
       </section>
     </div>
   );
