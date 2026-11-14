@@ -213,7 +213,17 @@ back to Practice). `POST /api/lab/problems/{version}/publish-practice` also acce
 exercises are a local bank (`examples/td-problems`, not committed): load it through Bulk import, or place it at
 `seed/td-problems.json.gz` before building and the backend installs it like the duel bank. `CP_SEED_TD_PROBLEMS=false` turns it off.
 
-## Communications and operations
+Missions (V28). A mission is a set of practice problems (a TP) with points per problem. `GET /api/missions` lists them with the
+caller's score; `GET /api/missions/{slug}` returns the problems with the caller's best tests, points and attempts, plus the
+leaderboard; `GET /api/missions/{slug}/card/{handle}` is a participant's score card. Score of a problem = weight x tests passed
+by the best submission / total tests (mission submissions are judged on every test, not stopped at the first failure); attempts
+never cost points. Only real practice submissions made while the mission is open count, and staff are not ranked. Ranking:
+points, fewer attempts, earlier. Problems join a mission when published to Practice with
+`{"mission":{"slug","title","description","position","weight"}}` (Bulk import does it from the bank) and are then kept off the
+Practice list. `PATCH /api/manage/missions/{slug}` (organizer): `open` true/false, `restart` true, `title`, `description`,
+`weights` `{problemId: points}`.
+
+$1
 
 | Method | Route | Body / access |
 | --- | --- | --- |

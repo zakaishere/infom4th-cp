@@ -40,7 +40,7 @@ public class PracticeService {
 
     public List<Map<String,Object>> catalog(Actor actor) {
         return plain(db.jdbc.queryForList(RESULTS+"SELECT "+COLUMNS+"FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id "
-                +"JOIN problems p ON p.id=pp.problem_id WHERE NOT pp.hidden AND pp.td_number IS NULL ORDER BY pp.published_at DESC LIMIT 1000",actor.id()));
+                +"JOIN problems p ON p.id=pp.problem_id WHERE NOT pp.hidden AND pp.td_number IS NULL AND NOT EXISTS(SELECT 1 FROM mission_problems mp WHERE mp.problem_id=pp.problem_id) ORDER BY pp.published_at DESC LIMIT 1000",actor.id()));
     }
 
     /** The academic section: TD problems, by TD number then position inside the TD. */
@@ -67,7 +67,7 @@ public class PracticeService {
     }
 
     public List<String> allTags() {
-        return db.jdbc.queryForList("SELECT DISTINCT unnest(tags) AS tag FROM practice_publications WHERE NOT hidden AND td_number IS NULL ORDER BY 1",String.class);
+        return db.jdbc.queryForList("SELECT DISTINCT unnest(tags) AS tag FROM practice_publications WHERE NOT hidden AND td_number IS NULL AND NOT EXISTS(SELECT 1 FROM mission_problems mp WHERE mp.problem_id=practice_publications.problem_id) ORDER BY 1",String.class);
     }
 
     @Transactional

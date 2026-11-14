@@ -11,6 +11,8 @@ export type BankProblem = {
   functionSignature?: ObjectValue;
   /** TD problems: the TD and position they take in the academic section when published, and their topics. */
   td?: { number: number; position: number }; tags?: string[];
+  /** Mission problems: the mission (created on first import), their order and points. */
+  mission?: { slug: string; title: string; description?: string; position: number; weight: number };
 };
 type ObjectValue = Record<string, unknown>;
 const bytes = (text: string) => new TextEncoder().encode(text).length;
@@ -161,7 +163,7 @@ export async function importProblem(
   check();
   if (mode === "publish" && current.status !== "PUBLISHED") {
     update({ message: "Publishing to Practice", versionId: id });
-    await transport.action(id, "publish-practice", problem.td ? { td: problem.td, tags: problem.tags ?? [] } : undefined);
+    await transport.action(id, "publish-practice", problem.td || problem.mission ? { td: problem.td, mission: problem.mission, tags: problem.tags ?? [] } : undefined);
   }
   // A version can already be PUBLISHED through practice; adding it to the duel pool is idempotent.
   if (mode === "duel") {

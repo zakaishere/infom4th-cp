@@ -27,6 +27,9 @@ examples/*
 examples/duel-problems/problem-bank.import.json*
 examples/td-problems/td[0-9]*/
 examples/td-problems/problem-bank.import.json*
+!examples/python-missions/
+examples/python-missions/py-*/
+examples/python-missions/problem-bank.import.json*
 backend/src/main/resources/seed/*.json
 backend/src/main/resources/seed/td-problems.json.gz
 
