@@ -2,6 +2,7 @@ package com.cpplatform.competition;
 
 import com.cpplatform.common.*;
 import com.cpplatform.identity.*;
+import com.cpplatform.laboratory.LaboratoryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,8 +20,8 @@ import java.util.*;
  */
 @Service
 public class MissionService {
-    private final Database db;private final Permissions access;
-    public MissionService(Database db,Permissions access){this.db=db;this.access=access;}
+    private final Database db;private final Permissions access;private final LaboratoryService lab;
+    public MissionService(Database db,Permissions access,LaboratoryService lab){this.db=db;this.access=access;this.lab=lab;}
 
     /** Every counted submission of the mission with its latest completed verdict (null while queued). */
     private static final String SUBMISSIONS="SELECT s.submitted_by AS user_id,u.handle,u.display_name,mp.problem_id,s.submitted_at,r.verdict,r.passed_tests,r.total_tests "
@@ -136,6 +137,61 @@ public class MissionService {
         result.put("mission",Map.of("slug",m.get("slug"),"title",m.get("title"),"totalPoints",problems.stream().mapToDouble(p->weight(p.get("weight"))).sum(),"participants",players.size()));
         result.put("card",card(player,problems));
         return result;
+    }
+
+    private static String slugify(String text) {
+        String slug=java.text.Normalizer.normalize(text.toLowerCase(),java.text.Normalizer.Form.NFD).replaceAll("[\\u0300-\\u036f]","").replaceAll("[^a-z0-9]+","-").replaceAll("^-+|-+$","");
+        return slug.length()>60?slug.substring(0,60).replaceAll("-+$",""):slug;
+    }
+
+    /** Organizer: a new, empty mission; problems are added afterwards. Returns its short name. */
+    @Transactional
+    public String create(Actor actor,Map<String,Object> body) {
+        access.organizer(actor);
+        String title=Api.text(body,"title",120),slug=slugify(title);
+        Api.require(slug.length()>=2,HttpStatus.BAD_REQUEST,"The title needs at least two letters or digits");
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM missions WHERE slug=?)",slug),HttpStatus.CONFLICT,"A mission with this title already exists");
+        UUID id=db.id("INSERT INTO missions(slug,title,description) VALUES (?,?,?) RETURNING id",slug,title,Api.optional(body,"description","",4000));
+        db.audit(actor.id(),"MISSION_CREATE","mission",id,title);
+        return slug;
+    }
+
+    /** Problems that can join a mission: reviewed-and-validated or approved, not already in Practice, a TD or a mission. */
+    public List<Map<String,Object>> candidates(Actor actor) {
+        access.organizer(actor);
+        return db.jdbc.queryForList("SELECT v.id AS version_id,v.title,p.slug,v.difficulty,v.status FROM problem_versions v JOIN problems p ON p.id=v.problem_id "
+                +"WHERE v.status IN ('READY_FOR_REVIEW','APPROVED','PUBLISHED') AND p.archived_at IS NULL "
+                +"AND NOT EXISTS(SELECT 1 FROM practice_publications pp WHERE pp.problem_id=v.problem_id) AND NOT EXISTS(SELECT 1 FROM mission_problems mp WHERE mp.problem_id=v.problem_id) "
+                +"ORDER BY v.created_at DESC,v.title LIMIT 500");
+    }
+
+    /** Organizer: adds problems with their points. One still ready for review is approved on the way (its validation must have passed). */
+    @Transactional
+    public void addProblems(Actor actor,String slug,Map<String,Object> body) {
+        access.organizer(actor);
+        var m=mission(slug);UUID id=(UUID)m.get("id");
+        Api.require(body.get("items") instanceof List<?> items && !items.isEmpty() && items.size()<=100,HttpStatus.BAD_REQUEST,"Choose between 1 and 100 problems");
+        int position=((Number)db.one("SELECT coalesce(max(position),0) AS n FROM mission_problems WHERE mission_id=?",id).get("n")).intValue();
+        for(var raw:(List<?>)body.get("items")) {
+            Api.require(raw instanceof Map<?,?>,HttpStatus.BAD_REQUEST,"Invalid problem entry");
+            var item=(Map<?,?>)raw;UUID version=Api.uuid(item.get("version"));
+            double weight=item.get("weight") instanceof Number n?n.doubleValue():10;
+            Api.require(weight>0 && weight<=1000,HttpStatus.BAD_REQUEST,"Points must be between 0 and 1000");
+            var v=db.one("SELECT status FROM problem_versions WHERE id=?",version);
+            if("READY_FOR_REVIEW".equals(v.get("status")))lab.approve(actor,version,"Approved when added to mission "+m.get("title"));
+            lab.publishPractice(actor,version,Map.of("mission",Map.of("slug",slug,"title",m.get("title"),"position",++position,"weight",weight)));
+        }
+        db.audit(actor.id(),"MISSION_ADD_PROBLEMS","mission",id,String.valueOf(((List<?>)body.get("items")).size())+" problems");
+    }
+
+    /** Organizer: takes a problem out of the mission and hides it, so it does not fall into the public Practice list. */
+    @Transactional
+    public void removeProblem(Actor actor,String slug,UUID problem) {
+        access.organizer(actor);
+        UUID id=(UUID)mission(slug).get("id");
+        Api.require(db.jdbc.update("DELETE FROM mission_problems WHERE mission_id=? AND problem_id=?",id,problem)==1,HttpStatus.NOT_FOUND,"This problem is not in the mission");
+        db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=?",problem);
+        db.audit(actor.id(),"MISSION_REMOVE_PROBLEM","problem",problem,slug);
     }
 
     /** Organizer: open or close the mission, restart its window, edit title and description, and set the points of each problem. */

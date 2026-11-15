@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { navigate, useAuth, useData, useToast } from "../app";
-import { patch } from "../api";
+import { del, patch, post } from "../api";
 import { Empty, ErrorBox, Loading, Ring, when } from "../ui";
 
 type Row = { problemId: string; version: string; title: string; weight: number; points: number; attempts: number; passed: number; total: number; solved: boolean; firstSolvedAt: string | null };
@@ -15,6 +15,15 @@ const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).repla
 export function MissionList() {
   const missions = useData<{ missions: Summary[] }>("/api/missions", 30000);
   const list = missions.data?.missions ?? [];
+  const { organizer } = useAuth();
+  const toast = useToast();
+  const [title, setTitle] = useState(""), [description, setDescription] = useState(""), [creating, setCreating] = useState(false);
+  const create = async () => {
+    setCreating(true);
+    try { const r = await post<{ slug: string }>("/api/manage/missions", { title, description }); navigate("/missions/" + r.slug); }
+    catch (e) { toast("error", e instanceof Error ? e.message : "Could not create the mission"); }
+    finally { setCreating(false); }
+  };
   return (
     <main className="page page-wide">
       <section className="practice-hero">
@@ -24,8 +33,19 @@ export function MissionList() {
           <p className="muted" style={{ margin: 0, maxWidth: 620 }}>The TP of each training session, as a mission. Every exercise is worth points: your score is the points of your best submission, so retrying never hurts. Finish with a score card to share.</p>
         </div>
       </section>
+      {organizer && (
+        <section className="card stack" style={{ marginBottom: "1rem" }}>
+          <div className="section-title"><h3>New mission</h3></div>
+          <div className="row" style={{ gap: "0.6rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label className="stack" style={{ gap: "0.2rem" }}><span className="small muted">Title</span><input value={title} placeholder="Python — TP3" onChange={(e) => setTitle(e.target.value)} /></label>
+            <label className="stack" style={{ gap: "0.2rem", flex: 1, minWidth: 220 }}><span className="small muted">Description (optional)</span><input value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+            <button className="primary" disabled={creating || title.trim().length < 2} onClick={() => void create()}>Create</button>
+          </div>
+          <span className="small muted">Then add problems to it: ones you imported and validated in the lab, with their points.</span>
+        </section>
+      )}
       <ErrorBox error={missions.error} />
-      {missions.loading ? <Loading /> : list.length === 0 ? <Empty>No mission yet. Organizers load one from Problem lab → Bulk import.</Empty> : (
+      {missions.loading ? <Loading /> : list.length === 0 ? <Empty>No mission yet.{organizer ? " Create one above." : ""}</Empty> : (
         <div className="mission-grid">
           {list.map((m) => (
             <a key={m.slug} className="card mission-tile" href={"#/missions/" + m.slug}>
@@ -49,11 +69,28 @@ export function MissionPage({ slug }: { slug: string }) {
   const { organizer } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const candidates = useData<{ candidates: { version_id: string; title: string; slug: string; difficulty: string; status: string }[] }>(organizer ? "/api/manage/missions/candidates" : null);
+  const [picked, setPicked] = useState<Record<string, boolean>>({}), [points, setPoints] = useState(10);
   const m = mission.data;
   if (mission.loading) return <Loading />;
   if (!m) return <main className="page"><ErrorBox error={mission.error} /><a href="#/missions">← Missions</a></main>;
   const me = m.me;
   const next = me.problems.find((p) => !p.solved);
+  const addPicked = async () => {
+    const items = Object.keys(picked).filter((k) => picked[k]).map((version) => ({ version, weight: points }));
+    if (!items.length) return;
+    setBusy(true);
+    try { await post("/api/manage/missions/" + slug + "/problems", { items }); toast("success", items.length + " problems added"); setPicked({}); await Promise.all([mission.reload(), candidates.reload()]); }
+    catch (e) { toast("error", e instanceof Error ? e.message : "Could not add the problems"); }
+    finally { setBusy(false); }
+  };
+  const remove = async (problemId: string, title: string) => {
+    if (!window.confirm("Remove “" + title + "” from the mission? It is hidden, not published to Practice.")) return;
+    setBusy(true);
+    try { await del("/api/manage/missions/" + slug + "/problems/" + problemId); toast("success", "Removed"); await Promise.all([mission.reload(), candidates.reload()]); }
+    catch (e) { toast("error", e instanceof Error ? e.message : "Could not remove the problem"); }
+    finally { setBusy(false); }
+  };
   const change = async (body: Record<string, unknown>, done: string) => {
     setBusy(true);
     try { await patch("/api/manage/missions/" + slug, body); toast("success", done); await mission.reload(); }
@@ -134,7 +171,34 @@ export function MissionPage({ slug }: { slug: string }) {
               : <button disabled={busy} onClick={() => change({ open: true }, "Mission reopened")}>Reopen</button>}
             <button className="ghost" disabled={busy} onClick={() => { if (window.confirm("Restart the mission now? Submissions made before now stop counting.")) change({ restart: true }, "Mission restarted"); }}>Restart for a new session</button>
           </div>
-          <span className="small muted">Points per exercise come from the bank file (Problem lab → Bulk import). To reweigh one, send <code>PATCH /api/manage/missions/{slug}</code> with <code>{"{\"weights\":{\"<problemId>\":12}}"}</code>.</span>
+          <div className="section-title"><h3>Exercises and points</h3></div>
+          {me.problems.length === 0 ? <span className="small muted">No exercise yet. Add some below.</span> : (
+            <table className="practice-table">
+              <tbody>{me.problems.map((p) => (
+                <tr key={p.problemId}>
+                  <td>{p.title}</td>
+                  <td className="right"><input type="number" min={1} max={1000} step="any" defaultValue={p.weight} disabled={busy} style={{ width: 90 }} aria-label={"Points for " + p.title}
+                    onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v <= 1000 && v !== p.weight) void change({ weights: { [p.problemId]: v } }, "Points updated"); }} /> pts</td>
+                  <td className="right"><button className="ghost small" disabled={busy} onClick={() => void remove(p.problemId, p.title)}>Remove</button></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+          <div className="section-title"><h3>Add problems</h3><span className="count">{candidates.data?.candidates.length ?? 0}</span></div>
+          {(candidates.data?.candidates.length ?? 0) === 0 ? <span className="small muted">No problem waiting. Import a bank in Problem lab → Bulk import with “Validate reference solutions”, then come back here: validated problems appear in this list.</span> : <>
+            <div className="stack" style={{ gap: "0.3rem", maxHeight: 280, overflow: "auto" }}>
+              {candidates.data!.candidates.map((c) => (
+                <label key={c.version_id} className="check"><input type="checkbox" checked={Boolean(picked[c.version_id])} onChange={(e) => setPicked({ ...picked, [c.version_id]: e.target.checked })} />
+                  {c.title} <span className="muted small mono">{c.slug} · {c.status === "READY_FOR_REVIEW" ? "ready for review" : c.status.toLowerCase()}</span></label>
+              ))}
+            </div>
+            <div className="row" style={{ gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+              <label className="small">Points each <input type="number" min={1} max={1000} value={points} style={{ width: 80 }} onChange={(e) => setPoints(Number(e.target.value) || 10)} /></label>
+              <button className="primary" disabled={busy || !Object.values(picked).some(Boolean)} onClick={() => void addPicked()}>Add {Object.values(picked).filter(Boolean).length} to the mission</button>
+              <button className="ghost" onClick={() => setPicked(Object.fromEntries(candidates.data!.candidates.map((c) => [c.version_id, true])))}>Select all</button>
+            </div>
+            <span className="small muted">A problem still “ready for review” is approved when added (its reference validation must have passed). Mission problems never appear on the public Practice page.</span>
+          </>}
         </section>
       )}
     </main>

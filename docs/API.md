@@ -221,7 +221,10 @@ never cost points. Only real practice submissions made while the mission is open
 points, fewer attempts, earlier. Problems join a mission when published to Practice with
 `{"mission":{"slug","title","description","position","weight"}}` (Bulk import does it from the bank) and are then kept off the
 Practice list. `PATCH /api/manage/missions/{slug}` (organizer): `open` true/false, `restart` true, `title`, `description`,
-`weights` `{problemId: points}`.
+`weights` `{problemId: points}`. Organizers also `POST /api/manage/missions` `{title, description}` (creates an empty mission),
+`GET /api/manage/missions/candidates` (validated or approved problems not yet in Practice, a TD or a mission),
+`POST /api/manage/missions/{slug}/problems` `{items:[{version, weight}]}` (approves a problem still ready for review, then adds it) and
+`DELETE /api/manage/missions/{slug}/problems/{problem}` (removes and hides it).
 
 $1
 
