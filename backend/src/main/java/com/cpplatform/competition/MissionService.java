@@ -184,6 +184,16 @@ public class MissionService {
         db.audit(actor.id(),"MISSION_ADD_PROBLEMS","mission",id,String.valueOf(((List<?>)body.get("items")).size())+" problems");
     }
 
+    /** Organizer: deletes the mission and hides its problems (they stay in the lab); scores are computed, so nothing else is lost. */
+    @Transactional
+    public void delete(Actor actor,String slug) {
+        access.organizer(actor);
+        UUID id=(UUID)mission(slug).get("id");
+        db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id IN (SELECT problem_id FROM mission_problems WHERE mission_id=?)",id);
+        db.jdbc.update("DELETE FROM missions WHERE id=?",id);
+        db.audit(actor.id(),"MISSION_DELETE","mission",id,slug);
+    }
+
     /** Organizer: takes a problem out of the mission and hides it, so it does not fall into the public Practice list. */
     @Transactional
     public void removeProblem(Actor actor,String slug,UUID problem) {

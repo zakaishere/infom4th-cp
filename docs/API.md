@@ -224,7 +224,7 @@ Practice list. `PATCH /api/manage/missions/{slug}` (organizer): `open` true/fals
 `weights` `{problemId: points}`. Organizers also `POST /api/manage/missions` `{title, description}` (creates an empty mission),
 `GET /api/manage/missions/candidates` (validated or approved problems not yet in Practice, a TD or a mission),
 `POST /api/manage/missions/{slug}/problems` `{items:[{version, weight}]}` (approves a problem still ready for review, then adds it) and
-`DELETE /api/manage/missions/{slug}/problems/{problem}` (removes and hides it).
+`DELETE /api/manage/missions/{slug}/problems/{problem}` (removes and hides it); `DELETE /api/manage/missions/{slug}` deletes the mission and hides its problems.
 
 $1
 

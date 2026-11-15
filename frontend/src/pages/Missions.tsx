@@ -91,6 +91,12 @@ export function MissionPage({ slug }: { slug: string }) {
     catch (e) { toast("error", e instanceof Error ? e.message : "Could not remove the problem"); }
     finally { setBusy(false); }
   };
+  const deleteMission = async () => {
+    if (!window.confirm("Delete the mission “" + (m?.title ?? slug) + "”? Its problems stay in the lab (hidden from Practice) and its scores disappear.")) return;
+    setBusy(true);
+    try { await del("/api/manage/missions/" + slug); toast("success", "Mission deleted"); navigate("/missions"); }
+    catch (e) { toast("error", e instanceof Error ? e.message : "Could not delete the mission"); setBusy(false); }
+  };
   const change = async (body: Record<string, unknown>, done: string) => {
     setBusy(true);
     try { await patch("/api/manage/missions/" + slug, body); toast("success", done); await mission.reload(); }
@@ -170,6 +176,7 @@ export function MissionPage({ slug }: { slug: string }) {
               ? <button disabled={busy} onClick={() => change({ open: false }, "Mission closed")}>Close the mission</button>
               : <button disabled={busy} onClick={() => change({ open: true }, "Mission reopened")}>Reopen</button>}
             <button className="ghost" disabled={busy} onClick={() => { if (window.confirm("Restart the mission now? Submissions made before now stop counting.")) change({ restart: true }, "Mission restarted"); }}>Restart for a new session</button>
+            <button className="ghost" disabled={busy} onClick={() => void deleteMission()}>Delete the mission</button>
           </div>
           <div className="section-title"><h3>Exercises and points</h3></div>
           {me.problems.length === 0 ? <span className="small muted">No exercise yet. Add some below.</span> : (
