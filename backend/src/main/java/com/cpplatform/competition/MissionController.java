@@ -24,6 +24,8 @@ public class MissionController {
     Object add(Authentication auth,@PathVariable String slug,@RequestBody Map<String,Object> body){missions.addProblems(Actor.of(auth),slug,body);return Map.of("ok",true);}
     @DeleteMapping("/api/manage/missions/{slug}/problems/{problem}")
     Object remove(Authentication auth,@PathVariable String slug,@PathVariable UUID problem){missions.removeProblem(Actor.of(auth),slug,problem);return Map.of("ok",true);}
+    @DeleteMapping("/api/manage/missions/{slug}")
+    Object delete(Authentication auth,@PathVariable String slug){missions.delete(Actor.of(auth),slug);return Map.of("ok",true);}
     @PatchMapping("/api/manage/missions/{slug}")
     Object update(Authentication auth,@PathVariable String slug,@RequestBody Map<String,Object> body){missions.update(Actor.of(auth),slug,body);return Map.of("ok",true);}
 }

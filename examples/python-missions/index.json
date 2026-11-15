@@ -1,52 +1,52 @@
 [
   {
-    "slug": "py-tp2-1a-operations",
-    "title": "Ex 1a · Opérations de base",
+    "slug": "tp2-1a-basic-operations",
+    "title": "Ex 1a · Basic operations",
     "weight": 5
   },
   {
-    "slug": "py-tp2-1b-cercle",
-    "title": "Ex 1b · Surface d'un cercle",
+    "slug": "tp2-1b-circle-area",
+    "title": "Ex 1b · Area of a circle",
     "weight": 5
   },
   {
-    "slug": "py-tp2-2-moyenne",
-    "title": "Ex 2 · Moyenne de trois notes",
+    "slug": "tp2-2-average-grade",
+    "title": "Ex 2 · Average of three grades",
     "weight": 8
   },
   {
-    "slug": "py-tp2-3-pair-impair",
-    "title": "Ex 3 · Pair ou impair",
+    "slug": "tp2-3-even-or-odd",
+    "title": "Ex 3 · Even or odd",
     "weight": 8
   },
   {
-    "slug": "py-tp2-4-duree",
-    "title": "Ex 4 · Convertir une durée",
+    "slug": "tp2-4-convert-duration",
+    "title": "Ex 4 · Convert a duration",
     "weight": 10
   },
   {
-    "slug": "py-tp2-5-maximum",
-    "title": "Ex 5 · Le plus grand de trois nombres",
+    "slug": "tp2-5-largest-of-three",
+    "title": "Ex 5 · Largest of three numbers",
     "weight": 10
   },
   {
-    "slug": "py-tp2-6-reduction",
-    "title": "Ex 6 · Réduction sur les achats",
+    "slug": "tp2-6-purchase-discount",
+    "title": "Ex 6 · Purchase discount",
     "weight": 14
   },
   {
-    "slug": "py-tp2-7-bissextile",
-    "title": "Ex 7 · Année bissextile",
+    "slug": "tp2-7-leap-year",
+    "title": "Ex 7 · Leap year",
     "weight": 12
   },
   {
-    "slug": "py-tp2-8-compte-a-rebours",
-    "title": "Ex 8 · Compte à rebours",
+    "slug": "tp2-8-countdown",
+    "title": "Ex 8 · Countdown",
     "weight": 14
   },
   {
-    "slug": "py-tp2-9-nombre-secret",
-    "title": "Ex 9 · Deviner le nombre secret",
+    "slug": "tp2-9-secret-number",
+    "title": "Ex 9 · Guess the secret number",
     "weight": 14
   }
 ]
