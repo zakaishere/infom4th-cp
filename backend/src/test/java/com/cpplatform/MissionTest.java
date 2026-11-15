@@ -122,4 +122,41 @@ class MissionTest {
         attempt(a,second,"ACCEPTED",2);
         assertEquals(80.0,((Number)row(missions.detail(a,"python-test"),handle(a)).get("points")).doubleValue());
     }
+
+    /** A validated problem waiting for review: the state a bulk import in "validate" mode leaves. */
+    static UUID reviewable() {
+        UUID version=lab.create(admin,Map.of("slug","review-"+UUID.randomUUID(),"title","Review me","statement","Add two integers","languages",List.of("CPP")));
+        lab.tests(admin,version,List.of(Map.of("input","2 3","expected","5","sample",true),Map.of("input","4 5","expected","9","sample",false)));
+        lab.reference(admin,version,Map.of("label","Correct","language","CPP","sourceCode","int main() {}","expectedVerdict","ACCEPTED"));
+        UUID validation=lab.validate(admin,version);
+        verdict(db.id("SELECT s.id FROM submissions s WHERE s.validation_id=?",validation),"ACCEPTED",2);
+        judge.finishValidations();
+        return version;
+    }
+
+    @Test void organizersCreateMissionsAndAddReviewedProblems() {
+        assertThrows(ResponseStatusException.class,()->missions.create(user(false),Map.of("title","Nope")));
+        String slug=missions.create(admin,Map.of("title","Mon TP é Python","description","Session 3"));
+        assertEquals("mon-tp-e-python",slug);
+        assertThrows(ResponseStatusException.class,()->missions.create(admin,Map.of("title","Mon TP é Python")));
+        UUID one=reviewable(),two=reviewable();
+        var candidates=missions.candidates(admin);
+        assertTrue(candidates.stream().anyMatch(c->one.equals(c.get("version_id"))),"a problem ready for review can be added");
+        assertThrows(ResponseStatusException.class,()->missions.candidates(user(false)));
+
+        missions.addProblems(admin,slug,Map.of("items",List.of(Map.of("version",one.toString(),"weight",30),Map.of("version",two.toString(),"weight",70))));
+        assertEquals("PUBLISHED",db.one("SELECT status FROM problem_versions WHERE id=?",one).get("status"),"approved on the way");
+        assertTrue(missions.candidates(admin).stream().noneMatch(c->one.equals(c.get("version_id"))));
+        assertTrue(practice.catalog(admin).stream().noneMatch(c->one.equals(c.get("id"))),"never visible in public Practice");
+        var detail=missions.detail(admin,slug);
+        assertEquals(100.0,((Number)detail.get("totalPoints")).doubleValue());
+        var problems=(List<Map<String,Object>>)((Map<String,Object>)detail.get("me")).get("problems");
+        assertEquals(2,problems.size());assertEquals(one,problems.get(0).get("version"),"added in the order given");
+
+        UUID problem=(UUID)problems.get(1).get("problemId");
+        assertThrows(ResponseStatusException.class,()->missions.removeProblem(user(false),slug,problem));
+        missions.removeProblem(admin,slug,problem);
+        assertEquals(30.0,((Number)missions.detail(admin,slug).get("totalPoints")).doubleValue());
+        assertTrue(practice.catalog(admin).stream().noneMatch(c->two.equals(c.get("id"))),"a removed problem is hidden, not leaked to Practice");
+    }
 }
