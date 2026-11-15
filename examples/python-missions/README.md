@@ -8,7 +8,7 @@ node examples/python-missions/generate.mjs
 node scripts/package-problem-bank.mjs examples/python-missions examples/python-missions/problem-bank.import.json
 ```
 
-Load `problem-bank.import.json.gz` through **Problem lab -> Bulk import** with "Validate, approve and publish to Practice".
-The mission is created by the first import and the problems join it with their points; they do not appear in Practice.
-Players open **Missions** in the menu. Folders and the bank file are not committed (git ignores them).
+Load `problem-bank.import.json.gz` through **Problem lab -> Bulk import**: choose "Validate, approve and publish", then
+"Publish to" -> "A mission" (or keep "As named in the file"). The **Goes to** column shows where every problem lands before you click Import.
+The mission is created by the first import; its problems never appear in Practice. Players open **Missions** in the menu. Folders and the bank file are not committed (git ignores them).
 For the next TP, copy `generate.mjs`, change the problems and the mission `slug`/`title`.
