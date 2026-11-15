@@ -12,6 +12,9 @@ const transport: ImportTransport = {
   wait: () => new Promise(resolve => setTimeout(resolve, 2000)),
 };
 
+type Dest = "file" | "practice" | "td" | "mission";
+const slugify = (text: string) => text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+
 /** Bulk import for the Problem lab, or (duel) straight into the duel problem pool. */
 export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   const { organizer } = useAuth();
@@ -19,6 +22,20 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   const [mode, setMode] = useState<ImportMode>(duel && organizer ? "duel" : "validate");
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false), [reading, setReading] = useState(false);
+  // Where published problems go. "file" keeps what the bank names (a TD, a mission, or Practice).
+  const [dest, setDest] = useState<Dest>("file"), [tdNumber, setTdNumber] = useState(1), [missionTitle, setMissionTitle] = useState("");
+  const placed = (problem: BankProblem, index: number): BankProblem => {
+    const { td, mission, ...rest } = problem;
+    if (dest === "file") return problem;
+    if (dest === "practice") return rest;
+    if (dest === "td") return { ...rest, td: { number: tdNumber, position: td?.position ?? index + 1 } };
+    return { ...rest, mission: { slug: slugify(missionTitle), title: missionTitle.trim(), description: mission?.description ?? "", position: mission?.position ?? index + 1, weight: mission?.weight ?? 10 } };
+  };
+  const where = (problem: BankProblem, index: number) => {
+    const x = placed(problem, index);
+    return x.mission ? { label: "Mission: " + x.mission.title, tone: "info" } : x.td ? { label: "TD " + x.td.number, tone: "info" } : { label: "Public Practice", tone: "warn" };
+  };
+  const destinationOk = mode !== "publish" || dest !== "mission" || slugify(missionTitle).length >= 2;
   const stop = useRef(false), active = useRef(false), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; stop.current = true; }; }, []);
   useEffect(() => {
@@ -43,11 +60,12 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
     if (active.current || reading) return;
     active.current = true; stop.current = false; setBusy(true); setError(null);
     try {
-      for (const row of rows.filter(r => r.selected && r.state !== "done" && r.state !== "skipped")) {
+      for (const [index, row] of rows.entries()) {
+        if (!row.selected || row.state === "done" || row.state === "skipped") continue;
         if (stop.current) break;
         update(row.problem.slug, { state: "running" });
         try {
-          const outcome = await importProblem(row.problem, mode, transport, (value: ImportUpdate) => {
+          const outcome = await importProblem(placed(row.problem, index), mode, transport, (value: ImportUpdate) => {
             update(row.problem.slug, { ...value, ownedAttempt: true });
           }, () => stop.current, row.ownedAttempt ? row.versionId : undefined);
           update(row.problem.slug, { state: outcome });
@@ -74,10 +92,24 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
             <option value="draft">Save drafts only</option>
             <option value="validate">Validate reference solutions</option>
             {organizer && !duel && <option value="approve">Validate and approve for contests</option>}
-            {organizer && !duel && <option value="publish">Validate, approve and publish to Practice</option>}
+            {organizer && !duel && <option value="publish">Validate, approve and publish (choose where below)</option>}
             {organizer && duel && <option value="duel">Validate, approve and add to Duels</option>}
           </select>
         </Field>
+        {mode === "publish" && !duel && <>
+          <Field label="Publish to" hint="Mission and TD problems never appear in the public Practice page. Only 'Public Practice' does.">
+            <select disabled={busy || reading} value={dest} onChange={e => setDest(e.target.value as Dest)}>
+              <option value="file">As named in the file (see the Goes to column)</option>
+              <option value="practice">Public Practice page (everyone signed in sees them)</option>
+              <option value="td">A TD (academic section)</option>
+              <option value="mission">A mission (scored TP)</option>
+            </select>
+          </Field>
+          {dest === "td" && <Field label="TD number"><input type="number" min={1} max={99} disabled={busy || reading} value={tdNumber} onChange={e => setTdNumber(Math.max(1, Math.min(99, Number(e.target.value) || 1)))} /></Field>}
+          {dest === "mission" && <Field label="Mission title" hint="A new mission is created with this title; typing the title of an existing mission adds the problems to it. Points default to 10 per problem unless the file sets them.">
+            <input value={missionTitle} disabled={busy || reading} placeholder="Python — TP3" onChange={e => setMissionTitle(e.target.value)} />
+          </Field>}
+        </>}
         <p className="small muted">Existing slugs are skipped. Validation runs one problem at a time on your internal judge; all allowed languages need a verified online worker. Failed problems remain in the lab for review.</p>
         <p className="small muted">Keep this page open while importing. Stop pauses further steps; an in-flight save or judge job may finish. Retry continues saved versions from this page. Reopening a bank skips previously imported slugs.</p>
         <ErrorBox error={error} />
@@ -85,18 +117,19 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
           <div className="row-between"><strong>{rows.length} problems · {rows.reduce((n, r) => n + r.problem.tests.length, 0)} tests · {samples} public samples</strong>
             <label className="check small"><input type="checkbox" disabled={busy} checked={rows.every(r => r.selected)} onChange={e => setRows(old => old.map(r => ({ ...r, selected: e.target.checked })))} />Select all</label></div>
           <div className="row">
-            <button className="primary" disabled={busy || reading || pending.length === 0} onClick={() => void run()}>{busy ? "Importing…" : rows.some(r => r.state === "error") ? `Retry / import ${pending.length} problems` : `Import ${pending.length} problems`}</button>
+            <button className="primary" disabled={busy || reading || pending.length === 0 || !destinationOk} onClick={() => void run()}>{busy ? "Importing…" : rows.some(r => r.state === "error") ? `Retry / import ${pending.length} problems` : `Import ${pending.length} problems`}</button>
             {busy && <button onClick={() => { stop.current = true; }}>Stop</button>}
             <span className="small muted" role="status" aria-live="polite">{rows.filter(r => r.state === "done").length} completed · {rows.filter(r => r.state === "skipped").length} skipped · {rows.filter(r => r.state === "error").length} need attention</span>
           </div>
         </>}
       </section>
       {rows.length > 0 && <div className="card table-wrap"><table>
-        <thead><tr><th>Select</th><th>Problem</th><th>Tests</th><th>Status</th><th /></tr></thead>
-        <tbody>{rows.map(r => <tr key={r.problem.slug}>
+        <thead><tr><th>Select</th><th>Problem</th><th>Tests</th>{!duel && <th>Goes to</th>}<th>Status</th><th /></tr></thead>
+        <tbody>{rows.map((r, index) => <tr key={r.problem.slug}>
           <td><input type="checkbox" aria-label={"Import " + r.problem.title} disabled={busy || r.state === "done" || r.state === "skipped"} checked={r.selected} onChange={e => update(r.problem.slug, { selected: e.target.checked })} /></td>
           <td><strong>{r.problem.title}</strong><div className="small muted mono">{r.problem.slug} · {r.problem.reference.language}</div></td>
           <td>{r.problem.tests.length}</td>
+          {!duel && <td>{mode === "publish" ? (() => { const w = where(r.problem, index); return <Badge tone={w.tone}>{w.label}</Badge>; })() : <span className="small muted">Lab only</span>}</td>}
           <td><Badge tone={r.state === "error" ? "bad" : r.state === "done" ? "ok" : r.state === "running" ? "info" : "neutral"}>{r.state}</Badge><div className="small" style={{ maxWidth: 420 }}>{r.message}</div></td>
           <td>{r.versionId && <a href={"#/admin/problems/" + r.versionId} target="_blank" rel="noreferrer" className="btn small">Open</a>}</td>
         </tr>)}</tbody>
