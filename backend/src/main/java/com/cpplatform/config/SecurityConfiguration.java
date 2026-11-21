@@ -34,7 +34,7 @@ public class SecurityConfiguration {
                     .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                     .requestMatchers("/actuator/health","/actuator/health/**").permitAll()
                     .requestMatchers("/api/time").permitAll()
-                    .requestMatchers("/api/auth/register","/api/auth/login","/api/auth/refresh","/api/auth/forgot-password","/api/auth/reset-password").permitAll()
+                    .requestMatchers("/api/auth/config","/api/auth/register","/api/auth/login","/api/auth/infom4th","/api/auth/refresh","/api/auth/forgot-password","/api/auth/reset-password").permitAll()
                     .requestMatchers("/internal/judge/**").hasRole("WORKER")
                     .requestMatchers("/api/**").authenticated().anyRequest().denyAll())
                 .exceptionHandling(e->e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
@@ -44,7 +44,11 @@ public class SecurityConfiguration {
         FilterRegistrationBean<BearerFilter> registration=new FilterRegistrationBean<>(filter);registration.setEnabled(false);return registration;
     }
     @Bean ApplicationRunner bootstrap(AuthService auth,@Value("${cp.bootstrap.email:}") String email,
-                                     @Value("${cp.bootstrap.password:}") String password) {
-        return args->{if(!email.isBlank()) auth.bootstrap(email,password);};
+                                     @Value("${cp.bootstrap.password:}") String password,
+                                     @Value("${cp.bootstrap.sub:}") String sub) {
+        return args->{
+            if(!email.isBlank()) auth.bootstrap(email,password);
+            if(!sub.isBlank()) auth.bootstrapDelegatedAdmin(sub);
+        };
     }
 }

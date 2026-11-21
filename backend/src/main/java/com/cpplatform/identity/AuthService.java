@@ -64,6 +64,84 @@ public class AuthService {
         UUID user=(UUID)users.get(0).get("id");
         return issue(user,UUID.randomUUID());
     }
+
+    /** Sign in a verified InfoM4th identity into CP's existing opaque session model.
+     *  The user stays in this database; the account is found/created by idp_subject,
+     *  then AuthService.issue() produces the same session map as a password login. */
+    @Transactional
+    public Map<String,Object> loginDelegated(InfoM4thAuthService.Identity id) {
+        Api.require(id!=null && id.sub()!=null && !id.sub().isBlank(), HttpStatus.UNAUTHORIZED,"Invalid identity");
+        var rows=db.jdbc.queryForList("SELECT id,status FROM users WHERE idp_subject=?",id.sub());
+        UUID user; boolean created=false;
+        if(rows.isEmpty()) {
+            String handle=uniqueHandle(id.sub());
+            String mail=uniqueEmail(id.email(),handle);
+            String display=firstNonBlank(id.name(),id.username(),handle);
+            Timestamp verified=id.emailVerified()?Timestamp.from(Instant.now()):null;
+            user=db.id("INSERT INTO users(email,handle,display_name,password_hash,idp_subject,email_verified_at) VALUES (?,?,?,?,?,?) RETURNING id",
+                    mail,handle,display.substring(0,Math.min(100,display.length())),
+                    passwords.encode(Tokens.random()),id.sub(),verified);
+            db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'PARTICIPANT')",user);
+            created=true;
+        } else {
+            user=(UUID)rows.get(0).get("id");
+            if(!"ACTIVE".equals(rows.get(0).get("status")))
+                throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"Account is not active");
+        }
+        db.audit(user,created?"DELEGATED_REGISTER":"DELEGATED_LOGIN","user",user,null);
+        return issue(user,UUID.randomUUID());
+    }
+
+    /** Seed the first admin from an InfoM4th subject. When that identity later signs
+     *  in, loginDelegated() finds this row by idp_subject and keeps the admin roles. */
+    @Transactional
+    public void bootstrapDelegatedAdmin(String sub) {
+        if(sub==null || sub.isBlank()) return;
+        sub=sub.trim();
+        db.jdbc.queryForList("SELECT pg_advisory_xact_lock(81746291)");
+        if(db.exists("SELECT EXISTS(SELECT 1 FROM user_roles WHERE role_code='SUPER_ADMIN')")) return;
+        var rows=db.jdbc.queryForList("SELECT id FROM users WHERE idp_subject=?",sub);
+        UUID user;
+        if(rows.isEmpty()) {
+            String handle=uniqueHandle(sub);
+            String mail=uniqueEmail(null,handle);
+            user=db.id("INSERT INTO users(email,handle,display_name,password_hash,idp_subject) VALUES (?,?,?,?,?) RETURNING id",
+                    mail,handle,"Platform administrator",passwords.encode(Tokens.random()),sub);
+        } else user=(UUID)rows.get(0).get("id");
+        db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'SUPER_ADMIN') ON CONFLICT DO NOTHING",user);
+        db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'PARTICIPANT') ON CONFLICT DO NOTHING",user);
+        db.audit(user,"BOOTSTRAP_ADMIN_IDP","user",user,null);
+    }
+
+    private String uniqueHandle(String sub) {
+        String digits=sub.replace("-","").replaceAll("[^A-Za-z0-9]","");
+        if(digits.length()>20) digits=digits.substring(0,20);
+        if(digits.length()<3) digits=UUID.randomUUID().toString().replace("-","").substring(0,12);
+        String base="im4_"+digits; // 4 + <=20 = <=24 chars, matches [A-Za-z0-9_]{3,32}
+        String handle=base;
+        for(int i=2;i<1000;i++) {
+            if(!db.exists("SELECT EXISTS(SELECT 1 FROM users WHERE lower(handle)=lower(?))",handle)) return handle;
+            handle=(base+i).substring(0,Math.min(32,(base+i).length()));
+        }
+        return base;
+    }
+
+    private String uniqueEmail(String preferred,String handle) {
+        String base=(preferred==null || preferred.length()>200 || !preferred.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+"))
+                ? handle+"@idp.invalid" : preferred.toLowerCase(Locale.ROOT);
+        String candidate=base; int at=base.indexOf('@');
+        for(int i=2;i<1000;i++) {
+            if(!db.exists("SELECT EXISTS(SELECT 1 FROM users WHERE email=?)",candidate)) return candidate;
+            candidate=base.substring(0,at)+"+idp"+i+base.substring(at);
+        }
+        return "idp-"+Tokens.random().substring(0,12)+"@idp.invalid";
+    }
+
+    private static String firstNonBlank(String... values) {
+        for(String v:values) if(v!=null && !v.isBlank()) return v;
+        return "Member";
+    }
+
     /** Signed-in password change: requires the current password, ends every other session
      *  and returns a fresh session for this browser. */
     @Transactional

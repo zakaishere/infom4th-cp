@@ -70,6 +70,18 @@ cp:
   bootstrap:
     email: ${BOOTSTRAP_EMAIL:}
     password: ${BOOTSTRAP_PASSWORD:}
+    # Seed the first SUPER_ADMIN from an InfoM4th subject ('sub') instead of a local
+    # email/password. When that identity signs in it keeps its admin role.
+    sub: ${BOOTSTRAP_ADMIN_SUB:}
+  # Delegated sign-in with InfoM4th (server-to-server only; the browser never sees
+  # InfoM4th credentials). All values empty => the feature is inactive.
+  infom4th:
+    token-url: ${INFO_M4TH_TOKEN_URL:}
+    jwks-url: ${INFO_M4TH_JWKS_URL:}
+    issuer: ${INFO_M4TH_ISSUER:}
+    client-id: ${INFO_M4TH_CLIENT_ID:}
+    client-secret: ${INFO_M4TH_CLIENT_SECRET:}
+    timeout-seconds: ${INFO_M4TH_TIMEOUT_SECONDS:5}
   public-url: ${PUBLIC_URL:http://localhost:3000}
   # Contest dates and times are shown in this zone on every screen, whatever a laptop is set to.
   display-timezone: ${DISPLAY_TIMEZONE:UTC}

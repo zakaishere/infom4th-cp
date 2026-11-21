@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { acceptSession, api } from "../api";
 import { useAuth, useToast } from "../app";
 import { Field } from "../ui";
@@ -11,9 +11,16 @@ export default function AuthPage() {
   const [form, setForm] = useState({ email: "", password: "", handle: "", displayName: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [delegatedAuth, setDelegatedAuth] = useState(false);
   const { reload } = useAuth();
   const toast = useToast();
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value });
+
+  useEffect(() => {
+    api<{ delegatedAuth: boolean }>("GET", "/api/auth/config", { anonymous: true })
+      .then((cfg) => setDelegatedAuth(Boolean(cfg.delegatedAuth)))
+      .catch(() => { /* older backend: keep local login */ });
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,7 +29,10 @@ export default function AuthPage() {
     try {
       if (mode === "login" || mode === "register") {
         const body = mode === "login" ? { email: form.email, password: form.password } : form;
-        acceptSession(await api("POST", "/api/auth/" + mode, { body, anonymous: true }));
+        // When InfoM4th is the identity provider, credentials are verified there by
+        // the backend; the browser never talks to InfoM4th or sees its secret.
+        const path = delegatedAuth && mode === "login" ? "/api/auth/infom4th" : "/api/auth/" + mode;
+        acceptSession(await api("POST", path, { body, anonymous: true }));
         await reload();
       } else if (mode === "forgot") {
         const result = await api("POST", "/api/auth/forgot-password", { body: { email: form.email }, anonymous: true });
@@ -41,7 +51,10 @@ export default function AuthPage() {
     }
   }
 
-  const titles: Record<Mode, string> = { login: "Sign in", register: "Create account", forgot: "Reset password", reset: "Choose a new password" };
+  const titles: Record<Mode, string> = {
+    login: delegatedAuth ? "Sign in with InfoM4th" : "Sign in",
+    register: "Create account", forgot: "Reset password", reset: "Choose a new password",
+  };
   return (
     <div className="auth">
       <section className="auth-art">
@@ -77,7 +90,9 @@ export default function AuthPage() {
           )}
           <button className="primary" disabled={busy}>{busy ? "Please wait…" : titles[mode]}</button>
           <div className="row-between small">
-            {mode === "login" ? (
+            {delegatedAuth && mode === "login" ? (
+              <span>Use your InfoM4th email and password. Accounts and password resets are managed in InfoM4th.</span>
+            ) : mode === "login" ? (
               <>
                 <a href="#" onClick={(e) => { e.preventDefault(); setMode("register"); }}>Create an account</a>
                 <a href="#" onClick={(e) => { e.preventDefault(); setMode("forgot"); }}>Forgot password?</a>

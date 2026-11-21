@@ -9,8 +9,11 @@ import java.util.*;
 
 @RestController
 public class AuthController {
-    private final AuthService auth; private final RateLimits limits;
-    public AuthController(AuthService auth,RateLimits limits) {this.auth=auth;this.limits=limits;}
+    private final AuthService auth; private final RateLimits limits; private final InfoM4thAuthService idp;
+    public AuthController(AuthService auth,RateLimits limits,InfoM4thAuthService idp) {this.auth=auth;this.limits=limits;this.idp=idp;}
+    /** Public capability flag so the login screen can adapt without a rebuild. */
+    @GetMapping("/api/auth/config")
+    Object authConfig() { return Map.of("delegatedAuth", idp.enabled(), "provider", "InfoM4th"); }
     @PostMapping("/api/auth/register")
     @ResponseStatus(HttpStatus.CREATED)
     Object register(@RequestBody Map<String,Object> body,HttpServletRequest request) {
@@ -20,6 +23,16 @@ public class AuthController {
     Object login(@RequestBody Map<String,Object> body,HttpServletRequest request) {
         limits.check("login-ip:"+request.getRemoteAddr(),120,60);
         limits.check("login-user:"+AuthService.email(body),10,60);return auth.login(body);
+    }
+    /** Delegated sign-in: credentials are verified by InfoM4th; the browser never
+     *  sees InfoM4th. Returns CP's normal opaque session map, identical to /login. */
+    @PostMapping("/api/auth/infom4th")
+    Object loginInfom4th(@RequestBody Map<String,Object> body,HttpServletRequest request) {
+        limits.check("login-ip:"+request.getRemoteAddr(),120,60);
+        String email=AuthService.email(body);
+        limits.check("login-user:"+email,10,60);
+        InfoM4thAuthService.Identity identity=idp.exchangeAndVerify(email,Api.text(body,"password",200));
+        return auth.loginDelegated(identity);
     }
     @PostMapping("/api/auth/refresh")
     Object refresh(@RequestBody Map<String,Object> body,HttpServletRequest request) {
