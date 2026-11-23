@@ -151,6 +151,18 @@ textarea { resize: vertical; min-height: 80px; }
 label.field { display: flex; flex-direction: column; gap: 0.3rem; font-weight: 500; }
 label.field > span { font-size: 0.85rem; color: var(--muted); font-weight: 700; }
 label.field .hint { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+.password-field { display: flex; flex-direction: column; gap: 0.3rem; font-weight: 500; }
+.password-field > label { font-size: 0.85rem; color: var(--muted); font-weight: 700; }
+.password-field .hint { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+.password-field .input-wrap { position: relative; }
+.password-field .input-wrap input { padding-right: 2.75rem; }
+.password-field .toggle {
+  position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 2rem; height: 2rem; padding: 0;
+  background: transparent; border: 0; color: var(--muted); cursor: pointer;
+}
+.password-field .toggle:hover { color: var(--fg); }
 label.check { display: flex; gap: 0.5rem; align-items: center; }
 label.check input { width: auto; }
 .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 1rem; flex-wrap: wrap; }

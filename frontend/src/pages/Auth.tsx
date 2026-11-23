@@ -3,7 +3,71 @@ import { acceptSession, api } from "../api";
 import { useAuth, useToast } from "../app";
 import { Field } from "../ui";
 
+// Accounts and password resets for InfoM4th users live on the main website.
+const INFO_M4TH_SIGNUP_URL = "https://www.infom4th.com/login?mode=register";
+const INFO_M4TH_FORGOT_URL = "https://www.infom4th.com/login?reset=1";
+
 type Mode = "login" | "register" | "forgot" | "reset";
+
+function EyeIcon({ off }: { off?: boolean }) {
+  return off ? (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <path d="m1 1 22 22" />
+    </svg>
+  ) : (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function PasswordInput({
+  label,
+  hint,
+  id,
+  value,
+  onChange,
+  autoComplete,
+}: {
+  label: string;
+  hint?: string;
+  id: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  autoComplete: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="password-field">
+      <label htmlFor={id}>{label}</label>
+      <div className="input-wrap">
+        <input
+          id={id}
+          name="password"
+          type={show ? "text" : "password"}
+          required
+          autoComplete={autoComplete}
+          autoCapitalize="none"
+          spellCheck={false}
+          value={value}
+          onChange={onChange}
+        />
+        <button
+          type="button"
+          className="toggle"
+          aria-label={show ? "Hide password" : "Show password"}
+          aria-pressed={show}
+          onClick={() => setShow((v) => !v)}
+        >
+          <EyeIcon off={show} />
+        </button>
+      </div>
+      {hint && <small className="hint">{hint}</small>}
+    </div>
+  );
+}
 
 export default function AuthPage() {
   const resetToken = new URLSearchParams(window.location.search).get("token");
@@ -93,32 +157,47 @@ export default function AuthPage() {
           )}
           {mode !== "reset" && (
             <Field label={useDelegated ? "InfoM4th email" : "Email"}>
-              <input type="email" required autoComplete="email" value={form.email} onChange={set("email")} />
+              <input id="email" name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={form.email} onChange={set("email")} />
             </Field>
           )}
           {mode === "register" && (
             <>
-              <Field label="Handle" hint="Shown on standings. Letters, digits, underscore."><input required value={form.handle} onChange={set("handle")} maxLength={32} /></Field>
-              <Field label="Display name"><input required value={form.displayName} onChange={set("displayName")} maxLength={100} /></Field>
+              <Field label="Handle" hint="Shown on standings. Letters, digits, underscore."><input name="handle" required value={form.handle} onChange={set("handle")} maxLength={32} /></Field>
+              <Field label="Display name"><input name="name" required value={form.displayName} onChange={set("displayName")} maxLength={100} /></Field>
             </>
           )}
           {mode !== "forgot" && (
-            <Field label="Password" hint={mode === "login" ? undefined : "8–72 characters with an uppercase letter, a number and a symbol."}>
-              <input type="password" required autoComplete={mode === "login" ? "current-password" : "new-password"} value={form.password} onChange={set("password")} />
-            </Field>
+            <PasswordInput
+              id="password"
+              label="Password"
+              hint={mode === "login" ? undefined : "8–72 characters with an uppercase letter, a number and a symbol."}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              value={form.password}
+              onChange={set("password")}
+            />
           )}
           <button className="primary" disabled={busy}>{busy ? "Please wait…" : titles[mode]}</button>
           <div className="row-between small">
             {delegatedAuth && mode === "login" ? (
-              <>
-                {useDelegated && <span>Use your InfoM4th email and password. Accounts and password resets are managed in InfoM4th.</span>}
-                {nonInfoM4th && <span>Existing non InfoM4th accounts are created by an admin, not through public signup.</span>}
-                {nonInfoM4th && <a href="#" onClick={(e) => { e.preventDefault(); go("forgot"); }}>Forgot password?</a>}
-              </>
+              useDelegated ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  <span>Accounts and passwords are managed on the InfoM4th website.</span>
+                  <span>
+                    <a href={INFO_M4TH_SIGNUP_URL} target="_blank" rel="noopener noreferrer">Sign up on InfoM4th</a>
+                    {" · "}
+                    <a href={INFO_M4TH_FORGOT_URL} target="_blank" rel="noopener noreferrer">Forgot password?</a>
+                  </span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  <span>Existing non InfoM4th accounts are created by an admin, not through public signup.</span>
+                  <a href={INFO_M4TH_FORGOT_URL} target="_blank" rel="noopener noreferrer">Forgot your InfoM4th password?</a>
+                </div>
+              )
             ) : mode === "login" ? (
               <>
-                <a href="#" onClick={(e) => { e.preventDefault(); go("register"); }}>Create an account</a>
-                <a href="#" onClick={(e) => { e.preventDefault(); go("forgot"); }}>Forgot password?</a>
+                <a href={INFO_M4TH_SIGNUP_URL} target="_blank" rel="noopener noreferrer">Sign up on InfoM4th</a>
+                <a href={INFO_M4TH_FORGOT_URL} target="_blank" rel="noopener noreferrer">Forgot password?</a>
               </>
             ) : (
               <a href="#" onClick={(e) => { e.preventDefault(); go("login"); }}>Back to sign in</a>
