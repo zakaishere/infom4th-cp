@@ -202,6 +202,9 @@ tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, transparent);
 .auth-art h1 { font-size: 3rem; color: #fff; }
 .auth-form { display: flex; align-items: center; justify-content: center; padding: 2rem; }
 .auth-form .card { width: min(420px, 100%); }
+.auth-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; padding: 0.25rem; border: 1px solid var(--line); background: var(--bg); }
+.auth-switch button { font-size: 0.8rem; padding: 0.55rem 0.35rem; }
+.auth-switch button[aria-pressed="true"] { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
 @media (max-width: 900px) { .auth { grid-template-columns: 1fr; } .auth-art { display: none; } }
 
 /* Contest arena */

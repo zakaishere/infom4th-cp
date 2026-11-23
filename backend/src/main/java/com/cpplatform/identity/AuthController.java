@@ -14,9 +14,13 @@ public class AuthController {
     /** Public capability flag so the login screen can adapt without a rebuild. */
     @GetMapping("/api/auth/config")
     Object authConfig() { return Map.of("delegatedAuth", idp.enabled(), "provider", "InfoM4th"); }
+    /** Public registration is closed when InfoM4th is the identity provider.
+     *  Older CP accounts keep working, and admins create non InfoM4th accounts
+     *  through /api/admin/users/bulk. */
     @PostMapping("/api/auth/register")
     @ResponseStatus(HttpStatus.CREATED)
     Object register(@RequestBody Map<String,Object> body,HttpServletRequest request) {
+        Api.require(!idp.enabled(),HttpStatus.FORBIDDEN,"Public registration is disabled. Create an InfoM4th account on the website, or ask an admin to create a non InfoM4th account.");
         limits.check("register:"+request.getRemoteAddr(),250,3600);return auth.register(body);
     }
     @PostMapping("/api/auth/login")
