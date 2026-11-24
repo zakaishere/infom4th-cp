@@ -160,19 +160,12 @@ function statusText(status: number) {
 }
 
 export async function logout() {
-  let endSessionUrl: string | null = null;
   try {
-    const res = await api<{ ok: boolean; endSessionUrl?: string }>("POST", "/api/auth/logout", { body: {} });
-    if (res && typeof res.endSessionUrl === "string" && res.endSessionUrl) {
-      endSessionUrl = res.endSessionUrl;
-    }
+    await api<{ ok: boolean }>("POST", "/api/auth/logout", { body: {} });
   } catch {
     /* local state is cleared regardless */
   }
   notifySessionChange();
-  if (endSessionUrl) {
-    window.location.assign(endSessionUrl);
-  }
 }
 
 // ---------- Server clock ----------

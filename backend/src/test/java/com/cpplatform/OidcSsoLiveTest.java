@@ -115,7 +115,7 @@ class OidcSsoLiveTest {
                 .build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(403, noCsrfRes.statusCode(), "Expected CSRF 403 without X-XSRF-TOKEN, got: " + noCsrfRes.statusCode());
 
-        // 8. Logout WITH X-XSRF-TOKEN succeeds, invalidates CP_SESSION, and returns OIDC endSessionUrl
+        // 8. Logout WITH X-XSRF-TOKEN succeeds and invalidates only CP_SESSION (InfoM4th stays signed in)
         assertNotNull(xsrfCookie, "Missing XSRF-TOKEN cookie");
         String xsrfValue = xsrfCookie.substring("XSRF-TOKEN=".length());
         HttpResponse<String> logoutRes = http.send(HttpRequest.newBuilder(URI.create(base + "/api/auth/logout"))
@@ -125,7 +125,8 @@ class OidcSsoLiveTest {
                 .POST(HttpRequest.BodyPublishers.ofString("{}"))
                 .build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(200, logoutRes.statusCode(), logoutRes.body());
-        assertTrue(logoutRes.body().contains("/api/auth/oauth2/end-session"), logoutRes.body());
+        assertTrue(logoutRes.body().contains("\"ok\":true"), logoutRes.body());
+        assertFalse(logoutRes.body().contains("end-session"), logoutRes.body());
 
         // 9. Session is now dead (401 on /api/me)
         HttpResponse<String> deadRes = http.send(HttpRequest.newBuilder(URI.create(base + "/api/me"))

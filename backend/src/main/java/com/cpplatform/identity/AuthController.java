@@ -61,21 +61,11 @@ public class AuthController {
         if (body != null && body.get("refreshToken") instanceof String rt && !rt.isBlank()) {
             auth.logout(Actor.of(authentication), rt);
         }
-        String endSessionUrl = null;
         HttpSession session = request.getSession(false);
         if (session != null) {
-            Object idToken = session.getAttribute(OidcSupport.SESSION_ID_TOKEN);
-            if (idToken instanceof String token && !token.isBlank()) {
-                String origin = request.getScheme() + "://" + request.getServerName()
-                        + ((request.getServerPort() == 80 || request.getServerPort() == 443) ? "" : ":" + request.getServerPort()) + "/";
-                endSessionUrl = oidc.buildEndSessionUrl(token, origin);
-            }
             session.invalidate();
         }
-        Map<String,Object> res = new LinkedHashMap<>();
-        res.put("ok", true);
-        if (endSessionUrl != null) res.put("endSessionUrl", endSessionUrl);
-        return res;
+        return Map.of("ok", true);
     }
     @PostMapping("/api/auth/forgot-password")
     Object forgot(@RequestBody Map<String,Object> body,HttpServletRequest request) {
