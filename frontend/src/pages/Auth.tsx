@@ -97,8 +97,8 @@ export default function AuthPage() {
     setBusy(true);
     setError("");
     try {
-      await loginWithInfoM4th();
-      await reload();
+      const signedIn = await loginWithInfoM4th();
+      if (signedIn) await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sign-in failed");
     } finally {

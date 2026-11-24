@@ -60,92 +60,97 @@ export async function api<T = any>(method: string, path: string, options: Option
   return data as T;
 }
 
+let ssoAttemptActive = false;
+let pendingSso: { resolve: (signedIn: boolean) => void; reject: (err: Error) => void } | null = null;
+let ssoListenersMounted = false;
+
+function ensureSsoListeners() {
+  if (ssoListenersMounted || typeof window === "undefined") return;
+  ssoListenersMounted = true;
+
+  const handlePayload = (payload: { ok?: boolean; error?: string }) => {
+    ssoAttemptActive = false;
+    const pending = pendingSso;
+    pendingSso = null;
+    if (!payload.ok) {
+      const err = new Error(payload.error || "InfoM4th sign-in failed.");
+      if (pending) pending.reject(err);
+      return;
+    }
+    notifySessionChange();
+    if (pending) pending.resolve(true);
+  };
+
+  window.addEventListener("message", (event: MessageEvent) => {
+    if (event.origin !== window.location.origin) return;
+    if (event.data && typeof event.data === "object" && "ok" in event.data) {
+      handlePayload(event.data as { ok?: boolean; error?: string });
+    }
+  });
+
+  try {
+    const channel = new BroadcastChannel("cp-auth");
+    channel.onmessage = (event) => {
+      if (event.data && typeof event.data === "object" && "ok" in event.data) {
+        handlePayload(event.data as { ok?: boolean; error?: string });
+      }
+    };
+  } catch {
+    /* BroadcastChannel unavailable; postMessage + focus fallback below handles it */
+  }
+
+  window.addEventListener("focus", () => {
+    if (!ssoAttemptActive) return;
+    window.setTimeout(() => {
+      if (!ssoAttemptActive) return;
+      api<Me>("GET", "/api/me")
+        .then(() => {
+          ssoAttemptActive = false;
+          notifySessionChange();
+          const pending = pendingSso;
+          pendingSso = null;
+          if (pending) pending.resolve(true);
+        })
+        .catch(() => {
+          // Keep ssoAttemptActive + BroadcastChannel alive in case the popup is still open in the background.
+          const pending = pendingSso;
+          pendingSso = null;
+          if (pending) pending.resolve(false);
+        });
+    }, 350);
+  });
+}
+
 /** Opens InfoM4th OIDC sign-in in a popup window, falling back to full-page redirect if blocked. */
-export async function loginWithInfoM4th(): Promise<void> {
+export async function loginWithInfoM4th(): Promise<boolean> {
+  ensureSsoListeners();
   const popupUrl = "/oauth2/authorization/infom4th?popup=1";
   const fullUrl = "/oauth2/authorization/infom4th";
   if (window.matchMedia("(max-width: 768px)").matches) {
-    // Mobile / narrow screens: full-page redirect avoids tab-switching and in-app browser popup quirks.
     window.location.assign(fullUrl);
-    return;
+    return false;
   }
   const w = 500;
   const h = 660;
   const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - w) / 2));
   const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - h) / 2));
+  ssoAttemptActive = true;
   const popup = window.open(popupUrl, "infom4th-sso", `width=${w},height=${h},left=${left},top=${top},popup=yes`);
 
   if (!popup) {
     window.location.assign(fullUrl);
-    return;
+    return false;
   }
 
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const cleanup = () => {
-      settled = true;
-      window.removeEventListener("message", onMessage);
-      if (channel) channel.close();
-      clearInterval(poll);
-    };
-    const finish = (payload: { ok?: boolean; error?: string }) => {
-      if (settled) return;
-      cleanup();
-      if (!payload.ok) {
-        reject(new Error(payload.error || "InfoM4th sign-in failed."));
-        return;
-      }
-      notifySessionChange();
-      resolve();
-    };
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.data && typeof event.data === "object" && "ok" in event.data) {
-        finish(event.data as { ok?: boolean; error?: string });
-      }
-    };
-    window.addEventListener("message", onMessage);
+  try {
+    popup.focus();
+  } catch {
+    /* ignore cross-origin focus restrictions */
+  }
 
-    let channel: BroadcastChannel | null = null;
-    try {
-      channel = new BroadcastChannel("cp-auth");
-      channel.onmessage = (event) => {
-        if (event.data && typeof event.data === "object" && "ok" in event.data) {
-          finish(event.data as { ok?: boolean; error?: string });
-        }
-      };
-    } catch {
-      /* BroadcastChannel unavailable */
-    }
-
-    const poll = window.setInterval(() => {
-      // Wait until the popup is closed AND focus has returned to this window: if a browser
-      // isolates cross-origin popups, `popup.closed` can report true while the user is still
-      // actively typing in the popup (`!document.hasFocus()`).
-      if (popup.closed && document.hasFocus() && !settled) {
-        clearInterval(poll);
-        const confirm = (attempt: number) => {
-          if (settled) return;
-          api<Me>("GET", "/api/me")
-            .then(() => {
-              if (settled) return;
-              cleanup();
-              notifySessionChange();
-              resolve();
-            })
-            .catch(() => {
-              if (settled) return;
-              if (attempt < 3) {
-                window.setTimeout(() => confirm(attempt + 1), 350);
-                return;
-              }
-              cleanup();
-              reject(new Error("Sign-in window was closed."));
-            });
-        };
-        window.setTimeout(() => confirm(0), 250);
-      }
-    }, 400);
+  return new Promise<boolean>((resolve, reject) => {
+    if (pendingSso) pendingSso.resolve(false);
+    pendingSso = { resolve, reject };
   });
 }
 
