@@ -68,22 +68,24 @@ public class AuthService {
     }
 
     /** Resolve an OIDC-verified InfoM4th identity strictly by `idp_subject = sub`.
-     *  Delta-updates only InfoM4th-owned fields (email, display_name, email_verified_at)
-     *  when they actually changed; CP-owned fields (handle, bio, school, roles) stay untouched. */
+     *  Delta-updates only InfoM4th-owned fields (email, display_name, avatar_url, email_verified_at)
+     *  when they actually changed; upgrades placeholder `im4_<hex>` handles to preferred_username;
+     *  and ensures BOOTSTRAP_ADMIN_SUB always holds SUPER_ADMIN. */
     @Transactional
-    public UUID resolveOidcUser(String sub, String email, boolean emailVerified, String name, String preferredUsername) {
+    public UUID resolveOidcUser(String sub, String email, boolean emailVerified, String name, String preferredUsername, String picture, String bootstrapAdminSub) {
         Api.require(sub!=null && !sub.isBlank(), HttpStatus.UNAUTHORIZED, "Invalid identity");
-        var rows=db.jdbc.queryForList("SELECT id,status,email,display_name,email_verified_at FROM users WHERE idp_subject=?",sub);
+        var rows=db.jdbc.queryForList("SELECT id,status,email,handle,display_name,avatar_url,email_verified_at FROM users WHERE idp_subject=?",sub);
         UUID user; boolean created=false;
         String cleanEmail=(email!=null && email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) ? email.trim().toLowerCase(Locale.ROOT) : null;
+        String cleanPicture=safeAvatarUrl(picture);
         if(rows.isEmpty()) {
-            String handle=uniqueHandle(preferredUsername!=null && !preferredUsername.isBlank() ? preferredUsername : sub);
+            String handle=uniqueCleanHandle(preferredUsername, sub);
             String mail=uniqueEmail(cleanEmail,handle);
             String display=firstNonBlank(name,preferredUsername,handle);
             Timestamp verified=emailVerified?Timestamp.from(Instant.now()):null;
-            user=db.id("INSERT INTO users(email,handle,display_name,password_hash,idp_subject,email_verified_at) VALUES (?,?,?,?,?,?) RETURNING id",
+            user=db.id("INSERT INTO users(email,handle,display_name,avatar_url,password_hash,idp_subject,email_verified_at) VALUES (?,?,?,?,?,?,?) RETURNING id",
                     mail,handle,display.substring(0,Math.min(100,display.length())),
-                    null,sub,verified);
+                    cleanPicture,null,sub,verified);
             db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'PARTICIPANT')",user);
             created=true;
         } else {
@@ -98,14 +100,52 @@ public class AuthService {
                     && !db.exists("SELECT EXISTS(SELECT 1 FROM users WHERE email=? AND id<>?)",cleanEmail,user)) {
                 nextEmail=cleanEmail;
             }
-            boolean verifyNow=emailVerified && row.get("email_verified_at")==null;
-            if(!Objects.equals(nextDisplay,row.get("display_name")) || !Objects.equals(nextEmail,currentEmail) || verifyNow) {
-                db.jdbc.update("UPDATE users SET email=?,display_name=?,email_verified_at=coalesce(email_verified_at,?),updated_at=now() WHERE id=?",
-                        nextEmail,nextDisplay,verifyNow?Timestamp.from(Instant.now()):null,user);
+            String currentHandle=(String)row.get("handle");
+            String nextHandle=currentHandle;
+            if(currentHandle!=null && currentHandle.matches("im4_[0-9a-fA-F]{12,}") && preferredUsername!=null && !preferredUsername.isBlank()) {
+                nextHandle=uniqueCleanHandle(preferredUsername, sub);
             }
+            String currentAvatar=(String)row.get("avatar_url");
+            String nextAvatar=(cleanPicture!=null) ? cleanPicture : currentAvatar;
+            boolean verifyNow=emailVerified && row.get("email_verified_at")==null;
+            if(!Objects.equals(nextDisplay,row.get("display_name"))
+                    || !Objects.equals(nextEmail,currentEmail)
+                    || !Objects.equals(nextHandle,currentHandle)
+                    || !Objects.equals(nextAvatar,currentAvatar)
+                    || verifyNow) {
+                db.jdbc.update("UPDATE users SET email=?,handle=?,display_name=?,avatar_url=?,email_verified_at=coalesce(email_verified_at,?),updated_at=now() WHERE id=?",
+                        nextEmail,nextHandle,nextDisplay,nextAvatar,verifyNow?Timestamp.from(Instant.now()):null,user);
+            }
+        }
+        if(bootstrapAdminSub!=null && !bootstrapAdminSub.isBlank() && bootstrapAdminSub.trim().equals(sub)) {
+            db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'SUPER_ADMIN') ON CONFLICT DO NOTHING",user);
+            db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'PARTICIPANT') ON CONFLICT DO NOTHING",user);
         }
         db.audit(user,created?"OIDC_REGISTER":"OIDC_LOGIN","user",user,null);
         return user;
+    }
+
+    private static String safeAvatarUrl(String url) {
+        if(url==null) return null;
+        String trimmed=url.trim();
+        if(trimmed.isEmpty() || trimmed.length()>1024) return null;
+        return (trimmed.startsWith("https://") || trimmed.startsWith("http://")) ? trimmed : null;
+    }
+
+    private String uniqueCleanHandle(String preferred, String sub) {
+        String base="";
+        if(preferred!=null && !preferred.isBlank()) {
+            base=preferred.trim().replaceAll("[^A-Za-z0-9_]+","_").replaceAll("^_+|_+$","");
+            if(base.length()>28) base=base.substring(0,28);
+        }
+        if(base.length()<3) return uniqueHandle(sub);
+        String candidate=base;
+        for(int i=2;i<1000;i++) {
+            if(!db.exists("SELECT EXISTS(SELECT 1 FROM users WHERE lower(handle)=lower(?))",candidate)) return candidate;
+            String suffix="_"+i;
+            candidate=base.substring(0,Math.min(32-suffix.length(),base.length()))+suffix;
+        }
+        return uniqueHandle(sub);
     }
 
     /** Sign in a verified InfoM4th identity into CP's existing opaque session model.
@@ -142,14 +182,13 @@ public class AuthService {
         if(sub==null || sub.isBlank()) return;
         sub=sub.trim();
         db.jdbc.queryForList("SELECT pg_advisory_xact_lock(81746291)");
-        if(db.exists("SELECT EXISTS(SELECT 1 FROM user_roles WHERE role_code='SUPER_ADMIN')")) return;
         var rows=db.jdbc.queryForList("SELECT id FROM users WHERE idp_subject=?",sub);
         UUID user;
         if(rows.isEmpty()) {
             String handle=uniqueHandle(sub);
             String mail=uniqueEmail(null,handle);
             user=db.id("INSERT INTO users(email,handle,display_name,password_hash,idp_subject) VALUES (?,?,?,?,?) RETURNING id",
-                    mail,handle,"Platform administrator",passwords.encode(Tokens.random()),sub);
+                    mail,handle,"Platform administrator",null,sub);
         } else user=(UUID)rows.get(0).get("id");
         db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'SUPER_ADMIN') ON CONFLICT DO NOTHING",user);
         db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'PARTICIPANT') ON CONFLICT DO NOTHING",user);
@@ -223,7 +262,7 @@ public class AuthService {
     }
     /** The signed-in account and the roles its session carries. */
     public Map<String,Object> me(Actor actor) {
-        var row=db.one("SELECT id,email,handle,display_name,(idp_subject IS NOT NULL) AS is_idp FROM users WHERE id=?",actor.id());
+        var row=db.one("SELECT id,email,handle,display_name,avatar_url,(idp_subject IS NOT NULL) AS is_idp FROM users WHERE id=?",actor.id());
         var result=new LinkedHashMap<>(row);
         result.put("roles",actor.roles());return result;
     }

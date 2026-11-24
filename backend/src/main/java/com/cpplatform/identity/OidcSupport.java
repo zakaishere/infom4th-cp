@@ -31,6 +31,7 @@ public class OidcSupport {
     private final String clientId;
     private final String clientSecret;
     private final String postLogoutUrl;
+    private final String bootstrapAdminSub;
     private final AuthService auth;
     private volatile ClientRegistration cachedRegistration;
 
@@ -39,11 +40,13 @@ public class OidcSupport {
             @Value("${cp.infom4th.client-id:}") String clientId,
             @Value("${cp.infom4th.client-secret:}") String clientSecret,
             @Value("${cp.infom4th.post-logout-url:}") String postLogoutUrl,
+            @Value("${cp.bootstrap.sub:}") String bootstrapAdminSub,
             AuthService auth) {
         this.issuer = issuer == null ? "" : issuer.trim();
         this.clientId = clientId == null ? "" : clientId.trim();
         this.clientSecret = clientSecret == null ? "" : clientSecret.trim();
         this.postLogoutUrl = postLogoutUrl == null ? "" : postLogoutUrl.trim();
+        this.bootstrapAdminSub = bootstrapAdminSub == null ? "" : bootstrapAdminSub.trim();
         this.auth = auth;
     }
 
@@ -116,7 +119,9 @@ public class OidcSupport {
                         oidcUser.getEmail(),
                         Boolean.TRUE.equals(oidcUser.getEmailVerified()),
                         oidcUser.getFullName(),
-                        oidcUser.getPreferredUsername()
+                        oidcUser.getPreferredUsername(),
+                        oidcUser.getPicture(),
+                        bootstrapAdminSub
                 );
                 session.setAttribute(SESSION_USER_ID, userId);
                 if (oidcUser.getIdToken() != null) {

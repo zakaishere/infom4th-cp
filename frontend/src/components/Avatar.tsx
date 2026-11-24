@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 /** Tier names come from the server; the colors live in profile.css as --tier-*. */
 export const TIER_ORDER = ["Digit", "Variable", "Lemma", "Theorem", "Infinity"];
 export const TIER_HEX: Record<string, string> = { Digit: "#8aa0ad", Variable: "#2fbf71", Lemma: "#00a8c8", Theorem: "#a06bff", Infinity: "#ffb020" };
@@ -21,7 +23,22 @@ export function identicon(handle: string) {
   return { cells, color: `hsl(${h % 360} 70% 58%)`, background: `hsl(${h % 360} 45% 16%)` };
 }
 
-export function Avatar({ handle, size = 40, tier }: { handle: string; size?: number; tier?: string | null }) {
+export function Avatar({ handle, src, size = 40, tier }: { handle: string; src?: string | null; size?: number; tier?: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      <img
+        className="identicon"
+        src={src}
+        alt=""
+        width={size}
+        height={size}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        style={{ width: size, height: size, objectFit: "cover", outlineColor: tier ? TIER_HEX[tier] : "transparent" }}
+      />
+    );
+  }
   const { cells, color, background } = identicon(handle);
   return (
     <svg className="identicon" width={size} height={size} viewBox="-1 -1 7 7" aria-hidden

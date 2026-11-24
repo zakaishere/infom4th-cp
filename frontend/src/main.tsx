@@ -91,9 +91,9 @@ function Shell() {
         </nav>
         <div className="topbar-right">
           <button className="ghost small" onClick={toggle} title="Toggle theme">{theme === "dark" ? "☀" : "☾"}</button>
-          <a className="btn ghost small row" style={{ gap: "0.5rem", padding: "0.15rem 0.4rem" }} title="Your profile" href={"#/u/" + me.handle}>
-            <Avatar handle={me.handle} size={28} />
-            <span className="small muted">@{me.handle}</span>
+          <a className="btn ghost small row" style={{ gap: "0.5rem", padding: "0.15rem 0.4rem" }} title={`Your profile (@${me.handle})`} href={"#/u/" + me.handle}>
+            <Avatar handle={me.handle} src={me.avatar_url} size={28} />
+            <span className="small">{me.display_name || me.handle}</span>
           </a>
           <button className="small" onClick={async () => { await logout(); navigate("/"); }}>Sign out</button>
         </div>

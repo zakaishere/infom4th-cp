@@ -1,5 +1,5 @@
 // BFF cookie-session API client. No auth tokens are stored in localStorage.
-export type Me = { id: string; email: string; handle: string; display_name: string; roles: string[]; is_idp?: boolean };
+export type Me = { id: string; email: string; handle: string; display_name: string; avatar_url?: string | null; roles: string[]; is_idp?: boolean };
 
 const listeners = new Set<() => void>();
 
