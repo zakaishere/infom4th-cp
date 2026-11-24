@@ -13,6 +13,7 @@ type Draft = {
   title: string; slug: string; kind: ContestFormat;
   mode: "INDIVIDUAL" | "TEAM"; maxTeamSize: number;
   durationSeconds: number;
+  launchMode: "manual" | "scheduled";
   freezeMinutes: number; penaltyMinutes: number; penalizeCompilationErrors: boolean;
   languages: string[]; description: string; rules: string;
   problems: string[]; participants: string; startsAt: string; visibility: string;
@@ -56,6 +57,7 @@ const DURATION_CHIPS: [string, number][] = [
 const EMPTY: Draft = {
   title: "", slug: "", kind: "BASIC", mode: "INDIVIDUAL", maxTeamSize: 3,
   ...PRESETS.BASIC,
+  launchMode: "manual",
   penalizeCompilationErrors: false, languages: ["CPP", "C", "JAVA", "PYTHON"],
   description: "", rules: RULES_BY_SCORING.ICPC,
   problems: [], participants: "", startsAt: nextHour(), visibility: "PUBLIC", points: {},
@@ -336,11 +338,19 @@ export default function ContestWizard() {
       {/* 2. Unified Timing */}
       <section className="card stack">
         <div className="row-between">
-          <h3 style={{ margin: 0 }}>2. Timing (single shared window)</h3>
-          <span className="small muted">Local time zone: <strong>{tz}</strong> (synced with server clock)</span>
+          <h3 style={{ margin: 0 }}>2. Duration &amp; start</h3>
+          <div className="filters" role="group" aria-label="Start mode">
+            <button type="button" className={d.launchMode !== "scheduled" ? "active" : ""} onClick={() => set({ launchMode: "manual" })}>
+              ▶ Start whenever I hit Start
+            </button>
+            <button type="button" className={d.launchMode === "scheduled" ? "active" : ""} onClick={() => set({ launchMode: "scheduled", startsAt: d.startsAt || nextHour() })}>
+              🗓 Schedule date &amp; time
+            </button>
+          </div>
         </div>
+
         <div className="row" style={{ gap: "0.4rem" }}>
-          <span className="small muted" style={{ marginRight: "0.25rem" }}>Quick duration:</span>
+          <span className="small muted" style={{ marginRight: "0.25rem" }}>Period:</span>
           {DURATION_CHIPS.map(([text, secs]) => (
             <button key={text} type="button" disabled={Boolean(created)}
               className={"small " + (d.durationSeconds === secs ? "primary" : "ghost")}
@@ -348,42 +358,65 @@ export default function ContestWizard() {
           ))}
         </div>
 
-        <div className="grid grid-3">
-          <Field label={`Start (${tz})`} hint="Ignored if you click “Create & start now”.">
-            <input type="datetime-local" value={d.startsAt} onChange={(e) => set({ startsAt: e.target.value })} />
-          </Field>
-          <Field label="Duration (days / hours / min)">
-            <div className="row" style={{ flexWrap: "nowrap", gap: "0.35rem" }}>
-              <input type="number" min={0} max={60} disabled={Boolean(created)} value={days}
-                onChange={(e) => setDuration(Math.max(0, Number(e.target.value)) * 86400 + hours * 3600 + minutes * 60)} aria-label="Days" />
-              <span className="small muted">d</span>
-              <input type="number" min={0} max={23} disabled={Boolean(created)} value={hours}
-                onChange={(e) => setDuration(days * 86400 + Math.max(0, Number(e.target.value)) * 3600 + minutes * 60)} aria-label="Hours" />
-              <span className="small muted">h</span>
-              <input type="number" min={0} max={59} disabled={Boolean(created)} value={minutes}
-                onChange={(e) => setDuration(days * 86400 + hours * 3600 + Math.max(0, Number(e.target.value)) * 60)} aria-label="Minutes" />
-              <span className="small muted">m</span>
+        {d.launchMode !== "scheduled" ? (
+          <>
+            <Field label="Custom period (days / hours / min)">
+              <div className="row" style={{ flexWrap: "nowrap", gap: "0.35rem", maxWidth: 320 }}>
+                <input type="number" min={0} max={60} disabled={Boolean(created)} value={days}
+                  onChange={(e) => setDuration(Math.max(0, Number(e.target.value)) * 86400 + hours * 3600 + minutes * 60)} aria-label="Days" />
+                <span className="small muted">d</span>
+                <input type="number" min={0} max={23} disabled={Boolean(created)} value={hours}
+                  onChange={(e) => setDuration(days * 86400 + Math.max(0, Number(e.target.value)) * 3600 + minutes * 60)} aria-label="Hours" />
+                <span className="small muted">h</span>
+                <input type="number" min={0} max={59} disabled={Boolean(created)} value={minutes}
+                  onChange={(e) => setDuration(days * 86400 + hours * 3600 + Math.max(0, Number(e.target.value)) * 60)} aria-label="Minutes" />
+                <span className="small muted">m</span>
+              </div>
+            </Field>
+            <div className="card-flat small row-between">
+              <span><strong>No scheduling needed:</strong> runs for <strong>{formatDuration(d.durationSeconds)}</strong> from the moment you hit Start.</span>
+              <span className="muted">All problems open at start &amp; close together at end.</span>
             </div>
-          </Field>
-          <Field label={`End (${tz})`} hint="Pick an end date/time directly or adjust duration.">
-            <input type="datetime-local" value={endsAtInput} disabled={Boolean(created) || Number.isNaN(startMs)}
-              onChange={(e) => {
-                const pickedEnd = fromZoneInput(e.target.value);
-                if (!Number.isNaN(pickedEnd) && !Number.isNaN(startMs) && pickedEnd > startMs) {
-                  setDuration(Math.round((pickedEnd - startMs) / 1000));
-                }
-              }} />
-          </Field>
-        </div>
-
-        <div className="card-flat small row-between">
-          <span>
-            <strong>Scheduled window:</strong>{" "}
-            {!Number.isNaN(startMs) ? `${when(startIso(d.startsAt))} → ${when(new Date(endMs).toISOString())}` : "Pick a start date & time"}{" "}
-            · <strong>{formatDuration(d.durationSeconds)}</strong>
-          </span>
-          <span className="muted">All problems open at start &amp; close together at end.</span>
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-3">
+              <Field label={`Start (${tz})`}>
+                <input type="datetime-local" value={d.startsAt} onChange={(e) => set({ startsAt: e.target.value })} />
+              </Field>
+              <Field label="Period (days / hours / min)">
+                <div className="row" style={{ flexWrap: "nowrap", gap: "0.35rem" }}>
+                  <input type="number" min={0} max={60} disabled={Boolean(created)} value={days}
+                    onChange={(e) => setDuration(Math.max(0, Number(e.target.value)) * 86400 + hours * 3600 + minutes * 60)} aria-label="Days" />
+                  <span className="small muted">d</span>
+                  <input type="number" min={0} max={23} disabled={Boolean(created)} value={hours}
+                    onChange={(e) => setDuration(days * 86400 + Math.max(0, Number(e.target.value)) * 3600 + minutes * 60)} aria-label="Hours" />
+                  <span className="small muted">h</span>
+                  <input type="number" min={0} max={59} disabled={Boolean(created)} value={minutes}
+                    onChange={(e) => setDuration(days * 86400 + hours * 3600 + Math.max(0, Number(e.target.value)) * 60)} aria-label="Minutes" />
+                  <span className="small muted">m</span>
+                </div>
+              </Field>
+              <Field label={`End (${tz})`} hint="Adjust end directly or change the period.">
+                <input type="datetime-local" value={endsAtInput} disabled={Boolean(created) || Number.isNaN(startMs)}
+                  onChange={(e) => {
+                    const pickedEnd = fromZoneInput(e.target.value);
+                    if (!Number.isNaN(pickedEnd) && !Number.isNaN(startMs) && pickedEnd > startMs) {
+                      setDuration(Math.round((pickedEnd - startMs) / 1000));
+                    }
+                  }} />
+              </Field>
+            </div>
+            <div className="card-flat small row-between">
+              <span>
+                <strong>Scheduled window ({tz}):</strong>{" "}
+                {!Number.isNaN(startMs) ? `${when(startIso(d.startsAt))} → ${when(new Date(endMs).toISOString())}` : "Pick a start date & time"}{" "}
+                · <strong>{formatDuration(d.durationSeconds)}</strong>
+              </span>
+              <span className="muted">All problems open at start &amp; close together at end.</span>
+            </div>
+          </>
+        )}
       </section>
 
       {/* 3. Problem Picker */}
@@ -577,19 +610,32 @@ export default function ContestWizard() {
             <ul className="small" style={{ margin: 0 }}>{issues.map((i) => <li key={i}>{i}</li>)}</ul>
           </div>
         )}
-        {!canScheduleFuture && issues.length === 0 && (
-          <div className="notice small">Start time is not in the future — pick a future start time to schedule, or click <strong>▶ Create &amp; start now</strong> to open immediately.</div>
+        {d.launchMode === "scheduled" && !canScheduleFuture && issues.length === 0 && (
+          <div className="notice warn small">Pick a future start date &amp; time, or switch back to <strong>Start whenever I hit Start</strong>.</div>
         )}
         <div className="row">
-          <button type="button" className="primary" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>
-            ▶ Create &amp; start now ({formatDuration(d.durationSeconds)})
-          </button>
-          <button type="button" className="primary" disabled={busy || issues.length > 0 || !canScheduleFuture} onClick={() => finish(true, false)}>
-            🗓 Create &amp; schedule ({!Number.isNaN(startMs) ? when(startIso(d.startsAt)) : "pick start"})
-          </button>
-          <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(false)}>
-            Save as draft
-          </button>
+          {d.launchMode !== "scheduled" ? (
+            <>
+              <button type="button" className="primary" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>
+                ▶ Create &amp; start now ({formatDuration(d.durationSeconds)})
+              </button>
+              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(false)}>
+                Save ready (hit Start whenever you want)
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="primary" disabled={busy || issues.length > 0 || !canScheduleFuture} onClick={() => finish(true, false)}>
+                🗓 Create &amp; schedule ({!Number.isNaN(startMs) ? when(startIso(d.startsAt)) : "pick start"})
+              </button>
+              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>
+                ▶ Start now instead
+              </button>
+              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(false)}>
+                Save as draft
+              </button>
+            </>
+          )}
           {created && <a className="btn ghost" href={"#/admin/contests/" + created}>Open contest page →</a>}
         </div>
         <ProgressLog lines={log} />
