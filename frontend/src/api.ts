@@ -119,14 +119,31 @@ export async function loginWithInfoM4th(): Promise<void> {
     }
 
     const poll = window.setInterval(() => {
-      if (popup.closed && !settled) {
-        cleanup();
-        api<Me>("GET", "/api/me")
-          .then(() => {
-            notifySessionChange();
-            resolve();
-          })
-          .catch(() => reject(new Error("Sign-in window was closed.")));
+      // Wait until the popup is closed AND focus has returned to this window: if a browser
+      // isolates cross-origin popups, `popup.closed` can report true while the user is still
+      // actively typing in the popup (`!document.hasFocus()`).
+      if (popup.closed && document.hasFocus() && !settled) {
+        clearInterval(poll);
+        const confirm = (attempt: number) => {
+          if (settled) return;
+          api<Me>("GET", "/api/me")
+            .then(() => {
+              if (settled) return;
+              cleanup();
+              notifySessionChange();
+              resolve();
+            })
+            .catch(() => {
+              if (settled) return;
+              if (attempt < 3) {
+                window.setTimeout(() => confirm(attempt + 1), 350);
+                return;
+              }
+              cleanup();
+              reject(new Error("Sign-in window was closed."));
+            });
+        };
+        window.setTimeout(() => confirm(0), 250);
       }
     }, 400);
   });

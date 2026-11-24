@@ -1,7 +1,11 @@
 package com.cpplatform.config;
 
 import com.cpplatform.identity.*;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import org.springframework.context.annotation.*;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,6 +19,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.web.*;
 import org.springframework.security.web.authentication.*;
 import org.springframework.security.web.csrf.*;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.web.cors.*;
 import java.util.*;
@@ -58,12 +63,23 @@ public class SecurityConfiguration {
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/api/time").permitAll()
                         .requestMatchers("/oauth2/**", "/login/oauth2/**", "/logout/connect/back-channel/**").permitAll()
-                        .requestMatchers("/api/auth/config", "/api/auth/register", "/api/auth/login", "/api/auth/infom4th",
-                                "/api/auth/refresh", "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
+                        .requestMatchers("/api/auth/config", "/api/auth/register", "/api/auth/login", "/api/auth/logout",
+                                "/api/auth/infom4th", "/api/auth/refresh", "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
                         .requestMatchers("/internal/judge/**").hasRole("WORKER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .addFilterAfter(new OncePerRequestFilter() {
+                    @Override
+                    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
+                            throws ServletException, IOException {
+                        // Force Spring Security 6's DeferredCsrfToken to materialize so the XSRF-TOKEN
+                        // cookie is always written on GET requests for the SPA before any POST/PUT/DELETE.
+                        CsrfToken token = (CsrfToken) req.getAttribute(CsrfToken.class.getName());
+                        if (token != null) token.getToken();
+                        chain.doFilter(req, res);
+                    }
+                }, CsrfFilter.class)
                 .addFilterBefore(bearer, UsernamePasswordAuthenticationFilter.class);
 
         if (oidc.enabled()) {

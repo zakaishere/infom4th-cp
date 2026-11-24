@@ -164,9 +164,14 @@ public class OidcSupport {
 
     private void sendResult(HttpServletResponse response, boolean popup, boolean ok, String error) throws IOException {
         if (popup) {
+            byte[] nonceBytes = new byte[16];
+            new java.security.SecureRandom().nextBytes(nonceBytes);
+            String nonce = Base64.getEncoder().encodeToString(nonceBytes);
             response.setStatus(ok ? HttpServletResponse.SC_OK : HttpServletResponse.SC_BAD_REQUEST);
             response.setContentType("text/html; charset=utf-8");
             response.setHeader("Cache-Control", "no-store");
+            response.setHeader("Content-Security-Policy",
+                    "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'");
             String escapedError = error == null ? "null" : "\"" + error.replace("\\", "\\\\").replace("\"", "\\\"").replace("<", "\\u003c") + "\"";
             String safeSubtitle = ok
                     ? "Returning you to InfoM4th Arena…"
@@ -210,11 +215,18 @@ public class OidcSupport {
                         <h1>%s</h1>
                         <p>%s</p>
                         %s
-                        <button type="button" class="btn" onclick="window.close()">Close window</button>
+                        <button type="button" class="btn" id="close-btn">Close window</button>
                       </main>
-                      <script>
+                      <script nonce="%s">
                       (function () {
                         var data = { ok: %s, error: %s };
+                        var btn = document.getElementById('close-btn');
+                        if (btn) {
+                          btn.addEventListener('click', function () {
+                            window.close();
+                            setTimeout(function () { window.location.replace('/'); }, 200);
+                          });
+                        }
                         try { var ch = new BroadcastChannel('cp-auth'); ch.postMessage(data); ch.close(); } catch (e) {}
                         try { if (window.opener && !window.opener.closed) window.opener.postMessage(data, window.location.origin); } catch (e) {}
                         setTimeout(function () {
@@ -224,7 +236,7 @@ public class OidcSupport {
                       })();
                       </script>
                     </body></html>
-                    """.formatted(title, accentDim, accentDim, accent, accent, accent, iconSvg, title, safeSubtitle, bar, ok ? "true" : "false", escapedError));
+                    """.formatted(title, accentDim, accentDim, accent, accent, accent, iconSvg, title, safeSubtitle, bar, nonce, ok ? "true" : "false", escapedError));
             return;
         }
         if (ok) {
