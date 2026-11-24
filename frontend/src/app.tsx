@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, get, hasSession, onSessionChange, serverNow, syncServerClock, type Me } from "./api";
+import { ApiError, get, onSessionChange, serverNow, syncServerClock, type Me } from "./api";
 
 // ---------- Routing (hash based, no server rewrites needed) ----------
 export function useRoute() {
@@ -31,13 +31,8 @@ export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
-  const [loading, setLoading] = useState(hasSession());
+  const [loading, setLoading] = useState(true);
   const reload = useCallback(async () => {
-    if (!hasSession()) {
-      setMe(null);
-      setLoading(false);
-      return;
-    }
     try {
       setMe(await get<Me>("/api/me"));
     } catch {
@@ -49,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     reload();
     return onSessionChange(() => {
-      if (!hasSession()) setMe(null);
+      void reload();
     });
   }, [reload]);
   const value = useMemo<Auth>(() => {

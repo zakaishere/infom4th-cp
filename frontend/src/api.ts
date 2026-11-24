@@ -1,31 +1,7 @@
-// Bearer-token API client. Access tokens last 15 minutes; refresh tokens rotate on use.
-export type Session = { accessToken: string; refreshToken: string; expiresAt: number };
-export type Me = { id: string; email: string; handle: string; display_name: string; roles: string[] };
+// BFF cookie-session API client. No auth tokens are stored in localStorage.
+export type Me = { id: string; email: string; handle: string; display_name: string; roles: string[]; is_idp?: boolean };
 
-const KEY = "cp.session";
-let session: Session | null = load();
-let refreshing: Promise<boolean> | null = null;
 const listeners = new Set<() => void>();
-
-function load(): Session | null {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch {
-    return null;
-  }
-}
-
-function store(next: Session | null) {
-  session = next;
-  try {
-    if (next) localStorage.setItem(KEY, JSON.stringify(next));
-    else localStorage.removeItem(KEY);
-  } catch {
-    /* storage unavailable: session lives in memory only */
-  }
-  listeners.forEach((listener) => listener());
-}
 
 export function onSessionChange(listener: () => void) {
   listeners.add(listener);
@@ -34,8 +10,13 @@ export function onSessionChange(listener: () => void) {
   };
 }
 
-export function hasSession() {
-  return session !== null;
+function notifySessionChange() {
+  listeners.forEach((listener) => listener());
+}
+
+/** Kept as a no-op helper for callers that previously stored tokens; the HttpOnly cookie is set by the server. */
+export function acceptSession(_body?: unknown) {
+  notifySessionChange();
 }
 
 export class ApiError extends Error {
@@ -44,47 +25,31 @@ export class ApiError extends Error {
   }
 }
 
-export function acceptSession(body: { accessToken: string; refreshToken: string; expiresIn: number }) {
-  store({ accessToken: body.accessToken, refreshToken: body.refreshToken, expiresAt: Date.now() + body.expiresIn * 1000 });
-}
-
-async function refresh(): Promise<boolean> {
-  if (!session) return false;
-  refreshing ??= (async () => {
-    try {
-      const response = await fetch("/api/auth/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: session!.refreshToken }),
-      });
-      if (!response.ok) {
-        store(null);
-        return false;
-      }
-      acceptSession(await response.json());
-      return true;
-    } catch {
-      return false;
-    } finally {
-      refreshing = null;
-    }
-  })();
-  return refreshing;
+function readCookie(name: string): string | null {
+  const prefix = name + "=";
+  for (const part of document.cookie.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+  }
+  return null;
 }
 
 type Options = { body?: unknown; idempotencyKey?: string; anonymous?: boolean };
 
 export async function api<T = any>(method: string, path: string, options: Options = {}): Promise<T> {
-  if (!options.anonymous && session && session.expiresAt - Date.now() < 30_000) await refresh();
-  const send = () => {
-    const headers: Record<string, string> = {};
-    if (options.body !== undefined) headers["Content-Type"] = "application/json";
-    if (!options.anonymous && session) headers.Authorization = "Bearer " + session.accessToken;
-    if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
-    return fetch(path, { method, headers, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
-  };
-  let response = await send();
-  if (response.status === 401 && !options.anonymous && session && (await refresh())) response = await send();
+  const headers: Record<string, string> = {};
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) {
+    const xsrf = readCookie("XSRF-TOKEN");
+    if (xsrf) headers["X-XSRF-TOKEN"] = xsrf;
+  }
+  const response = await fetch(path, {
+    method,
+    credentials: "include",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   const data = text ? safeJson(text) : undefined;
@@ -95,12 +60,81 @@ export async function api<T = any>(method: string, path: string, options: Option
   return data as T;
 }
 
-/** Saves a protected file. A plain link cannot send the sign-in token, so it is fetched first. */
+/** Opens InfoM4th OIDC sign-in in a popup window, falling back to full-page redirect if blocked. */
+export async function loginWithInfoM4th(): Promise<void> {
+  const popupUrl = "/oauth2/authorization/infom4th?popup=1";
+  const fullUrl = "/oauth2/authorization/infom4th";
+  if (window.matchMedia("(max-width: 768px)").matches) {
+    // Mobile / narrow screens: full-page redirect avoids tab-switching and in-app browser popup quirks.
+    window.location.assign(fullUrl);
+    return;
+  }
+  const w = 500;
+  const h = 660;
+  const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - w) / 2));
+  const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - h) / 2));
+  const popup = window.open(popupUrl, "infom4th-sso", `width=${w},height=${h},left=${left},top=${top},popup=yes`);
+
+  if (!popup) {
+    window.location.assign(fullUrl);
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      settled = true;
+      window.removeEventListener("message", onMessage);
+      if (channel) channel.close();
+      clearInterval(poll);
+    };
+    const finish = (payload: { ok?: boolean; error?: string }) => {
+      if (settled) return;
+      cleanup();
+      if (!payload.ok) {
+        reject(new Error(payload.error || "InfoM4th sign-in failed."));
+        return;
+      }
+      notifySessionChange();
+      resolve();
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data && typeof event.data === "object" && "ok" in event.data) {
+        finish(event.data as { ok?: boolean; error?: string });
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("cp-auth");
+      channel.onmessage = (event) => {
+        if (event.data && typeof event.data === "object" && "ok" in event.data) {
+          finish(event.data as { ok?: boolean; error?: string });
+        }
+      };
+    } catch {
+      /* BroadcastChannel unavailable */
+    }
+
+    const poll = window.setInterval(() => {
+      if (popup.closed && !settled) {
+        cleanup();
+        api<Me>("GET", "/api/me")
+          .then(() => {
+            notifySessionChange();
+            resolve();
+          })
+          .catch(() => reject(new Error("Sign-in window was closed.")));
+      }
+    }, 400);
+  });
+}
+
+/** Saves a protected file using the browser's HttpOnly session cookie. */
 export async function download(path: string, filename: string) {
-  if (session && session.expiresAt - Date.now() < 30_000) await refresh();
-  const send = () => fetch(path, { headers: session ? { Authorization: "Bearer " + session.accessToken } : {} });
-  let response = await send();
-  if (response.status === 401 && session && (await refresh())) response = await send();
+  const response = await fetch(path, { credentials: "include" });
   if (!response.ok) throw new ApiError(response.status, statusText(response.status));
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
@@ -126,32 +160,33 @@ function statusText(status: number) {
 }
 
 export async function logout() {
-  if (session) {
-    try {
-      await api("POST", "/api/auth/logout", { body: { refreshToken: session.refreshToken } });
-    } catch {
-      /* the local session is cleared regardless */
+  let endSessionUrl: string | null = null;
+  try {
+    const res = await api<{ ok: boolean; endSessionUrl?: string }>("POST", "/api/auth/logout", { body: {} });
+    if (res && typeof res.endSessionUrl === "string" && res.endSessionUrl) {
+      endSessionUrl = res.endSessionUrl;
     }
+  } catch {
+    /* local state is cleared regardless */
   }
-  store(null);
+  notifySessionChange();
+  if (endSessionUrl) {
+    window.location.assign(endSessionUrl);
+  }
 }
 
 // ---------- Server clock ----------
-// performance.now() keeps counting steadily even if someone changes the laptop's clock mid-contest.
 let clockBase = Date.now() - performance.now();
 let zone = "UTC";
 
-/** Current server time in milliseconds. Every contest timer on every screen reads this. */
 export function serverNow() {
   return clockBase + performance.now();
 }
 
-/** The one time zone contest dates and times are shown in, whatever the laptop is set to. */
 export function displayTimeZone() {
   return zone;
 }
 
-/** Uses the fastest of a few samples, because a quick response has the smallest network error. */
 export async function syncServerClock() {
   let fastest = Infinity;
   for (let i = 0; i < 3; i++) {
@@ -167,7 +202,7 @@ export async function syncServerClock() {
         zone = body.timeZone;
       }
     } catch {
-      /* offline: keep the last known offset and try again at the next sync */
+      /* offline */
     }
   }
 }

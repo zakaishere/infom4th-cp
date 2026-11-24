@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { acceptSession, api } from "../api";
+import { acceptSession, api, loginWithInfoM4th } from "../api";
 import { useAuth, useToast } from "../app";
 import { Field } from "../ui";
 
@@ -76,19 +76,35 @@ export default function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [delegatedAuth, setDelegatedAuth] = useState(false);
-  // The switch always starts on InfoM4th. Flip it only for an old CP account or
-  // a non InfoM4th account created by an admin. There is no public signup then.
-  const [nonInfoM4th, setNonInfoM4th] = useState(false);
+  const [oidcEnabled, setOidcEnabled] = useState(false);
+  // Clean default: show only "Sign in with InfoM4th". Reveal local email/password form only when clicked.
+  const [showLocalForm, setShowLocalForm] = useState(false);
   const { reload } = useAuth();
   const toast = useToast();
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value });
-  const useDelegated = delegatedAuth && mode === "login" && !nonInfoM4th;
+  const useSsoView = delegatedAuth && oidcEnabled && mode === "login" && !showLocalForm;
 
   useEffect(() => {
-    api<{ delegatedAuth: boolean }>("GET", "/api/auth/config", { anonymous: true })
-      .then((cfg) => setDelegatedAuth(Boolean(cfg.delegatedAuth)))
-      .catch(() => { /* older backend: keep local login */ });
+    api<{ delegatedAuth: boolean; oidc?: boolean }>("GET", "/api/auth/config", { anonymous: true })
+      .then((cfg) => {
+        setDelegatedAuth(Boolean(cfg.delegatedAuth));
+        setOidcEnabled(Boolean(cfg.oidc));
+      })
+      .catch(() => { /* keep local login */ });
   }, []);
+
+  async function handleOidcPopup() {
+    setBusy(true);
+    setError("");
+    try {
+      await loginWithInfoM4th();
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -97,10 +113,9 @@ export default function AuthPage() {
     try {
       if (mode === "login" || mode === "register") {
         const body = mode === "login" ? { email: form.email, password: form.password } : form;
-        // When InfoM4th is the identity provider, credentials are verified there by
-        // the backend; the browser never talks to InfoM4th or sees its secret.
-        // Non InfoM4th accounts use the normal /login path in both configurations.
-        const path = useDelegated ? "/api/auth/infom4th" : "/api/auth/" + mode;
+        const path = delegatedAuth && !oidcEnabled && mode === "login" && !showLocalForm
+          ? "/api/auth/infom4th"
+          : "/api/auth/" + mode;
         acceptSession(await api("POST", path, { body, anonymous: true }));
         await reload();
       } else if (mode === "forgot") {
@@ -120,15 +135,27 @@ export default function AuthPage() {
     }
   }
 
-  const go = (next: Mode) => { setError(""); setNonInfoM4th(false); setMode(next); };
-  const pickAccountType = (value: boolean) => {
-    setNonInfoM4th(value);
+  const go = (next: Mode) => { setError(""); setMode(next); };
+  const toggleLocal = (open: boolean) => {
+    setShowLocalForm(open);
     setError("");
     setForm({ ...form, email: "", password: "" });
   };
   const titles: Record<Mode, string> = {
-    login: useDelegated ? "Sign in with InfoM4th" : nonInfoM4th ? "Sign in with a non InfoM4th account" : "Sign in",
-    register: "Create account", forgot: "Reset password", reset: "Choose a new password",
+    login: useSsoView ? "Welcome back" : showLocalForm ? "Non InfoM4th account" : "Sign in",
+    register: "Create account",
+    forgot: "Reset password",
+    reset: "Choose a new password",
+  };
+  const quietLinkStyle: React.CSSProperties = {
+    background: "none",
+    border: "none",
+    padding: 0,
+    color: "#9fc6d1",
+    textDecoration: "underline",
+    textUnderlineOffset: "4px",
+    cursor: "pointer",
+    fontSize: "0.9rem",
   };
   return (
     <div className="auth">
@@ -149,60 +176,87 @@ export default function AuthPage() {
           <div className="brand"><img src="/logo.png" alt="" /> <span>INFO<b>M4TH</b></span> <small>Arena</small></div>
           <h2>{titles[mode]}</h2>
           {error && <div className="notice bad">{error}</div>}
-          {delegatedAuth && mode === "login" && (
-            <div className="auth-switch" role="group" aria-label="Account type">
-              <button type="button" aria-pressed={!nonInfoM4th} onClick={() => pickAccountType(false)}>InfoM4th account</button>
-              <button type="button" aria-pressed={nonInfoM4th} onClick={() => pickAccountType(true)}>non InfoM4th account</button>
-            </div>
-          )}
-          {mode !== "reset" && (
-            <Field label={useDelegated ? "InfoM4th email" : "Email"}>
-              <input id="email" name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={form.email} onChange={set("email")} />
-            </Field>
-          )}
-          {mode === "register" && (
+
+          {useSsoView ? (
             <>
-              <Field label="Handle" hint="Shown on standings. Letters, digits, underscore."><input name="handle" required value={form.handle} onChange={set("handle")} maxLength={32} /></Field>
-              <Field label="Display name"><input name="name" required value={form.displayName} onChange={set("displayName")} maxLength={100} /></Field>
+              <button type="button" className="btn primary" disabled={busy} onClick={handleOidcPopup}>
+                {busy ? "Signing in…" : "Sign in with InfoM4th"}
+              </button>
+              <small className="hint" style={{ textAlign: "center" }}>
+                Already signed in on InfoM4th? You will be signed in automatically.
+              </small>
+              <div style={{ borderTop: "1px solid rgba(53,199,232,0.16)", paddingTop: 12, textAlign: "center" }}>
+                <button type="button" style={quietLinkStyle} onClick={() => toggleLocal(true)}>
+                  Sign in with a non InfoM4th account
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {mode !== "reset" && (
+                <Field label="Email">
+                  <input id="email" name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={form.email} onChange={set("email")} />
+                </Field>
+              )}
+              {mode === "register" && (
+                <>
+                  <Field label="Handle" hint="Shown on standings. Letters, digits, underscore."><input name="handle" required value={form.handle} onChange={set("handle")} maxLength={32} /></Field>
+                  <Field label="Display name"><input name="name" required value={form.displayName} onChange={set("displayName")} maxLength={100} /></Field>
+                </>
+              )}
+              {mode !== "forgot" && (
+                <PasswordInput
+                  id="password"
+                  label={mode === "reset" ? "New password" : "Password"}
+                  hint={mode === "register" || mode === "reset" ? "At least 8 characters with uppercase, digit and symbol." : undefined}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  value={form.password}
+                  onChange={set("password")}
+                />
+              )}
+              <button type="submit" className="btn primary" disabled={busy}>
+                {busy ? "Working…" : mode === "login" ? "Sign in" : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : "Set new password"}
+              </button>
+              {delegatedAuth && oidcEnabled && mode === "login" && (
+                <div style={{ paddingTop: 6, textAlign: "center" }}>
+                  <button type="button" style={quietLinkStyle} onClick={() => toggleLocal(false)}>
+                    ← Back to Sign in with InfoM4th
+                  </button>
+                </div>
+              )}
             </>
           )}
-          {mode !== "forgot" && (
-            <PasswordInput
-              id="password"
-              label="Password"
-              hint={mode === "login" ? undefined : "8–72 characters with an uppercase letter, a number and a symbol."}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              value={form.password}
-              onChange={set("password")}
-            />
-          )}
-          <button className="primary" disabled={busy}>{busy ? "Please wait…" : titles[mode]}</button>
-          <div className="row-between small">
-            {delegatedAuth && mode === "login" ? (
-              useDelegated ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                  <span>Accounts and passwords are managed on the InfoM4th website.</span>
-                  <span>
+
+          {mode === "login" ? (
+            delegatedAuth ? (
+              useSsoView ? (
+                <div className="auth-links">
+                  <div>
                     <a href={INFO_M4TH_SIGNUP_URL} target="_blank" rel="noopener noreferrer">Sign up on InfoM4th</a>
                     {" · "}
                     <a href={INFO_M4TH_FORGOT_URL} target="_blank" rel="noopener noreferrer">Forgot password?</a>
-                  </span>
+                  </div>
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                  <span>Existing non InfoM4th accounts are created by an admin, not through public signup.</span>
-                  <a href={INFO_M4TH_FORGOT_URL} target="_blank" rel="noopener noreferrer">Forgot your InfoM4th password?</a>
+                <div className="auth-links">
+                  <small>Local accounts are for legacy or admin-created users.</small>
+                  <div>
+                    <button type="button" className="link" onClick={() => go("forgot")}>Forgot local password?</button>
+                  </div>
                 </div>
               )
-            ) : mode === "login" ? (
-              <>
-                <a href={INFO_M4TH_SIGNUP_URL} target="_blank" rel="noopener noreferrer">Sign up on InfoM4th</a>
-                <a href={INFO_M4TH_FORGOT_URL} target="_blank" rel="noopener noreferrer">Forgot password?</a>
-              </>
             ) : (
-              <a href="#" onClick={(e) => { e.preventDefault(); go("login"); }}>Back to sign in</a>
-            )}
-          </div>
+              <div className="auth-links">
+                <button type="button" className="link" onClick={() => go("register")}>Create account</button>
+                {" · "}
+                <button type="button" className="link" onClick={() => go("forgot")}>Forgot password?</button>
+              </div>
+            )
+          ) : (
+            <div className="auth-links">
+              <button type="button" className="link" onClick={() => go("login")}>Back to sign in</button>
+            </div>
+          )}
         </form>
       </section>
     </div>

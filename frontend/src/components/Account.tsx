@@ -1,16 +1,32 @@
 import { useState } from "react";
 import { acceptSession, post } from "../api";
-import { useToast } from "../app";
+import { useAuth, useToast } from "../app";
 import { Field, Modal } from "../ui";
 
 /** Signed-in password change. Other sessions end; this browser stays signed in. */
 export function ChangePassword({ onClose }: { onClose: () => void }) {
+  const { me } = useAuth();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
+  if (me?.is_idp) {
+    return (
+      <Modal title="Password managed on InfoM4th" onClose={onClose}>
+        <div className="stack">
+          <p>Your account signs in through InfoM4th SSO. Change or reset your password on the InfoM4th website.</p>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" onClick={onClose}>Close</button>
+            <a className="btn primary" href="https://www.infom4th.com/profile" target="_blank" rel="noopener noreferrer">
+              Open InfoM4th
+            </a>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
   const strong = next.length >= 8 && /[A-Z]/.test(next) && /[0-9]/.test(next) && /[^A-Za-z0-9]/.test(next);
   return (
     <Modal title="Change password" onClose={onClose}>

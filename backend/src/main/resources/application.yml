@@ -3,6 +3,14 @@ server:
   # The website container sends the real client address in X-Forwarded-For; Tomcat trusts it
   # only from private-network proxies, so per-IP rate limits see each contestant separately.
   forward-headers-strategy: native
+  servlet:
+    session:
+      timeout: 7d
+      cookie:
+        name: CP_SESSION
+        http-only: true
+        same-site: lax
+        secure: ${COOKIE_SECURE:false}
   error:
     include-message: never
     include-stacktrace: never
@@ -73,14 +81,15 @@ cp:
     # Seed the first SUPER_ADMIN from an InfoM4th subject ('sub') instead of a local
     # email/password. When that identity signs in it keeps its admin role.
     sub: ${BOOTSTRAP_ADMIN_SUB:}
-  # Delegated sign-in with InfoM4th (server-to-server only; the browser never sees
-  # InfoM4th credentials). All values empty => the feature is inactive.
+  # OpenID Connect (OIDC) SSO with InfoM4th (Authorization Code + PKCE).
+  # All values empty => local auth only.
   infom4th:
     token-url: ${INFO_M4TH_TOKEN_URL:}
     jwks-url: ${INFO_M4TH_JWKS_URL:}
     issuer: ${INFO_M4TH_ISSUER:}
     client-id: ${INFO_M4TH_CLIENT_ID:}
     client-secret: ${INFO_M4TH_CLIENT_SECRET:}
+    post-logout-url: ${INFO_M4TH_POST_LOGOUT_URL:}
     timeout-seconds: ${INFO_M4TH_TIMEOUT_SECONDS:5}
   public-url: ${PUBLIC_URL:http://localhost:3000}
   # Contest dates and times are shown in this zone on every screen, whatever a laptop is set to.

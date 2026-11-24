@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
-    proxy: { "/api": { target: process.env.CP_API_URL ?? "http://127.0.0.1:8081", changeOrigin: false } },
+    proxy: {
+      "/api": { target: process.env.CP_API_URL ?? "http://127.0.0.1:8081", changeOrigin: false },
+      "/oauth2": { target: process.env.CP_API_URL ?? "http://127.0.0.1:8081", changeOrigin: false },
+      "/login/oauth2": { target: process.env.CP_API_URL ?? "http://127.0.0.1:8081", changeOrigin: false },
+      "/logout": { target: process.env.CP_API_URL ?? "http://127.0.0.1:8081", changeOrigin: false },
+    },
   },
 });

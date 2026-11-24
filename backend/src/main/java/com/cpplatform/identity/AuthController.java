@@ -2,6 +2,7 @@ package com.cpplatform.identity;
 
 import com.cpplatform.common.*;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.http.HttpStatus;
@@ -9,34 +10,46 @@ import java.util.*;
 
 @RestController
 public class AuthController {
-    private final AuthService auth; private final RateLimits limits; private final InfoM4thAuthService idp;
-    public AuthController(AuthService auth,RateLimits limits,InfoM4thAuthService idp) {this.auth=auth;this.limits=limits;this.idp=idp;}
+    private final AuthService auth; private final RateLimits limits; private final InfoM4thAuthService idp; private final OidcSupport oidc;
+    public AuthController(AuthService auth,RateLimits limits,InfoM4thAuthService idp,OidcSupport oidc) {
+        this.auth=auth;this.limits=limits;this.idp=idp;this.oidc=oidc;
+    }
     /** Public capability flag so the login screen can adapt without a rebuild. */
     @GetMapping("/api/auth/config")
-    Object authConfig() { return Map.of("delegatedAuth", idp.enabled(), "provider", "InfoM4th"); }
+    Object authConfig() {
+        boolean enabled = oidc.enabled() || idp.enabled();
+        return Map.of("delegatedAuth", enabled, "oidc", oidc.enabled(), "provider", "InfoM4th");
+    }
     /** Public registration is closed when InfoM4th is the identity provider.
      *  Older CP accounts keep working, and admins create non InfoM4th accounts
      *  through /api/admin/users/bulk. */
     @PostMapping("/api/auth/register")
     @ResponseStatus(HttpStatus.CREATED)
     Object register(@RequestBody Map<String,Object> body,HttpServletRequest request) {
-        Api.require(!idp.enabled(),HttpStatus.FORBIDDEN,"Public registration is disabled. Create an InfoM4th account on the website, or ask an admin to create a non InfoM4th account.");
-        limits.check("register:"+request.getRemoteAddr(),250,3600);return auth.register(body);
+        Api.require(!(oidc.enabled() || idp.enabled()),HttpStatus.FORBIDDEN,"Public registration is disabled. Create an InfoM4th account on the website, or ask an admin to create a non InfoM4th account.");
+        limits.check("register:"+request.getRemoteAddr(),250,3600);
+        Map<String,Object> issued = auth.register(body);
+        establishSession(request, (UUID) issued.get("userId"));
+        return issued;
     }
     @PostMapping("/api/auth/login")
     Object login(@RequestBody Map<String,Object> body,HttpServletRequest request) {
         limits.check("login-ip:"+request.getRemoteAddr(),120,60);
-        limits.check("login-user:"+AuthService.email(body),10,60);return auth.login(body);
+        limits.check("login-user:"+AuthService.email(body),10,60);
+        Map<String,Object> issued = auth.login(body);
+        establishSession(request, (UUID) issued.get("userId"));
+        return issued;
     }
-    /** Delegated sign-in: credentials are verified by InfoM4th; the browser never
-     *  sees InfoM4th. Returns CP's normal opaque session map, identical to /login. */
+    /** Legacy delegated sign-in (retained for backward compatibility with existing tests while ROPC is deprecated). */
     @PostMapping("/api/auth/infom4th")
     Object loginInfom4th(@RequestBody Map<String,Object> body,HttpServletRequest request) {
         limits.check("login-ip:"+request.getRemoteAddr(),120,60);
         String email=AuthService.email(body);
         limits.check("login-user:"+email,10,60);
         InfoM4thAuthService.Identity identity=idp.exchangeAndVerify(email,Api.text(body,"password",200));
-        return auth.loginDelegated(identity);
+        Map<String,Object> issued = auth.loginDelegated(identity);
+        establishSession(request, (UUID) issued.get("userId"));
+        return issued;
     }
     @PostMapping("/api/auth/refresh")
     Object refresh(@RequestBody Map<String,Object> body,HttpServletRequest request) {
@@ -44,8 +57,25 @@ public class AuthController {
         return auth.refresh(Api.text(body,"refreshToken",100)).orElseThrow(()->new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED,"Invalid refresh token"));
     }
     @PostMapping("/api/auth/logout")
-    Object logout(@RequestBody Map<String,Object> body,Authentication authentication) {
-        auth.logout(Actor.of(authentication),Api.text(body,"refreshToken",100));return Map.of("ok",true);
+    Object logout(@RequestBody(required = false) Map<String,Object> body,Authentication authentication,HttpServletRequest request) {
+        if (body != null && body.get("refreshToken") instanceof String rt && !rt.isBlank()) {
+            auth.logout(Actor.of(authentication), rt);
+        }
+        String endSessionUrl = null;
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Object idToken = session.getAttribute(OidcSupport.SESSION_ID_TOKEN);
+            if (idToken instanceof String token && !token.isBlank()) {
+                String origin = request.getScheme() + "://" + request.getServerName()
+                        + ((request.getServerPort() == 80 || request.getServerPort() == 443) ? "" : ":" + request.getServerPort()) + "/";
+                endSessionUrl = oidc.buildEndSessionUrl(token, origin);
+            }
+            session.invalidate();
+        }
+        Map<String,Object> res = new LinkedHashMap<>();
+        res.put("ok", true);
+        if (endSessionUrl != null) res.put("endSessionUrl", endSessionUrl);
+        return res;
     }
     @PostMapping("/api/auth/forgot-password")
     Object forgot(@RequestBody Map<String,Object> body,HttpServletRequest request) {
@@ -65,4 +95,10 @@ public class AuthController {
     }
     @GetMapping("/api/me")
     Object me(Authentication authentication){return auth.me(Actor.of(authentication));}
+
+    private void establishSession(HttpServletRequest request, UUID userId) {
+        if (userId == null) return;
+        HttpSession session = request.getSession(true);
+        session.setAttribute(OidcSupport.SESSION_USER_ID, userId);
+    }
 }

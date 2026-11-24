@@ -56,13 +56,56 @@ public class AuthService {
     @Transactional
     public Map<String,Object> login(Map<String,Object> body) {
         String email=email(body), password=Api.text(body,"password",200);
-        var users=db.jdbc.queryForList("SELECT id,password_hash,status FROM users WHERE email=?",email);
-        String hash=users.isEmpty()?dummyHash:(String)users.get(0).get("password_hash");
+        // Strict isolation: only non-InfoM4th local accounts (idp_subject IS NULL) may use password login.
+        var users=db.jdbc.queryForList("SELECT id,password_hash,status FROM users WHERE email=? AND idp_subject IS NULL",email);
+        String stored=users.isEmpty()?null:(String)users.get(0).get("password_hash");
+        String hash=(stored==null || stored.isBlank())?dummyHash:stored;
         boolean valid=passwords.matches(password,hash);
-        Api.require(valid && !users.isEmpty() && "ACTIVE".equals(users.get(0).get("status")),
+        Api.require(valid && stored!=null && !users.isEmpty() && "ACTIVE".equals(users.get(0).get("status")),
                 HttpStatus.UNAUTHORIZED,"Invalid credentials");
         UUID user=(UUID)users.get(0).get("id");
         return issue(user,UUID.randomUUID());
+    }
+
+    /** Resolve an OIDC-verified InfoM4th identity strictly by `idp_subject = sub`.
+     *  Delta-updates only InfoM4th-owned fields (email, display_name, email_verified_at)
+     *  when they actually changed; CP-owned fields (handle, bio, school, roles) stay untouched. */
+    @Transactional
+    public UUID resolveOidcUser(String sub, String email, boolean emailVerified, String name, String preferredUsername) {
+        Api.require(sub!=null && !sub.isBlank(), HttpStatus.UNAUTHORIZED, "Invalid identity");
+        var rows=db.jdbc.queryForList("SELECT id,status,email,display_name,email_verified_at FROM users WHERE idp_subject=?",sub);
+        UUID user; boolean created=false;
+        String cleanEmail=(email!=null && email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) ? email.trim().toLowerCase(Locale.ROOT) : null;
+        if(rows.isEmpty()) {
+            String handle=uniqueHandle(preferredUsername!=null && !preferredUsername.isBlank() ? preferredUsername : sub);
+            String mail=uniqueEmail(cleanEmail,handle);
+            String display=firstNonBlank(name,preferredUsername,handle);
+            Timestamp verified=emailVerified?Timestamp.from(Instant.now()):null;
+            user=db.id("INSERT INTO users(email,handle,display_name,password_hash,idp_subject,email_verified_at) VALUES (?,?,?,?,?,?) RETURNING id",
+                    mail,handle,display.substring(0,Math.min(100,display.length())),
+                    null,sub,verified);
+            db.jdbc.update("INSERT INTO user_roles(user_id,role_code) VALUES (?,'PARTICIPANT')",user);
+            created=true;
+        } else {
+            var row=rows.get(0);
+            user=(UUID)row.get("id");
+            if(!"ACTIVE".equals(row.get("status")))
+                throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"Account is not active");
+            String nextDisplay=(name!=null && !name.isBlank()) ? name.substring(0,Math.min(100,name.length())) : (String)row.get("display_name");
+            String currentEmail=(String)row.get("email");
+            String nextEmail=currentEmail;
+            if(cleanEmail!=null && emailVerified && !cleanEmail.equalsIgnoreCase(currentEmail)
+                    && !db.exists("SELECT EXISTS(SELECT 1 FROM users WHERE email=? AND id<>?)",cleanEmail,user)) {
+                nextEmail=cleanEmail;
+            }
+            boolean verifyNow=emailVerified && row.get("email_verified_at")==null;
+            if(!Objects.equals(nextDisplay,row.get("display_name")) || !Objects.equals(nextEmail,currentEmail) || verifyNow) {
+                db.jdbc.update("UPDATE users SET email=?,display_name=?,email_verified_at=coalesce(email_verified_at,?),updated_at=now() WHERE id=?",
+                        nextEmail,nextDisplay,verifyNow?Timestamp.from(Instant.now()):null,user);
+            }
+        }
+        db.audit(user,created?"OIDC_REGISTER":"OIDC_LOGIN","user",user,null);
+        return user;
     }
 
     /** Sign in a verified InfoM4th identity into CP's existing opaque session model.
@@ -146,10 +189,13 @@ public class AuthService {
      *  and returns a fresh session for this browser. */
     @Transactional
     public Map<String,Object> changePassword(UUID user,Map<String,Object> body) {
-        var row=db.one("SELECT password_hash FROM users WHERE id=? FOR UPDATE",user);
-        Api.require(passwords.matches(Api.text(body,"currentPassword",200),(String)row.get("password_hash")),HttpStatus.BAD_REQUEST,"Current password is wrong");
+        var row=db.one("SELECT password_hash,idp_subject FROM users WHERE id=? FOR UPDATE",user);
+        Api.require(row.get("idp_subject")==null,HttpStatus.BAD_REQUEST,"InfoM4th accounts manage their password on the InfoM4th website");
+        String stored=(String)row.get("password_hash");
+        Api.require(stored!=null && passwords.matches(Api.text(body,"currentPassword",200),stored),HttpStatus.BAD_REQUEST,"Current password is wrong");
         String next=password(Map.of("password",Api.text(body,"newPassword",200)));
         db.jdbc.update("UPDATE users SET password_hash=?,updated_at=now() WHERE id=?",passwords.encode(next),user);
+        db.jdbc.update("UPDATE password_reset_tokens SET used_at=now() WHERE user_id=? AND used_at IS NULL",user);
         db.jdbc.update("UPDATE refresh_tokens SET revoked_at=coalesce(revoked_at,now()) WHERE user_id=?",user);
         db.audit(user,"PASSWORD_CHANGE","user",user,null);
         return issue(user,UUID.randomUUID());
@@ -175,19 +221,22 @@ public class AuthService {
         db.jdbc.update("UPDATE refresh_tokens SET revoked_at=now() WHERE id=?",row.get("id"));
         return Optional.of(issue((UUID)row.get("user_id"),(UUID)row.get("family_id")));
     }
-    /** The signed-in account and the roles its access token carries. */
+    /** The signed-in account and the roles its session carries. */
     public Map<String,Object> me(Actor actor) {
-        var result=new LinkedHashMap<>(db.one("SELECT id,email,handle,display_name FROM users WHERE id=?",actor.id()));
+        var row=db.one("SELECT id,email,handle,display_name,(idp_subject IS NOT NULL) AS is_idp FROM users WHERE id=?",actor.id());
+        var result=new LinkedHashMap<>(row);
         result.put("roles",actor.roles());return result;
     }
     @Transactional
     public void logout(Actor actor,String refresh) {
+        if(refresh==null || refresh.isBlank()) return;
         db.jdbc.update("UPDATE refresh_tokens SET revoked_at=coalesce(revoked_at,now()) WHERE user_id=? AND family_id IN (SELECT family_id FROM refresh_tokens WHERE token_digest=?)",
                 actor.id(),Tokens.digest(refresh));
     }
     @Transactional
     public void forgot(String email) {
-        var rows=db.jdbc.queryForList("SELECT id FROM users WHERE email=? AND status='ACTIVE'",email);
+        // Strict isolation: InfoM4th SSO accounts reset passwords on InfoM4th, never locally.
+        var rows=db.jdbc.queryForList("SELECT id FROM users WHERE email=? AND status='ACTIVE' AND idp_subject IS NULL",email);
         if(rows.isEmpty()) return;
         UUID user=(UUID)rows.get(0).get("id"); String token=Tokens.random();
         db.jdbc.update("UPDATE password_reset_tokens SET used_at=now() WHERE user_id=? AND used_at IS NULL",user);
@@ -199,7 +248,8 @@ public class AuthService {
         var rows=db.jdbc.queryForList("UPDATE password_reset_tokens SET used_at=now() WHERE token_digest=? AND used_at IS NULL AND expires_at>now() RETURNING user_id",Tokens.digest(token));
         Api.require(!rows.isEmpty(),HttpStatus.BAD_REQUEST,"Invalid or expired reset token");
         UUID user=(UUID)rows.get(0).get("user_id");
-        db.jdbc.update("UPDATE users SET password_hash=?,updated_at=now() WHERE id=?",passwords.encode(password),user);
+        int updated=db.jdbc.update("UPDATE users SET password_hash=?,updated_at=now() WHERE id=? AND idp_subject IS NULL",passwords.encode(password),user);
+        Api.require(updated>0,HttpStatus.BAD_REQUEST,"InfoM4th accounts reset their password on the InfoM4th website");
         db.jdbc.update("UPDATE refresh_tokens SET revoked_at=coalesce(revoked_at,now()) WHERE user_id=?",user);
         db.audit(user,"PASSWORD_RESET","user",user,null);
     }

@@ -30,14 +30,26 @@ public class BearerFilter extends OncePerRequestFilter {
                     SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("judge",null,List.of(new SimpleGrantedAuthority("ROLE_WORKER"))));
             } else if(token.length()<=100) {
                 var users=db.jdbc.queryForList("SELECT u.id FROM access_tokens a JOIN refresh_tokens r ON r.id=a.refresh_token_id JOIN users u ON u.id=r.user_id WHERE a.token_digest=? AND a.expires_at>now() AND r.revoked_at IS NULL AND r.expires_at>now() AND u.status='ACTIVE'",Tokens.digest(token));
-                if(!users.isEmpty()) {
-                    UUID id=(UUID)users.get(0).get("id");
-                    Set<String> roles=new HashSet<>(db.jdbc.queryForList("SELECT role_code FROM user_roles WHERE user_id=?",String.class,id));
-                    Actor actor=new Actor(id,roles);
-                    SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(actor,null,roles.stream().map(r->new SimpleGrantedAuthority("ROLE_"+r)).collect(Collectors.toList())));
+                if(!users.isEmpty()) authenticateUser((UUID)users.get(0).get("id"));
+            }
+        } else if (!request.getRequestURI().startsWith("/internal/judge/")) {
+            // BFF HttpOnly cookie session (primary browser authentication path).
+            HttpSession session = request.getSession(false);
+            if (session != null && session.getAttribute(OidcSupport.SESSION_USER_ID) instanceof UUID userId) {
+                var rows = db.jdbc.queryForList("SELECT id FROM users WHERE id=? AND status='ACTIVE'", userId);
+                if (!rows.isEmpty()) {
+                    authenticateUser(userId);
+                } else {
+                    session.invalidate();
                 }
             }
         }
         chain.doFilter(request,response);
+    }
+
+    private void authenticateUser(UUID id) {
+        Set<String> roles=new HashSet<>(db.jdbc.queryForList("SELECT role_code FROM user_roles WHERE user_id=?",String.class,id));
+        Actor actor=new Actor(id,roles);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(actor,null,roles.stream().map(r->new SimpleGrantedAuthority("ROLE_"+r)).collect(Collectors.toList())));
     }
 }
