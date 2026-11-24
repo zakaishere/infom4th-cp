@@ -55,8 +55,8 @@ export function ProblemList() {
         <ReasonDialog title={(target.action === "delete" ? "Delete “" : "Restore “") + target.row.title + "”"} confirm={target.action === "delete" ? "Delete problem" : "Restore"}
           danger={target.action === "delete"} onClose={() => setTarget(null)}
           description={target.action === "delete"
-            ? "The problem (all its versions) leaves the Problem lab, the contest wizard and Practice. Finished contests, scoreboards and submissions keep it, so nothing breaks. You can restore it later from “Show deleted”. A problem used by a contest that has not finished cannot be deleted."
-            : "The problem comes back to the Problem lab. If it was in Practice, show it again from the Practice set."}
+            ? "The problem (all its versions) leaves the Problem lab, the contest wizard and Problem Set. Finished contests, scoreboards and submissions keep it, so nothing breaks. You can restore it later from “Show deleted”. A problem used by a contest that has not finished cannot be deleted."
+            : "The problem comes back to the Problem lab. If it was in Problem Set, show it again from the Problem Set page."}
           onSubmit={(reason) => run(async () => { await post("/api/lab/problems/" + target.row.version_id + "/" + target.action, { reason }); setTarget(null); list.reload(); },
             target.action === "delete" ? "Problem deleted" : "Problem restored")} />
       )}
@@ -99,7 +99,7 @@ export function ProblemEditor({ versionId }: { versionId: string }) {
           {sealed && <button disabled={busy} onClick={() => run(async () => { const r = await post("/api/lab/problems/" + p.id + "/clone"); navigate("/admin/problems/" + r.versionId); }, "New editable version created")}>Clone to edit</button>}
           {!sealed && <button className="primary" disabled={busy} onClick={() => run(async () => { await post("/api/lab/problems/" + p.id + "/validate"); setTab("validation"); await v.reload(); }, "Validation queued on the internal judge lane")}>Seal & validate</button>}
           {p.status === "READY_FOR_REVIEW" && <button className="primary" onClick={() => setApproving(true)}>Approve…</button>}
-          {p.status === "APPROVED" && <button disabled={busy} onClick={() => run(async () => { await post("/api/lab/problems/" + p.id + "/publish-practice"); await v.reload(); }, "Published to practice")}>Publish to practice</button>}
+          {p.status === "APPROVED" && <button disabled={busy} onClick={() => run(async () => { await post("/api/lab/problems/" + p.id + "/publish-practice"); await v.reload(); }, "Published to Problem Set")}>Publish to Problem Set</button>}
         </div>
       </div>
       <div className="tabs">

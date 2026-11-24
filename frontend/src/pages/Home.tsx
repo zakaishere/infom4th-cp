@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { useAuth, useData, useServerClock } from "../app";
+import { navigate, useAuth, useData, useServerClock } from "../app";
 import { SCORING_INFO } from "../components/Standings";
-import { Badge, Empty, ErrorBox, LiveDot, Loading, clock, when } from "../ui";
+import { Badge, CONTEST_FORMAT_LABEL, Empty, ErrorBox, LiveDot, Loading, clock, formatDuration, when } from "../ui";
 
+type ContestFormat = "STANDARD" | "BASIC" | "WARMUP";
 type Competition = {
   id: string; slug: string; title: string; status: string; run_id: string; starts_at: string; ends_at: string;
   mode?: string; scoring_system?: keyof typeof SCORING_INFO; max_team_size?: number; problem_count?: number; entrant_count?: number;
+  contest_format?: ContestFormat; require_fullscreen?: boolean;
 };
-type MyRun = { run_id: string; kind: string; status: string; starts_at: string; ends_at: string; title: string; competition_id: string; submissions_paused: boolean; entry_name?: string; members?: string | null; team_id?: string | null };
+type MyRun = { run_id: string; kind: string; status: string; starts_at: string; ends_at: string; title: string; competition_id: string; submissions_paused: boolean; contest_format?: ContestFormat; entry_name?: string; members?: string | null; team_id?: string | null };
 
 export function runPhase(now: number, start: string, end: string) {
   const s = new Date(start).getTime(), e = new Date(end).getTime();
@@ -22,21 +24,27 @@ export function PhaseBadge({ phase, ms }: { phase: string; ms: number }) {
   return <Badge>Ended</Badge>;
 }
 
-const duration = (c: { starts_at: string; ends_at: string }) => {
-  const m = Math.round((new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime()) / 60000);
-  return m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? String(m % 60).padStart(2, "0") : ""}` : m + " min";
+const duration = (c: { starts_at: string; ends_at: string }) =>
+  formatDuration(Math.max(60, Math.round((new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime()) / 1000)));
+
+const FORMAT_STYLE: Record<ContestFormat, { borderColor?: string; color?: string }> = {
+  BASIC: { borderColor: "var(--ok)", color: "var(--ok)" },
+  WARMUP: { borderColor: "#35c7e8", color: "#35c7e8" },
+  STANDARD: {},
 };
 
 function ContestCard({ c, now, registered, organizer }: { c: Competition; now: number; registered: boolean; organizer: boolean }) {
   const p = runPhase(now, c.starts_at, c.ends_at);
   const total = new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime();
   const enter = p.phase === "live" && registered;
+  const fmt: ContestFormat = c.contest_format ?? "STANDARD";
   return (
     <div className={"card hover contest-card rise " + p.phase}>
       <div className="contest-top">
         <div className="stack" style={{ gap: "0.3rem" }}>
           <h3>{c.title}</h3>
           <div className="row" style={{ gap: "0.3rem" }}>
+            <span className="tag" style={FORMAT_STYLE[fmt]}>{CONTEST_FORMAT_LABEL[fmt] ?? "Normal"}</span>
             {c.scoring_system && <span className="tag scoring">{SCORING_INFO[c.scoring_system]?.name}</span>}
             {c.mode && <span className="tag">{c.mode === "TEAM" ? `Teams of ≤${c.max_team_size}` : "Individual"}</span>}
             {registered && <span className="tag" style={{ color: "var(--ok)", borderColor: "var(--ok)" }}>Registered</span>}
@@ -72,33 +80,43 @@ export default function Home() {
   const mine = useData<MyRun[]>("/api/me/runs", 30000);
   const now = useServerClock();
   const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "ended">("all");
+  const [kindFilter, setKindFilter] = useState<"ALL" | ContestFormat>("ALL");
   const myRuns = new Set((mine.data ?? []).map((r) => r.run_id));
   const all = competitions.data ?? [];
+  const byKind = kindFilter === "ALL" ? all : all.filter((c) => (c.contest_format ?? "STANDARD") === kindFilter);
   const phaseOf = (c: Competition) => runPhase(now, c.starts_at, c.ends_at).phase;
-  const live = all.filter((c) => phaseOf(c) === "live");
-  const upcoming = all.filter((c) => phaseOf(c) === "upcoming").sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-  const ended = all.filter((c) => phaseOf(c) === "ended");
+  const live = byKind.filter((c) => phaseOf(c) === "live");
+  const upcoming = byKind.filter((c) => phaseOf(c) === "upcoming").sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const ended = byKind.filter((c) => phaseOf(c) === "ended");
   const shown = filter === "live" ? live : filter === "upcoming" ? upcoming : filter === "ended" ? ended : [...live, ...upcoming, ...ended];
+  const allLive = all.filter((c) => phaseOf(c) === "live");
+  const allUpcoming = all.filter((c) => phaseOf(c) === "upcoming").sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   // Rehearsals and private contests the user entered are not in the public list.
   const privateActive = (mine.data ?? []).filter((r) => !all.some((c) => c.run_id === r.run_id) && runPhase(now, r.starts_at, r.ends_at).phase !== "ended" && r.status !== "FINISHED");
-  const next = upcoming.find((c) => myRuns.has(c.run_id)) ?? upcoming[0];
+  const next = allUpcoming.find((c) => myRuns.has(c.run_id)) ?? allUpcoming[0];
+  const countOfKind = (k: ContestFormat) => all.filter((c) => (c.contest_format ?? "STANDARD") === k).length;
 
   return (
     <main className="page">
       <section className="hero">
         <div className="eyebrow" style={{ color: "#35c7e8" }}>Welcome back, {me?.display_name}</div>
-        <h1>Ready to compete?</h1>
-        <p>Pick a contest, register, and the arena opens by itself when the clock hits zero. Solve fast, avoid wrong answers, and climb the live scoreboard.</p>
+        <div className="row-between" style={{ alignItems: "flex-start", gap: "1rem" }}>
+          <div>
+            <h1>Ready to compete?</h1>
+            <p>Pick a contest — Basic events, long Warmups, or Normal rounds — register, and enter the arena when the clock hits zero.</p>
+          </div>
+          {organizer && <button className="primary" onClick={() => navigate("/admin/contests/new")}>+ New contest</button>}
+        </div>
         <div className="hero-stats">
-          <div><strong>{live.length}</strong><span>Live now</span></div>
-          <div><strong>{upcoming.length}</strong><span>Upcoming</span></div>
+          <div><strong>{allLive.length}</strong><span>Live now</span></div>
+          <div><strong>{allUpcoming.length}</strong><span>Upcoming</span></div>
           <div><strong>{(mine.data ?? []).length}</strong><span>Contests you entered</span></div>
           {next && <div><strong className="mono">{clock(new Date(next.starts_at).getTime() - now)}</strong><span>Until {next.title}</span></div>}
         </div>
         <img src="/logo.png" alt="" />
       </section>
 
-      {live.filter((c) => myRuns.has(c.run_id)).map((c) => (
+      {allLive.filter((c) => myRuns.has(c.run_id)).map((c) => (
         <a key={c.id} href={"#/arena/" + c.run_id} className="notice ok row-between rise" style={{ marginBottom: "1.25rem", color: "inherit", textDecoration: "none" }}>
           <span className="row"><LiveDot /><strong>{c.title} is live</strong><span className="muted">{clock(new Date(c.ends_at).getTime() - now)} left</span></span>
           <span className="btn primary small">Enter arena ▸</span>
@@ -124,16 +142,28 @@ export default function Home() {
       )}
 
       <section>
-        <div className="row-between" style={{ marginBottom: "1rem" }}>
-          <div className="section-title" style={{ margin: 0 }}><h2>Contests</h2><span className="count">{all.length}</span></div>
-          <div className="filters">
-            {([["all", "All"], ["live", `Live (${live.length})`], ["upcoming", `Upcoming (${upcoming.length})`], ["ended", "Finished"]] as const).map(([k, label]) => (
-              <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>{label}</button>
-            ))}
+        <div className="row-between" style={{ marginBottom: "0.75rem", gap: "0.75rem" }}>
+          <div className="section-title" style={{ margin: 0 }}><h2>Contests</h2><span className="count">{byKind.length}</span></div>
+          <div className="row" style={{ gap: "0.75rem" }}>
+            <div className="filters" role="group" aria-label="Contest category">
+              {([
+                ["ALL", `All types (${all.length})`],
+                ["BASIC", `Basic (${countOfKind("BASIC")})`],
+                ["WARMUP", `Warmup (${countOfKind("WARMUP")})`],
+                ["STANDARD", `Normal (${countOfKind("STANDARD")})`],
+              ] as const).map(([k, label]) => (
+                <button key={k} className={kindFilter === k ? "active" : ""} onClick={() => setKindFilter(k)}>{label}</button>
+              ))}
+            </div>
+            <div className="filters" role="group" aria-label="Contest status">
+              {([["all", "All"], ["live", `Live (${live.length})`], ["upcoming", `Upcoming (${upcoming.length})`], ["ended", "Finished"]] as const).map(([k, label]) => (
+                <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>{label}</button>
+              ))}
+            </div>
           </div>
         </div>
         <ErrorBox error={competitions.error} />
-        {competitions.loading ? <Loading /> : shown.length === 0 ? <Empty>{filter === "all" ? "No public contests yet. Check back soon!" : "Nothing here right now."}</Empty> : (
+        {competitions.loading ? <Loading /> : shown.length === 0 ? <Empty>{all.length === 0 ? "No public contests yet. Check back soon!" : "No contest matches these filters."}</Empty> : (
           <div className="contest-grid">
             {shown.map((c) => <ContestCard key={c.id} c={c} now={now} registered={myRuns.has(c.run_id)} organizer={organizer} />)}
           </div>

@@ -71,7 +71,7 @@ class WarmupContestTest {
     }
     UUID warmup(User owner,int days) {
         return contests.create(owner.actor,new HashMap<>(Map.of("slug","warm-"+UUID.randomUUID(),"title","Warmup","languages",List.of("CPP"),
-                "format","WARMUP","days",days,"scoringSystem","ICPC","freezeBeforeEndSeconds",600)));
+                "format","WARMUP","days",days)));
     }
     /** Moves the run's clock back, as if it had started `seconds` earlier. */
     void startedAgo(UUID run,long seconds) {
@@ -90,15 +90,33 @@ class WarmupContestTest {
     @SuppressWarnings("unchecked")
     static List<Map<String,Object>> list(Object value){return (List<Map<String,Object>>)value;}
 
-    @Test void warmupUsesWholeDaysBestSubmissionScoringAndStaysUnrated() {
+    @Test void warmupDefaultsSensiblyAndAllCategoriesAllowFlexibleDurationsAndScoring() {
         User owner=user(true);UUID contest=warmup(owner,3);
         var v=contests.version(contest);
         assertEquals("WARMUP",v.get("contest_format"));
         assertEquals(3*86400,((Number)v.get("duration_seconds")).intValue());
-        assertEquals("IOI",v.get("scoring_system"),"a warmup ignores the requested scoring");
-        assertEquals(0,((Number)v.get("freeze_before_end_seconds")).intValue(),"a warmup never freezes");
+        assertEquals("IOI",v.get("scoring_system"));
+        assertEquals(0,((Number)v.get("freeze_before_end_seconds")).intValue());
         assertEquals(true,v.get("publish_to_practice"));
+        assertEquals(false,v.get("require_fullscreen"));
         assertEquals(false,db.one("SELECT rated FROM competitions WHERE id=?",contest).get("rated"));
+
+        // BASIC category defaults to 90 min, unrated, fullscreen on, and supports custom settings.
+        UUID basic=contests.create(owner.actor,new HashMap<>(Map.of("slug","basic-"+UUID.randomUUID(),"title","Basic Event","languages",List.of("CPP"),"format","BASIC")));
+        var bv=contests.version(basic);
+        assertEquals("BASIC",bv.get("contest_format"));
+        assertEquals(5400,((Number)bv.get("duration_seconds")).intValue());
+        assertEquals(true,bv.get("require_fullscreen"));
+        assertEquals(false,db.one("SELECT rated FROM competitions WHERE id=?",basic).get("rated"));
+
+        // STANDARD (Normal) contests can also be multi-day and disable fullscreen.
+        UUID longNormal=contests.create(owner.actor,new HashMap<>(Map.of("slug","norm-"+UUID.randomUUID(),"title","Week Cup","languages",List.of("CPP"),
+                "format","STANDARD","durationSeconds",5*86400,"requireFullscreen",false)));
+        var nv=contests.version(longNormal);
+        assertEquals("STANDARD",nv.get("contest_format"));
+        assertEquals(5*86400,((Number)nv.get("duration_seconds")).intValue());
+        assertEquals(false,nv.get("require_fullscreen"));
+
         UUID p=problem(owner,"Late");
         var outside=assertThrows(RuntimeException.class,()->contests.attach(owner.actor,contest,p,1,"A",null,4));
         assertTrue(outside.getMessage().contains("day from 1 to 3"),outside.getMessage());
@@ -109,13 +127,13 @@ class WarmupContestTest {
         assertTrue(tooShort.getMessage().contains("after day 2"),tooShort.getMessage());
     }
 
-    @Test void standardContestProblemsAllOpenAtTheStart() {
+    @Test void standardContestProblemsAllOpenAtTheStartAndSupportLongDuration() {
         User owner=user(true);
         UUID contest=contests.create(owner.actor,new HashMap<>(Map.of("slug","std-"+UUID.randomUUID(),"title","Standard","languages",List.of("CPP"),"durationSeconds",3600)));
         UUID p=problem(owner,"Only");
         assertThrows(RuntimeException.class,()->contests.attach(owner.actor,contest,p,1,"A",null,2));
-        contests.edit(owner.actor,contest,Map.of("days",3));
-        assertEquals(3600,((Number)contests.version(contest).get("duration_seconds")).intValue(),"days only apply to warmups");
+        contests.edit(owner.actor,contest,Map.of("durationSeconds",3*86400));
+        assertEquals(3*86400,((Number)contests.version(contest).get("duration_seconds")).intValue());
     }
 
     @Test void problemsOpenDayByDayAndJoinPracticeWhenTheWarmupEnds() throws Exception {

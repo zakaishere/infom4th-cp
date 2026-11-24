@@ -21,32 +21,37 @@ public class CompetitionService {
         String mode=Api.optional(body,"mode","INDIVIDUAL",16);
         Api.require(List.of("INDIVIDUAL","TEAM").contains(mode),HttpStatus.BAD_REQUEST,"Invalid competition mode");
         int size=mode.equals("TEAM")?Api.number(body,"maxTeamSize",3,1,10):1;
-        boolean warmup=WARMUP.equals(format(body));
-        // A warmup lasts whole days, scores the best submission per problem and never freezes.
-        String scoring=warmup?"IOI":scoring(body,"ICPC");
-        int duration=warmup?Api.number(body,"days",7,1,MAX_WARMUP_DAYS)*DAY:Api.number(body,"durationSeconds",10800,60,DAY);
-        int freeze=warmup?0:Api.number(body,"freezeBeforeEndSeconds",0,0,DAY-1);
+        String format=format(body);
+        boolean warmup=WARMUP.equals(format),basic=BASIC.equals(format);
+        // Format acts primarily as a category/preset: every contest can customize scoring, duration (minutes to multi-day), freeze and full screen.
+        String scoring=body.containsKey("scoringSystem")?scoring(body,warmup?"IOI":"ICPC"):(warmup?"IOI":"ICPC");
+        int duration=body.containsKey("durationSeconds")?Api.number(body,"durationSeconds",10800,60,MAX_DURATION_SECONDS)
+                :(warmup || body.containsKey("days"))?Api.number(body,"days",7,1,60)*DAY
+                :(basic?5400:10800);
+        int freeze=Api.number(body,"freezeBeforeEndSeconds",0,0,duration-1);
         boolean practice=body.containsKey("publishToPractice")?Boolean.TRUE.equals(body.get("publishToPractice")):warmup;
-        UUID version=db.id("INSERT INTO competition_versions(competition_id,version_number,duration_seconds,mode,max_team_size,description_md,rules_md,wrong_attempt_penalty_seconds,penalize_compilation_errors,freeze_before_end_seconds,created_by,scoring_system,contest_format,publish_to_practice) VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
+        boolean requireFullscreen=body.containsKey("requireFullscreen")?Boolean.TRUE.equals(body.get("requireFullscreen")):(!warmup && duration<=DAY);
+        boolean rated=body.containsKey("rated")?Boolean.TRUE.equals(body.get("rated")):(!warmup && !basic);
+        UUID version=db.id("INSERT INTO competition_versions(competition_id,version_number,duration_seconds,mode,max_team_size,description_md,rules_md,wrong_attempt_penalty_seconds,penalize_compilation_errors,freeze_before_end_seconds,created_by,scoring_system,contest_format,publish_to_practice,require_fullscreen) VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
                 id,duration,mode,size,Api.optional(body,"description","",262144),
                 Api.optional(body,"rules","",262144),Api.number(body,"wrongAttemptPenaltySeconds",1200,0,86400),
-                Boolean.TRUE.equals(body.get("penalizeCompilationErrors")),freeze,actor.id(),scoring,warmup?WARMUP:"STANDARD",practice);
-        // Warmups are practice: they stay out of ratings unless the organizer turns that on.
-        if(warmup)db.jdbc.update("UPDATE competitions SET rated=false WHERE id=?",id);
+                Boolean.TRUE.equals(body.get("penalizeCompilationErrors")),freeze,actor.id(),scoring,format,practice,requireFullscreen);
+        if(!rated)db.jdbc.update("UPDATE competitions SET rated=false WHERE id=?",id);
         for(String language:Api.languages(body))db.jdbc.update("INSERT INTO competition_version_languages VALUES (?,?)",version,language);
         db.audit(actor.id(),"COMPETITION_CREATE","competition",id,null);return id;
     }
-    static final String WARMUP="WARMUP";
-    static final int DAY=86400,MAX_WARMUP_DAYS=31;
+    static final String WARMUP="WARMUP",BASIC="BASIC";
+    static final int DAY=86400,MAX_WARMUP_DAYS=31,MAX_DURATION_SECONDS=60*DAY;
+    static final List<String> FORMATS=List.of("STANDARD",BASIC,WARMUP);
     static String format(Map<String,Object> body) {
         String value=Api.optional(body,"format","STANDARD",16);
-        Api.require(List.of("STANDARD",WARMUP).contains(value),HttpStatus.BAD_REQUEST,"Format must be STANDARD or WARMUP");
+        Api.require(FORMATS.contains(value),HttpStatus.BAD_REQUEST,"Format must be one of "+FORMATS);
         return value;
     }
     static boolean warmup(Map<String,Object> version){return WARMUP.equals(version.get("contest_format"));}
-    /** Number of days of a warmup (1 for other contests, whose problems all open at the start). */
-    static int days(Map<String,Object> version){return warmup(version)?((Number)version.get("duration_seconds")).intValue()/DAY:1;}
-    /** When a problem of a run opens: the start for normal contests, start + (day - 1) days in a warmup. */
+    /** Number of days covered by a contest (at least 1). */
+    static int days(Map<String,Object> version){return Math.max(1,(int)Math.ceil(((Number)version.get("duration_seconds")).doubleValue()/DAY));}
+    /** When a problem of a run opens: the start for day 1, or start + (day - 1) days when staggered. */
     static Instant opensAt(Instant runStart,Object releaseDay){return runStart.plusSeconds((long)DAY*(((Number)releaseDay).intValue()-1));}
     static String scoring(Map<String,Object> body,String fallback) {
         String value=Api.optional(body,"scoringSystem",fallback,16);
@@ -61,22 +66,38 @@ public class CompetitionService {
         var v=version(competition);
         Api.require(v.get("sealed_at")==null,HttpStatus.CONFLICT,"Clone the snapshot before editing");
         if(body.containsKey("title"))db.jdbc.update("UPDATE competitions SET title=? WHERE id=?",Api.text(body,"title",255),competition);
+        if(body.containsKey("rated"))db.jdbc.update("UPDATE competitions SET rated=? WHERE id=?",Boolean.TRUE.equals(body.get("rated")),competition);
         for(var field:Map.of("description","description_md","rules","rules_md").entrySet())
             if(body.containsKey(field.getKey()))db.jdbc.update("UPDATE competition_versions SET "+field.getValue()+"=? WHERE id=?",String.valueOf(body.get(field.getKey())),v.get("id"));
-        boolean warmup=warmup(v);
-        if(warmup) {
-            Api.require(!body.containsKey("scoringSystem") || "IOI".equals(body.get("scoringSystem")),HttpStatus.BAD_REQUEST,"A warmup always scores the best submission on each problem");
-            Api.require(!body.containsKey("freezeBeforeEndSeconds") || Api.number(body,"freezeBeforeEndSeconds",0,0,0)==0,HttpStatus.BAD_REQUEST,"A warmup scoreboard never freezes");
-            if(body.containsKey("days")) {
-                int days=Api.number(body,"days",7,1,MAX_WARMUP_DAYS);
-                Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=? AND release_day>?)",v.get("id"),days),HttpStatus.CONFLICT,"Some problems open after day "+days+"; move them to an earlier day first");
-                db.jdbc.update("UPDATE competition_versions SET duration_seconds=? WHERE id=?",days*DAY,v.get("id"));
-            }
-        } else if(body.containsKey("durationSeconds"))db.jdbc.update("UPDATE competition_versions SET duration_seconds=? WHERE id=?",Api.number(body,"durationSeconds",3600,60,86400),v.get("id"));
+        if(body.containsKey("format"))db.jdbc.update("UPDATE competition_versions SET contest_format=? WHERE id=?",format(body),v.get("id"));
+        if(body.containsKey("mode")) {
+            String mode=Api.text(body,"mode",16);
+            Api.require(List.of("INDIVIDUAL","TEAM").contains(mode),HttpStatus.BAD_REQUEST,"Invalid competition mode");
+            int size=mode.equals("TEAM")?Api.number(body,"maxTeamSize",3,1,10):1;
+            db.jdbc.update("UPDATE competition_versions SET mode=?,max_team_size=? WHERE id=?",mode,size,v.get("id"));
+        } else if(body.containsKey("maxTeamSize") && "TEAM".equals(v.get("mode"))) {
+            db.jdbc.update("UPDATE competition_versions SET max_team_size=? WHERE id=?",Api.number(body,"maxTeamSize",3,1,10),v.get("id"));
+        }
+        int nextDuration=((Number)v.get("duration_seconds")).intValue();
+        if(body.containsKey("durationSeconds")) {
+            nextDuration=Api.number(body,"durationSeconds",3600,60,MAX_DURATION_SECONDS);
+        } else if(body.containsKey("days")) {
+            int days=Api.number(body,"days",7,1,60);
+            Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=? AND release_day>?)",v.get("id"),days),HttpStatus.CONFLICT,"Some problems open after day "+days+"; move them to an earlier day first");
+            nextDuration=days*DAY;
+        }
+        int nextFreeze=body.containsKey("freezeBeforeEndSeconds")
+                ?Api.number(body,"freezeBeforeEndSeconds",0,0,nextDuration-1)
+                :Math.min(((Number)v.get("freeze_before_end_seconds")).intValue(),nextDuration-1);
+        if(body.containsKey("durationSeconds") || body.containsKey("days") || body.containsKey("freezeBeforeEndSeconds")) {
+            int maxSpanDays=Math.max(1,(int)Math.ceil(nextDuration/(double)DAY));
+            Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=? AND release_day>?)",v.get("id"),maxSpanDays),HttpStatus.CONFLICT,"Some problems open after day "+maxSpanDays+"; move them to an earlier day first");
+            db.jdbc.update("UPDATE competition_versions SET duration_seconds=?,freeze_before_end_seconds=? WHERE id=?",nextDuration,nextFreeze,v.get("id"));
+        }
         if(body.containsKey("publishToPractice"))db.jdbc.update("UPDATE competition_versions SET publish_to_practice=? WHERE id=?",Boolean.TRUE.equals(body.get("publishToPractice")),v.get("id"));
-        if(body.containsKey("scoringSystem") && !warmup)db.jdbc.update("UPDATE competition_versions SET scoring_system=? WHERE id=?",scoring(body,"ICPC"),v.get("id"));
+        if(body.containsKey("requireFullscreen"))db.jdbc.update("UPDATE competition_versions SET require_fullscreen=? WHERE id=?",Boolean.TRUE.equals(body.get("requireFullscreen")),v.get("id"));
+        if(body.containsKey("scoringSystem"))db.jdbc.update("UPDATE competition_versions SET scoring_system=? WHERE id=?",scoring(body,"ICPC"),v.get("id"));
         if(body.containsKey("penalizeCompilationErrors"))db.jdbc.update("UPDATE competition_versions SET penalize_compilation_errors=? WHERE id=?",Boolean.TRUE.equals(body.get("penalizeCompilationErrors")),v.get("id"));
-        if(body.containsKey("freezeBeforeEndSeconds") && !warmup)db.jdbc.update("UPDATE competition_versions SET freeze_before_end_seconds=? WHERE id=?",Api.number(body,"freezeBeforeEndSeconds",0,0,86399),v.get("id"));
         if(body.containsKey("wrongAttemptPenaltySeconds"))db.jdbc.update("UPDATE competition_versions SET wrong_attempt_penalty_seconds=? WHERE id=?",Api.number(body,"wrongAttemptPenaltySeconds",1200,0,86400),v.get("id"));
         if(body.containsKey("languages")) {
             db.jdbc.update("DELETE FROM competition_version_languages WHERE competition_version_id=?",v.get("id"));
@@ -101,7 +122,7 @@ public class CompetitionService {
         var contest=db.one("SELECT * FROM competitions WHERE id=? FOR UPDATE",competition);
         Api.require(List.of("DRAFT","INTERNAL_TESTING","READY").contains(contest.get("status")),HttpStatus.CONFLICT,"Contest is already scheduled");
         var v=version(competition);Api.require(v.get("sealed_at")!=null,HttpStatus.CONFLICT,"Current snapshot is editable");
-        UUID next=db.id("INSERT INTO competition_versions(competition_id,version_number,description_md,rules_md,mode,max_team_size,duration_seconds,scoring_system,wrong_attempt_penalty_seconds,penalize_compilation_errors,freeze_before_end_seconds,created_by,contest_format,publish_to_practice) SELECT competition_id,version_number+1,description_md,rules_md,mode,max_team_size,duration_seconds,scoring_system,wrong_attempt_penalty_seconds,penalize_compilation_errors,freeze_before_end_seconds,?,contest_format,publish_to_practice FROM competition_versions WHERE id=? RETURNING id",actor.id(),v.get("id"));
+        UUID next=db.id("INSERT INTO competition_versions(competition_id,version_number,description_md,rules_md,mode,max_team_size,duration_seconds,scoring_system,wrong_attempt_penalty_seconds,penalize_compilation_errors,freeze_before_end_seconds,created_by,contest_format,publish_to_practice,require_fullscreen) SELECT competition_id,version_number+1,description_md,rules_md,mode,max_team_size,duration_seconds,scoring_system,wrong_attempt_penalty_seconds,penalize_compilation_errors,freeze_before_end_seconds,?,contest_format,publish_to_practice,require_fullscreen FROM competition_versions WHERE id=? RETURNING id",actor.id(),v.get("id"));
         db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) SELECT ?,slot,label,problem_id,problem_version_id,points,release_day FROM competition_problems WHERE competition_version_id=?",next,v.get("id"));
         db.jdbc.update("INSERT INTO competition_version_languages SELECT ?,language_code FROM competition_version_languages WHERE competition_version_id=?",next,v.get("id"));
         if("READY".equals(contest.get("status")))db.jdbc.update("UPDATE competitions SET status='INTERNAL_TESTING' WHERE id=?",competition);
@@ -122,7 +143,7 @@ public class CompetitionService {
         db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competition);
         var v=version(competition);Api.require(v.get("sealed_at")==null,HttpStatus.CONFLICT,"Clone the contest snapshot before editing");
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions pv JOIN problems p ON p.id=pv.problem_id WHERE pv.id=? AND p.archived_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"This problem was deleted; restore it first");
-        Api.require(releaseDay>=1 && releaseDay<=days(v),HttpStatus.BAD_REQUEST,warmup(v)?"Pick a day from 1 to "+days(v):"Problems of this contest all open at the start");
+        Api.require(releaseDay>=1 && releaseDay<=(warmup(v)?days(v):1),HttpStatus.BAD_REQUEST,warmup(v)?"Pick a day from 1 to "+days(v):"Problems of this contest all open at the start");
         db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) SELECT ?,?,?,problem_id,id,?,? FROM problem_versions WHERE id=?",
                 v.get("id"),slot,label,points,releaseDay,problemVersion);
     }

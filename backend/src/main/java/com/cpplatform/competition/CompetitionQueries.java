@@ -18,13 +18,14 @@ public class CompetitionQueries {
         access.competition(actor,competition,false);
         var result=new LinkedHashMap<>(db.one("SELECT * FROM competitions WHERE id=?",competition));
         var version=contests.version(competition);result.put("version",version);
+        result.put("languages",db.jdbc.queryForList("SELECT language_code FROM competition_version_languages WHERE competition_version_id=? ORDER BY language_code",String.class,version.get("id")));
         result.put("problems",db.jdbc.queryForList("SELECT * FROM competition_problems WHERE competition_version_id=? ORDER BY slot",version.get("id")));
         result.put("runs",db.jdbc.queryForList("SELECT * FROM contest_runs WHERE competition_id=? ORDER BY created_at DESC",competition));return result;
     }
     /** Competitions the organizer owns or staffs; every competition for a super administrator. */
     public List<Map<String,Object>> managed(Actor actor) {
         access.organizer(actor);
-        return db.jdbc.queryForList("SELECT c.* FROM competitions c WHERE ? OR c.owner_id=? OR EXISTS(SELECT 1 FROM competition_staff s WHERE s.competition_id=c.id AND s.user_id=?) ORDER BY c.created_at DESC LIMIT 200",actor.superAdmin(),actor.id(),actor.id());
+        return db.jdbc.queryForList("SELECT c.*,(SELECT v.contest_format FROM competition_versions v WHERE v.competition_id=c.id ORDER BY v.version_number DESC LIMIT 1) AS contest_format FROM competitions c WHERE ? OR c.owner_id=? OR EXISTS(SELECT 1 FROM competition_staff s WHERE s.competition_id=c.id AND s.user_id=?) ORDER BY c.created_at DESC LIMIT 200",actor.superAdmin(),actor.id(),actor.id());
     }
     public List<Map<String,Object>> participants(Actor actor,UUID competition) {
         access.competition(actor,competition,false);
@@ -36,18 +37,18 @@ public class CompetitionQueries {
     }
     /** Published public competitions with their official run. */
     public List<Map<String,Object>> published() {
-        return db.jdbc.queryForList("SELECT c.id,c.slug,c.title,c.status,r.id AS run_id,r.starts_at,r.ends_at,v.mode,v.scoring_system,v.max_team_size,"
+        return db.jdbc.queryForList("SELECT c.id,c.slug,c.title,c.status,r.id AS run_id,r.starts_at,r.ends_at,v.mode,v.scoring_system,v.max_team_size,v.contest_format,v.require_fullscreen,"
                 +"(SELECT count(*) FROM competition_problems p WHERE p.competition_version_id=v.id) AS problem_count,(SELECT count(*) FROM run_entries e WHERE e.run_id=r.id) AS entrant_count "
                 +"FROM competitions c JOIN contest_runs r ON r.competition_id=c.id AND r.kind='OFFICIAL' JOIN competition_versions v ON v.id=r.competition_version_id WHERE c.published_at IS NOT NULL AND c.visibility='PUBLIC' ORDER BY r.starts_at DESC LIMIT 200");
     }
     /** Runs the actor is an entrant of, including rehearsals and unlisted/private contests. */
     public List<Map<String,Object>> runsOf(Actor actor) {
-        return db.jdbc.queryForList("SELECT r.id AS run_id,r.kind,r.status,r.starts_at,r.ends_at,r.submissions_paused,c.id AS competition_id,c.slug,c.title,m.entry_id,e.display_name AS entry_name,e.team_id,(SELECT string_agg(u.handle,', ' ORDER BY u.handle) FROM run_entry_members x JOIN users u ON u.id=x.user_id WHERE x.entry_id=m.entry_id) AS members FROM run_entry_members m JOIN contest_runs r ON r.id=m.run_id JOIN competitions c ON c.id=r.competition_id JOIN run_entries e ON e.id=m.entry_id WHERE m.user_id=? ORDER BY r.starts_at DESC LIMIT 100",actor.id());
+        return db.jdbc.queryForList("SELECT r.id AS run_id,r.kind,r.status,r.starts_at,r.ends_at,r.submissions_paused,c.id AS competition_id,c.slug,c.title,v.contest_format,m.entry_id,e.display_name AS entry_name,e.team_id,(SELECT string_agg(u.handle,', ' ORDER BY u.handle) FROM run_entry_members x JOIN users u ON u.id=x.user_id WHERE x.entry_id=m.entry_id) AS members FROM run_entry_members m JOIN contest_runs r ON r.id=m.run_id JOIN competitions c ON c.id=r.competition_id JOIN competition_versions v ON v.id=r.competition_version_id JOIN run_entries e ON e.id=m.entry_id WHERE m.user_id=? ORDER BY r.starts_at DESC LIMIT 100",actor.id());
     }
     /** A run, its configuration and, once it has started (or for the jury), its problems. */
     public Map<String,Object> run(Actor actor,UUID run) {
         var r=contests.runAccess(actor,run,false);
-        var v=db.one("SELECT c.title,v.description_md,v.rules_md,v.mode,v.duration_seconds,v.scoring_system,v.wrong_attempt_penalty_seconds,v.freeze_before_end_seconds,v.max_team_size,v.contest_format,v.publish_to_practice FROM competition_versions v JOIN competitions c ON c.id=v.competition_id WHERE v.id=?",r.get("competition_version_id"));
+        var v=db.one("SELECT c.title,v.description_md,v.rules_md,v.mode,v.duration_seconds,v.scoring_system,v.wrong_attempt_penalty_seconds,v.freeze_before_end_seconds,v.max_team_size,v.contest_format,v.publish_to_practice,v.require_fullscreen FROM competition_versions v JOIN competitions c ON c.id=v.competition_id WHERE v.id=?",r.get("competition_version_id"));
         var result=new LinkedHashMap<String,Object>();result.put("run",r);result.put("configuration",v);result.put("serverTime",Instant.now());
         boolean jury=access.jury(actor,(UUID)r.get("competition_id"));
         Instant now=Instant.now(),start=Api.time(r.get("starts_at"));

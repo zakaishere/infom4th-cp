@@ -317,8 +317,12 @@ public class LaboratoryService {
     /** Problems the actor owns or collaborates on (every problem for a super administrator); deleted=true lists the deleted ones instead. */
     public List<Map<String,Object>> list(Actor actor,boolean deleted) {
         access.setter(actor);
-        return db.jdbc.queryForList("SELECT p.id,p.slug,v.id AS version_id,v.title,v.version_number,v.status,p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE NOT p.system_benchmark AND (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC LIMIT 500",
+        var rows=db.jdbc.queryForList("SELECT p.id,p.slug,v.id AS version_id,v.title,v.version_number,v.status,v.difficulty,coalesce((SELECT pp.tags FROM practice_publications pp WHERE pp.problem_id=p.id),'{}'::text[]) AS tags,p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE NOT p.system_benchmark AND (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC LIMIT 500",
                 actor.superAdmin(),actor.id(),actor.id(),deleted);
+        for(var row:rows) if(row.get("tags") instanceof java.sql.Array array) {
+            try{row.put("tags",List.of((String[])array.getArray()));}catch(java.sql.SQLException e){throw new IllegalStateException(e);}
+        }
+        return rows;
     }
     /** Everything a setter edits: the version, its tests with hidden content, reference solutions, validations and languages. */
     public Map<String,Object> detail(Actor actor,UUID version) {

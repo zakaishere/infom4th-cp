@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { get, post } from "../../api";
 import { useAction, useAuth, useData, useServerClock } from "../../app";
-import { Badge, Empty, LiveDot, Loading, Meter, ReasonDialog, Stat, clock } from "../../ui";
+import { Badge, Empty, LiveDot, Loading, Meter, ReasonDialog, Stat, clock, formatDuration } from "../../ui";
 import { runPhase } from "../Home";
 
 type Competition = { id: string; title: string; status: string };
@@ -144,7 +144,7 @@ export default function Dashboard() {
         )}
       </div>
       {startNow && <ReasonDialog title={"Start now: " + startNow.competition.title} confirm="Start the contest"
-        description={<>The contest starts immediately and ends after its configured duration ({Math.round((new Date(startNow.ends_at).getTime() - new Date(startNow.starts_at).getTime()) / 60000)} min). Registered entrants see the problems at once.</>}
+        description={<>The contest starts immediately and ends after its configured duration ({formatDuration(Math.round((new Date(startNow.ends_at).getTime() - new Date(startNow.starts_at).getTime()) / 1000))}). Registered entrants see the problems at once.</>}
         onClose={() => setStartNow(null)}
         onSubmit={(reason) => run(async () => { await post("/api/manage/runs/" + startNow.id + "/control", { action: "start-now", reason }); setStartNow(null); }, "Contest started")} />}
       {pause && <ReasonDialog title={"Pause submissions: " + pause.competition.title} danger onClose={() => setPause(null)}

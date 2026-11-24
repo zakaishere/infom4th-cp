@@ -1,69 +1,168 @@
-import { useEffect, useState } from "react";
-import { displayTimeZone, get, post, serverNow } from "../../api";
+import { useEffect, useMemo, useState } from "react";
+import { get, post, serverNow } from "../../api";
 import { navigate, useData } from "../../app";
-import { ProgressLog, StepNav, Steps, slugify, type LogLine } from "../../components/Wizard";
+import { ProgressLog, slugify, type LogLine } from "../../components/Wizard";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SCORING_INFO } from "../../components/Standings";
-import { Badge, Empty, Field, Loading, fromZoneInput, toZoneInput, when } from "../../ui";
+import { DifficultyPill } from "../Practice";
+import { Badge, CONTEST_FORMAT_LABEL, Empty, Field, Loading, formatDuration, fromZoneInput, localTimeZone, toZoneInput, when } from "../../ui";
 
-type Lab = { version_id: string; title: string; slug: string; status: string };
+type ContestFormat = "STANDARD" | "BASIC" | "WARMUP";
+type Lab = { version_id: string; title: string; slug: string; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; tags?: string[] };
 type Draft = {
-  title: string; slug: string; mode: "INDIVIDUAL" | "TEAM"; maxTeamSize: number; hours: number; minutes: number;
-  freezeMinutes: number; penaltyMinutes: number; penalizeCompilationErrors: boolean; languages: string[];
-  description: string; rules: string; problems: string[]; participants: string; startsAt: string; visibility: string;
+  title: string; slug: string; kind: ContestFormat;
+  mode: "INDIVIDUAL" | "TEAM"; maxTeamSize: number;
+  durationSeconds: number;
+  freezeMinutes: number; penaltyMinutes: number; penalizeCompilationErrors: boolean;
+  languages: string[]; description: string; rules: string;
+  problems: string[]; participants: string; startsAt: string; visibility: string;
   scoring: "ICPC" | "IOI" | "CODEFORCES" | "ATCODER"; points: Record<string, number>;
-  /** WARMUP: a multi-day contest whose problems open day by day (see the backend V26 migration). */
-  kind: "STANDARD" | "WARMUP"; days: number; dayOf: Record<string, number>; publishToPractice: boolean;
+  publishToPractice: boolean; requireFullscreen: boolean; rated: boolean;
+  touchedTiming?: boolean; touchedScoring?: boolean;
 };
-const KEY = "cp.contest-wizard";
-const WARMUP_RULES = "- A new set of problems opens every day at the start time.\n- Earlier days stay open until the end: you can catch up any time.\n- Each problem counts your best submission (points for the tests it passes).\n- No time penalty and no full screen: solve at your own pace.\n- Do not share code until the warmup ends; the problems then move to Practice.";
-const RULES = "- Standard ICPC scoring: most problems solved, then least total time.\n- Each rejected attempt before acceptance adds the penalty below.\n- Ask questions about statements through Clarifications.\n- Do not share code during the contest.";
-/** The next full hour in the platform's time zone, as a datetime-local value. */
+
+const KEY = "cp.contest-wizard.v2";
+const RULES_BY_SCORING: Record<Draft["scoring"], string> = {
+  ICPC: "- Most problems solved wins; ties are broken by total time + penalty.\n- Each rejected attempt before acceptance adds the configured penalty.\n- Ask questions about statements through Clarifications.\n- Do not share code while the contest is running.",
+  IOI: "- Each problem counts your best submission (partial points for passed tests).\n- No time penalty for rejected attempts — solve at your own pace.\n- Ask questions about statements through Clarifications.\n- Do not share code until the contest ends.",
+  CODEFORCES: "- Problem points decrease gradually over time; rejected attempts deduct points.\n- Ask questions about statements through Clarifications.\n- Do not share code while the contest is running.",
+  ATCODER: "- Fixed points per problem; ties broken by time of last scoring submission + penalty.\n- Ask questions about statements through Clarifications.\n- Do not share code while the contest is running.",
+};
+
 function nextHour() {
   return toZoneInput(serverNow() + 60 * 60 * 1000).slice(0, 14) + "00";
 }
-/** ISO instant of the chosen start, read in the platform's time zone. */
 const startIso = (value: string) => new Date(fromZoneInput(value)).toISOString();
-const EMPTY: Draft = {
-  title: "", slug: "", mode: "INDIVIDUAL", maxTeamSize: 3, hours: 3, minutes: 0, freezeMinutes: 60, penaltyMinutes: 20,
-  penalizeCompilationErrors: false, languages: ["CPP", "C", "JAVA", "PYTHON"], description: "", rules: RULES,
-  problems: [], participants: "", startsAt: nextHour(), visibility: "PUBLIC", scoring: "ICPC", points: {},
-  kind: "STANDARD", days: 7, dayOf: {}, publishToPractice: true,
+
+const PRESETS: Record<ContestFormat, Pick<Draft, "durationSeconds" | "scoring" | "freezeMinutes" | "penaltyMinutes" | "requireFullscreen" | "rated" | "publishToPractice">> = {
+  BASIC: { durationSeconds: 90 * 60, scoring: "ICPC", freezeMinutes: 0, penaltyMinutes: 10, requireFullscreen: true, rated: false, publishToPractice: false },
+  WARMUP: { durationSeconds: 7 * 86400, scoring: "IOI", freezeMinutes: 0, penaltyMinutes: 0, requireFullscreen: false, rated: false, publishToPractice: true },
+  STANDARD: { durationSeconds: 3 * 3600, scoring: "ICPC", freezeMinutes: 60, penaltyMinutes: 20, requireFullscreen: true, rated: true, publishToPractice: false },
 };
-const defaultPoints = (scoring: Draft["scoring"], i: number) => (scoring === "IOI" ? 100 : scoring === "CODEFORCES" ? 500 * (i + 1) : scoring === "ATCODER" ? 100 * (i + 1) : 1);
-const STEPS = ["Details", "Problems", "Participants", "Schedule"];
-const label = (i: number) => String.fromCharCode(65 + i);
+
+const DURATION_CHIPS: [string, number][] = [
+  ["45m", 45 * 60],
+  ["1h", 3600],
+  ["1h 30m", 90 * 60],
+  ["2h", 2 * 3600],
+  ["3h", 3 * 3600],
+  ["5h", 5 * 3600],
+  ["1 day", 86400],
+  ["3 days", 3 * 86400],
+  ["7 days", 7 * 86400],
+  ["14 days", 14 * 86400],
+];
+
+const EMPTY: Draft = {
+  title: "", slug: "", kind: "BASIC", mode: "INDIVIDUAL", maxTeamSize: 3,
+  ...PRESETS.BASIC,
+  penalizeCompilationErrors: false, languages: ["CPP", "C", "JAVA", "PYTHON"],
+  description: "", rules: RULES_BY_SCORING.ICPC,
+  problems: [], participants: "", startsAt: nextHour(), visibility: "PUBLIC", points: {},
+  touchedTiming: false, touchedScoring: false,
+};
+
+const defaultPoints = (scoring: Draft["scoring"], i: number) =>
+  scoring === "IOI" ? 100 : scoring === "CODEFORCES" ? 500 * (i + 1) : scoring === "ATCODER" ? 100 * (i + 1) : 1;
+const label = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1));
+
+function splitDuration(totalSeconds: number) {
+  const mins = Math.max(1, Math.round(totalSeconds / 60));
+  const days = Math.floor(mins / 1440);
+  const rem = mins % 1440;
+  return { days, hours: Math.floor(rem / 60), minutes: rem % 60 };
+}
 
 export default function ContestWizard() {
   const lab = useData<Lab[]>("/api/lab/problems");
   const [d, setD] = useState<Draft>(() => {
-    try { return { ...EMPTY, startsAt: nextHour(), ...JSON.parse(localStorage.getItem(KEY) ?? "{}") }; } catch { return { ...EMPTY, startsAt: nextHour() }; }
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+      return { ...EMPTY, startsAt: nextHour(), ...saved };
+    } catch {
+      return { ...EMPTY, startsAt: nextHour() };
+    }
   });
-  const [step, setStep] = useState(0);
+  const [problemSearch, setProblemSearch] = useState("");
+  const [diffFilter, setDiffFilter] = useState<"" | "EASY" | "MEDIUM" | "HARD">(() => (d.kind === "BASIC" ? "EASY" : ""));
   const [log, setLog] = useState<LogLine[]>([]);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<string | null>(null);
-  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* ignore */ } }, [d]);
+
+  useEffect(() => {
+    try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* ignore */ }
+  }, [d]);
+
   const set = (change: Partial<Draft>) => setD((old) => ({ ...old, ...change }));
-  const approved = (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
-  const titles = Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p.title]));
-  const warmup = d.kind === "WARMUP";
-  const duration = warmup ? d.days * 86400 : d.hours * 3600 + d.minutes * 60;
-  const dayOf = (version: string) => Math.min(d.days, Math.max(1, d.dayOf[version] ?? 1));
-  // A warmup's letters follow its days: day 1 problems first, then day 2, and so on.
-  const ordered = warmup ? [...d.problems].sort((a, b) => dayOf(a) - dayOf(b)) : d.problems;
+
+  const applyPreset = (kind: ContestFormat, force = false) => {
+    const p = PRESETS[kind];
+    setD((old) => {
+      const nextScoring = force || !old.touchedScoring ? p.scoring : old.scoring;
+      const nextDuration = force || !old.touchedTiming ? p.durationSeconds : old.durationSeconds;
+      const nextFreeze = Math.min(force || !old.touchedTiming ? p.freezeMinutes : old.freezeMinutes, Math.max(0, Math.floor(nextDuration / 60) - 1));
+      const defaultRuleValues = Object.values(RULES_BY_SCORING);
+      const nextRules = defaultRuleValues.includes(old.rules) ? RULES_BY_SCORING[nextScoring] : old.rules;
+      return {
+        ...old,
+        kind,
+        durationSeconds: nextDuration,
+        scoring: nextScoring,
+        freezeMinutes: nextFreeze,
+        penaltyMinutes: force || !old.touchedScoring ? p.penaltyMinutes : old.penaltyMinutes,
+        requireFullscreen: force || !old.touchedTiming ? p.requireFullscreen : old.requireFullscreen,
+        rated: force || !old.touchedScoring ? p.rated : old.rated,
+        publishToPractice: force || !old.touchedScoring ? p.publishToPractice : old.publishToPractice,
+        rules: nextRules,
+        ...(force ? { touchedTiming: false, touchedScoring: false } : {}),
+      };
+    });
+    if (kind === "BASIC") setDiffFilter("EASY");
+    else if (diffFilter === "EASY" && d.problems.length === 0) setDiffFilter("");
+  };
+
+  const setDuration = (seconds: number) => {
+    const clamped = Math.max(60, Math.min(60 * 86400, Math.round(seconds)));
+    const maxFreezeMin = Math.max(0, Math.floor(clamped / 60) - 1);
+    set({
+      durationSeconds: clamped,
+      freezeMinutes: Math.min(d.freezeMinutes, maxFreezeMin),
+      // Multi-day contests should not trap participants in full screen unless explicitly re-enabled.
+      ...(clamped > 86400 && d.durationSeconds <= 86400 ? { requireFullscreen: false } : {}),
+      touchedTiming: true,
+    });
+  };
+
+  const approved = useMemo(
+    () => (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED"),
+    [lab.data],
+  );
+  const byId = useMemo(() => Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p])), [lab.data]);
+
+  const filteredProblems = useMemo(() => {
+    const q = problemSearch.trim().toLowerCase();
+    return approved.filter((p) => {
+      if (diffFilter && (p.difficulty ?? "MEDIUM") !== diffFilter) return false;
+      if (!q) return true;
+      return (p.title + " " + p.slug + " " + (p.tags ?? []).join(" ")).toLowerCase().includes(q);
+    });
+  }, [approved, diffFilter, problemSearch]);
+
+  const startMs = fromZoneInput(d.startsAt);
+  const endMs = Number.isNaN(startMs) ? NaN : startMs + d.durationSeconds * 1000;
+  const endsAtInput = Number.isNaN(endMs) ? "" : toZoneInput(endMs);
+  const { days, hours, minutes } = splitDuration(d.durationSeconds);
+
   const handles = d.participants.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
   const issues: string[] = [];
-  if (!d.title.trim()) issues.push("Title is required");
-  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) issues.push("Short name must be lowercase letters, digits and dashes");
-  if (warmup && !(d.days >= 1 && d.days <= 31)) issues.push("A warmup lasts 1 to 31 days");
-  if (!warmup && duration < 60) issues.push("Duration must be at least one minute");
-  if (!warmup && d.freezeMinutes * 60 >= duration) issues.push("Freeze must be shorter than the contest");
-  if (d.problems.length === 0) issues.push("Choose at least one problem");
-  if (d.languages.length === 0) issues.push("Choose at least one language");
-  const emptyDays = warmup ? Array.from({ length: d.days }, (_, i) => i + 1).filter((day) => !d.problems.some((v) => dayOf(v) === day)) : [];
+  if (!d.title.trim()) issues.push("Enter a contest name");
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) issues.push("Short URL name must use lowercase letters, digits and dashes");
+  if (d.durationSeconds < 60) issues.push("Duration must be at least 1 minute");
+  if (d.freezeMinutes * 60 >= d.durationSeconds) issues.push("Scoreboard freeze must be shorter than the contest duration");
+  if (d.problems.length === 0) issues.push("Select at least one problem");
+  if (d.languages.length === 0) issues.push("Select at least one allowed language");
 
-  async function run(text: string, action: () => Promise<unknown>) {
+  async function runStep(text: string, action: () => Promise<unknown>) {
     setLog((l) => [...l, { text, state: "running" }]);
     try {
       const result = await action();
@@ -76,179 +175,428 @@ export default function ContestWizard() {
   }
 
   async function finish(schedule: boolean, startNow = false) {
-    setBusy(true); setLog([]);
+    setBusy(true);
+    setLog([]);
     try {
       let id = created;
       if (!id) {
-        const r = await run("Creating contest", () => post<{ competitionId: string }>("/api/manage/competitions", {
-          slug: d.slug, title: d.title, mode: d.mode, maxTeamSize: d.mode === "TEAM" ? d.maxTeamSize : 1, languages: d.languages,
-          ...(warmup
-            ? { format: "WARMUP", days: d.days, publishToPractice: d.publishToPractice }
-            : { durationSeconds: duration, scoringSystem: d.scoring, freezeBeforeEndSeconds: d.freezeMinutes * 60 }),
-          // The API rejects blank optional text; leave it out instead.
-          ...(d.description.trim() ? { description: d.description } : {}), ...(d.rules.trim() ? { rules: d.rules } : {}),
-          wrongAttemptPenaltySeconds: d.penaltyMinutes * 60, penalizeCompilationErrors: d.penalizeCompilationErrors,
+        const r = await runStep("Creating contest", () => post<{ competitionId: string }>("/api/manage/competitions", {
+          slug: d.slug,
+          title: d.title.trim(),
+          format: d.kind,
+          mode: d.mode,
+          maxTeamSize: d.mode === "TEAM" ? d.maxTeamSize : 1,
+          languages: d.languages,
+          durationSeconds: d.durationSeconds,
+          scoringSystem: d.scoring,
+          freezeBeforeEndSeconds: d.freezeMinutes * 60,
+          wrongAttemptPenaltySeconds: d.penaltyMinutes * 60,
+          penalizeCompilationErrors: d.penalizeCompilationErrors,
+          publishToPractice: d.publishToPractice,
+          requireFullscreen: d.requireFullscreen,
+          rated: d.rated,
+          ...(d.description.trim() ? { description: d.description } : {}),
+          ...(d.rules.trim() ? { rules: d.rules } : {}),
         }));
         id = (r as { competitionId: string }).competitionId;
         setCreated(id);
-        for (const [i, version] of ordered.entries())
-          await run(`Adding problem ${label(i)}${warmup ? ` (day ${dayOf(version)})` : ""}: ${titles[version] ?? version}`, () => post("/api/manage/competitions/" + id + "/problems", {
-            versionId: version, slot: i + 1, label: label(i),
-            ...(warmup ? { releaseDay: dayOf(version) } : d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }),
+        for (const [i, version] of d.problems.entries()) {
+          const title = byId[version]?.title ?? version;
+          await runStep(`Adding problem ${label(i)}: ${title}`, () => post("/api/manage/competitions/" + id + "/problems", {
+            versionId: version,
+            slot: i + 1,
+            label: label(i),
+            releaseDay: 1,
+            ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }),
           }));
+        }
       }
       if (handles.length && d.mode === "INDIVIDUAL") {
-        const result = await run(`Registering ${handles.length} participant(s)`, () => post<{ user: string; status: string }[]>("/api/manage/competitions/" + id + "/participants", { users: handles }));
+        const result = await runStep(`Registering ${handles.length} participant(s)`, () => post<{ user: string; status: string }[]>("/api/manage/competitions/" + id + "/participants", { users: handles }));
         const missing = (result as { user: string; status: string }[]).filter((r) => r.status === "NOT_FOUND" || r.status === "INACTIVE");
         if (missing.length) setLog((l) => [...l, { text: "Not found or inactive: " + missing.map((m) => m.user).join(", "), state: "error" }]);
       }
       if (!schedule) { finishDraft(id!); return; }
-      // The backend requires a rehearsal before scheduling; this automatic one is ended immediately.
       let teamIds: string[] | undefined;
       if (d.mode === "TEAM") {
-        const team = await run("Creating a jury test team for the rehearsal", () => post<{ teamId: string }>("/api/teams", { name: "Jury check " + d.slug.slice(0, 80) }));
+        const team = await runStep("Creating jury check team for pre-launch verification", () => post<{ teamId: string }>("/api/teams", { name: "Jury check " + d.slug.slice(0, 80) }));
         teamIds = [(team as { teamId: string }).teamId];
       }
-      const rehearsal = await run("Running the automatic rehearsal check", () => post<{ runId: string }>("/api/manage/competitions/" + id + "/rehearsals", teamIds ? { teamIds } : {}));
-      await run("Ending the rehearsal", () => post("/api/manage/runs/" + (rehearsal as { runId: string }).runId + "/control", { action: "end-rehearsal", reason: "Automatic pre-schedule check" }));
-      const ready = await run("Checking readiness (approved problems, online judges, runtimes)", () => get<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness"));
+      const rehearsal = await runStep("Running automatic pre-launch check", () => post<{ runId: string }>("/api/manage/competitions/" + id + "/rehearsals", teamIds ? { teamIds } : {}));
+      await runStep("Completing pre-launch check", () => post("/api/manage/runs/" + (rehearsal as { runId: string }).runId + "/control", { action: "end-rehearsal", reason: "Automatic pre-schedule check" }));
+      const ready = await runStep("Checking readiness (approved problems & online judges)", () => get<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness"));
       if (!(ready as { ready: boolean }).ready) {
         setLog((l) => [...l, ...(ready as { errors: string[] }).errors.map((e) => ({ text: e, state: "error" as const }))]);
         throw new Error("not ready");
       }
-      if (startNow) await run("Starting the contest now", () => post("/api/manage/competitions/" + id + "/schedule", { startNow: true, visibility: d.visibility, reason: "Started from the contest wizard" }));
-      else await run(`Scheduling for ${when(startIso(d.startsAt))}`, () => post("/api/manage/competitions/" + id + "/schedule", { startsAt: startIso(d.startsAt), visibility: d.visibility }));
+      if (startNow) await runStep("Starting the contest now", () => post("/api/manage/competitions/" + id + "/schedule", { startNow: true, visibility: d.visibility, reason: "Started from contest builder" }));
+      else await runStep(`Scheduling for ${when(startIso(d.startsAt))}`, () => post("/api/manage/competitions/" + id + "/schedule", { startsAt: startIso(d.startsAt), visibility: d.visibility }));
       finishDraft(id!);
-    } catch { /* details are in the log; the contest page can finish the remaining steps */ } finally { setBusy(false); }
+    } catch {
+      /* Details are shown in ProgressLog; organizer can fix and retry or open the contest page. */
+    } finally {
+      setBusy(false);
+    }
   }
+
   function finishDraft(id: string) {
     try { localStorage.removeItem(KEY); } catch { /* ignore */ }
     navigate("/admin/contests/" + id);
   }
+
   const move = (i: number, delta: number) => {
-    // Indexes are those of the list as shown (sorted by day in a warmup).
-    const list = [...ordered]; const j = i + delta;
+    const list = [...d.problems];
+    const j = i + delta;
     if (j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]]; set({ problems: list });
+    [list[i], list[j]] = [list[j], list[i]];
+    set({ problems: list });
   };
+
+  const countDiff = (diff: "EASY" | "MEDIUM" | "HARD") => approved.filter((p) => (p.difficulty ?? "MEDIUM") === diff).length;
+  const tz = localTimeZone();
+  const canScheduleFuture = !Number.isNaN(startMs) && startMs >= serverNow() + 60_000;
 
   return (
     <div className="stack" style={{ gap: "1.25rem" }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><a href="#/admin/contests" className="small">← Contests</a><h1>New contest</h1><p>Fill four steps; the wizard creates, checks and schedules the contest for you.</p></div>
-        <button className="ghost small" onClick={() => { if (confirm("Discard this draft?")) { setD({ ...EMPTY, startsAt: nextHour() }); setStep(0); setCreated(null); setLog([]); } }}>Start over</button>
+        <div>
+          <a href="#/admin/contests" className="small">← Contests</a>
+          <h1>New contest</h1>
+          <p>Pick a category preset, choose problems, set your single start/end window, and launch in one click.</p>
+        </div>
+        <div className="row">
+          {(d.touchedTiming || d.touchedScoring) && !created && (
+            <button type="button" className="ghost small" onClick={() => applyPreset(d.kind, true)}>↺ Reset to {CONTEST_FORMAT_LABEL[d.kind]} defaults</button>
+          )}
+          <button type="button" className="ghost small" onClick={() => { if (confirm("Discard this draft?")) { setD({ ...EMPTY, startsAt: nextHour() }); setDiffFilter("EASY"); setCreated(null); setLog([]); } }}>Start over</button>
+        </div>
       </div>
-      <Steps steps={STEPS} current={step} onSelect={setStep} />
-      <section className="card">
-        {step === 0 && (
-          <div className="stack">
-            <div className="contest-kinds" role="radiogroup" aria-label="Contest type">
-              {([["STANDARD", "Standard contest", "A timed contest of a few hours. Full screen in the arena."],
-                 ["WARMUP", "Warmup (several days)", "New problems open every day. Best submission counts, no time penalty, no full screen."]] as const).map(([kind, name, text]) => (
-                <button key={kind} type="button" role="radio" aria-checked={d.kind === kind} disabled={Boolean(created)} className={"card-flat" + (d.kind === kind ? " active" : "")}
-                  onClick={() => set({ kind, rules: d.rules === RULES || d.rules === WARMUP_RULES ? (kind === "WARMUP" ? WARMUP_RULES : RULES) : d.rules })}>
-                  <strong>{name}</strong><span className="small muted">{text}</span>
-                </button>
+
+      {/* 1. Category & Essentials */}
+      <section className="card stack">
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>1. Category &amp; basics</h3>
+          <span className="small muted">Category is used for filtering on the Contests page &amp; smart defaults — everything stays customizable.</span>
+        </div>
+        <div className="contest-kinds" role="radiogroup" aria-label="Contest category">
+          {([
+            ["BASIC", "Basic", "Great for small events & beginners. Defaults to 1h 30m, filters Easy problems, unrated."],
+            ["WARMUP", "Warmup", "Long-running practice round (e.g. several days). Best submission counts, no full screen, moves to Problem Set after."],
+            ["STANDARD", "Normal", "Standard or multi-day competition. Defaults to 3h, ICPC scoring, rated."],
+          ] as const).map(([kind, name, desc]) => (
+            <button key={kind} type="button" role="radio" aria-checked={d.kind === kind} disabled={Boolean(created)}
+              className={"card-flat" + (d.kind === kind ? " active" : "")}
+              onClick={() => applyPreset(kind)}>
+              <strong>{name}</strong>
+              <span className="small muted">{desc}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-2">
+          <Field label="Contest name">
+            <input autoFocus value={d.title} disabled={Boolean(created)}
+              onChange={(e) => set({ title: e.target.value, slug: created ? d.slug : slugify(e.target.value) })}
+              placeholder={d.kind === "BASIC" ? "InfoM4th Starter Cup" : d.kind === "WARMUP" ? "InfoM4th Spring Warmup" : "InfoM4th Official Round #1"} />
+          </Field>
+          <Field label="Short URL name">
+            <input value={d.slug} disabled={Boolean(created)} onChange={(e) => set({ slug: e.target.value })} placeholder="infom4th-starter-cup" />
+          </Field>
+          <Field label="Participation">
+            <select value={d.mode} disabled={Boolean(created)} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}>
+              <option value="INDIVIDUAL">Individual</option>
+              <option value="TEAM">Teams</option>
+            </select>
+          </Field>
+          {d.mode === "TEAM" ? (
+            <Field label="Max team size">
+              <input type="number" min={1} max={10} disabled={Boolean(created)} value={d.maxTeamSize} onChange={(e) => set({ maxTeamSize: Number(e.target.value) })} />
+            </Field>
+          ) : (
+            <Field label="Who can see and join">
+              <select value={d.visibility} onChange={(e) => set({ visibility: e.target.value })}>
+                <option value="PUBLIC">Public — listed on Contests, anyone can register</option>
+                <option value="UNLISTED">Unlisted — direct link only</option>
+                <option value="PRIVATE">Private — invited / pre-registered users only</option>
+              </select>
+            </Field>
+          )}
+          {d.mode === "TEAM" && (
+            <Field label="Who can see and join">
+              <select value={d.visibility} onChange={(e) => set({ visibility: e.target.value })}>
+                <option value="PUBLIC">Public — listed on Contests, any team can register</option>
+                <option value="UNLISTED">Unlisted — direct link only</option>
+                <option value="PRIVATE">Private — invited teams only</option>
+              </select>
+            </Field>
+          )}
+        </div>
+      </section>
+
+      {/* 2. Unified Timing */}
+      <section className="card stack">
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>2. Timing (single shared window)</h3>
+          <span className="small muted">Local time zone: <strong>{tz}</strong> (synced with server clock)</span>
+        </div>
+        <div className="row" style={{ gap: "0.4rem" }}>
+          <span className="small muted" style={{ marginRight: "0.25rem" }}>Quick duration:</span>
+          {DURATION_CHIPS.map(([text, secs]) => (
+            <button key={text} type="button" disabled={Boolean(created)}
+              className={"small " + (d.durationSeconds === secs ? "primary" : "ghost")}
+              onClick={() => setDuration(secs)}>{text}</button>
+          ))}
+        </div>
+
+        <div className="grid grid-3">
+          <Field label={`Start (${tz})`} hint="Ignored if you click “Create & start now”.">
+            <input type="datetime-local" value={d.startsAt} onChange={(e) => set({ startsAt: e.target.value })} />
+          </Field>
+          <Field label="Duration (days / hours / min)">
+            <div className="row" style={{ flexWrap: "nowrap", gap: "0.35rem" }}>
+              <input type="number" min={0} max={60} disabled={Boolean(created)} value={days}
+                onChange={(e) => setDuration(Math.max(0, Number(e.target.value)) * 86400 + hours * 3600 + minutes * 60)} aria-label="Days" />
+              <span className="small muted">d</span>
+              <input type="number" min={0} max={23} disabled={Boolean(created)} value={hours}
+                onChange={(e) => setDuration(days * 86400 + Math.max(0, Number(e.target.value)) * 3600 + minutes * 60)} aria-label="Hours" />
+              <span className="small muted">h</span>
+              <input type="number" min={0} max={59} disabled={Boolean(created)} value={minutes}
+                onChange={(e) => setDuration(days * 86400 + hours * 3600 + Math.max(0, Number(e.target.value)) * 60)} aria-label="Minutes" />
+              <span className="small muted">m</span>
+            </div>
+          </Field>
+          <Field label={`End (${tz})`} hint="Pick an end date/time directly or adjust duration.">
+            <input type="datetime-local" value={endsAtInput} disabled={Boolean(created) || Number.isNaN(startMs)}
+              onChange={(e) => {
+                const pickedEnd = fromZoneInput(e.target.value);
+                if (!Number.isNaN(pickedEnd) && !Number.isNaN(startMs) && pickedEnd > startMs) {
+                  setDuration(Math.round((pickedEnd - startMs) / 1000));
+                }
+              }} />
+          </Field>
+        </div>
+
+        <div className="card-flat small row-between">
+          <span>
+            <strong>Scheduled window:</strong>{" "}
+            {!Number.isNaN(startMs) ? `${when(startIso(d.startsAt))} → ${when(new Date(endMs).toISOString())}` : "Pick a start date & time"}{" "}
+            · <strong>{formatDuration(d.durationSeconds)}</strong>
+          </span>
+          <span className="muted">All problems open at start &amp; close together at end.</span>
+        </div>
+      </section>
+
+      {/* 3. Problem Picker */}
+      <section className="card stack">
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>3. Problems ({d.problems.length} selected)</h3>
+          <a className="small" href="#/admin/problems/new">+ Create a new problem in Lab</a>
+        </div>
+        <div className="grid grid-2" style={{ alignItems: "start" }}>
+          <div className="stack" style={{ gap: "0.6rem" }}>
+            <div className="row" style={{ gap: "0.5rem" }}>
+              <input placeholder="Search by title, slug, or tag…" value={problemSearch} onChange={(e) => setProblemSearch(e.target.value)} style={{ flex: 1 }} />
+              {!created && filteredProblems.some((p) => !d.problems.includes(p.version_id)) && (
+                <button type="button" className="small ghost" onClick={() => {
+                  const add = filteredProblems.map((p) => p.version_id).filter((id) => !d.problems.includes(id));
+                  set({ problems: [...d.problems, ...add] });
+                }}>+ Add shown ({filteredProblems.filter((p) => !d.problems.includes(p.version_id)).length})</button>
+              )}
+            </div>
+            <div className="filters">
+              {([
+                ["", `All (${approved.length})`],
+                ["EASY", `Easy (${countDiff("EASY")})`],
+                ["MEDIUM", `Medium (${countDiff("MEDIUM")})`],
+                ["HARD", `Hard (${countDiff("HARD")})`],
+              ] as const).map(([val, text]) => (
+                <button key={val || "all"} type="button" className={diffFilter === val ? "active" : ""} onClick={() => setDiffFilter(val)}>{text}</button>
               ))}
             </div>
-            <div className="grid grid-2">
-              <Field label="Contest name"><input autoFocus value={d.title} onChange={(e) => set({ title: e.target.value, slug: created ? d.slug : slugify(e.target.value) })} placeholder="InfoM4th Spring Cup" /></Field>
-              <Field label="Short name (URL)"><input value={d.slug} disabled={Boolean(created)} onChange={(e) => set({ slug: e.target.value })} /></Field>
-              <Field label="Format"><select value={d.mode} onChange={(e) => set({ mode: e.target.value as Draft["mode"] })}><option value="INDIVIDUAL">Individual</option><option value="TEAM">Teams</option></select></Field>
-              {d.mode === "TEAM" && <Field label="Max team size"><input type="number" min={1} max={10} value={d.maxTeamSize} onChange={(e) => set({ maxTeamSize: Number(e.target.value) })} /></Field>}
-              {warmup ? (
-                <Field label="Number of days" hint="Day N's problems open N − 1 days after the start, at the same time of day.">
-                  <input type="number" min={1} max={31} value={d.days} onChange={(e) => set({ days: Number(e.target.value) })} />
-                </Field>
-              ) : (
-                <Field label="Duration"><div className="row" style={{ flexWrap: "nowrap" }}>
-                  <input type="number" min={0} max={24} value={d.hours} onChange={(e) => set({ hours: Number(e.target.value) })} /><span>h</span>
-                  <input type="number" min={0} max={59} value={d.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} /><span>min</span></div></Field>
-              )}
-              {warmup && <Field label="Scoring" hint={SCORING_INFO.IOI.summary}><input value="Best submission on each problem" disabled /></Field>}
-              {!warmup && <Field label="Freeze scoreboard before the end (minutes)" hint="0 = never freeze"><input type="number" min={0} value={d.freezeMinutes} onChange={(e) => set({ freezeMinutes: Number(e.target.value) })} /></Field>}
-              {!warmup && <Field label="Scoring system" hint={SCORING_INFO[d.scoring].summary}>
-                <select value={d.scoring} onChange={(e) => set({ scoring: e.target.value as Draft["scoring"], points: {} })}>
+            {lab.loading ? <Loading /> : approved.length === 0 ? (
+              <Empty>No approved problems yet. Create and approve problems in the Problem lab first.</Empty>
+            ) : filteredProblems.length === 0 ? (
+              <Empty>No approved problem matches this filter. <button type="button" className="ghost small" onClick={() => { setDiffFilter(""); setProblemSearch(""); }}>Show all</button></Empty>
+            ) : (
+              <div className="stack" style={{ gap: "0.4rem", maxHeight: 380, overflowY: "auto", paddingRight: 4 }}>
+                {filteredProblems.map((p) => {
+                  const checked = d.problems.includes(p.version_id);
+                  return (
+                    <label key={p.version_id} className="check card-flat" style={{ justifyContent: "space-between", cursor: created ? "default" : "pointer" }}>
+                      <span className="row" style={{ gap: "0.5rem" }}>
+                        <input type="checkbox" disabled={Boolean(created)} checked={checked}
+                          onChange={(e) => set({ problems: e.target.checked ? [...d.problems, p.version_id] : d.problems.filter((x) => x !== p.version_id) })} />
+                        <span>
+                          <strong>{p.title}</strong>
+                          <span className="small muted mono" style={{ marginLeft: "0.4rem" }}>{p.slug}</span>
+                        </span>
+                      </span>
+                      <DifficultyPill value={p.difficulty ?? "MEDIUM"} />
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="stack" style={{ gap: "0.5rem" }}>
+            <div className="row-between">
+              <strong>Contest problem set ({d.problems.length})</strong>
+              {!created && d.problems.length > 0 && <button type="button" className="ghost small" onClick={() => set({ problems: [] })}>Clear all</button>}
+            </div>
+            {d.problems.length === 0 ? (
+              <Empty>Tick problems on the left{d.kind === "BASIC" ? " (filtered to Easy for Basic events)" : ""}. Letters A, B, C… are assigned automatically.</Empty>
+            ) : (
+              d.problems.map((v, i) => {
+                const info = byId[v];
+                return (
+                  <div key={v} className="row-between card-flat">
+                    <span className="row" style={{ gap: "0.5rem" }}>
+                      <span className="problem-letter">{label(i)}</span>
+                      <strong>{info?.title ?? v}</strong>
+                      {info?.difficulty && <DifficultyPill value={info.difficulty} />}
+                    </span>
+                    <span className="row" style={{ gap: "0.4rem", flexWrap: "nowrap" }}>
+                      {d.scoring !== "ICPC" && (
+                        <label className="row small" style={{ flexWrap: "nowrap" }}>
+                          pts
+                          <input type="number" min={1} max={100000} style={{ width: 82 }} disabled={Boolean(created)}
+                            value={d.points[v] ?? defaultPoints(d.scoring, i)}
+                            onChange={(e) => set({ points: { ...d.points, [v]: Number(e.target.value) } })} />
+                        </label>
+                      )}
+                      {!created && (
+                        <>
+                          <button type="button" className="small ghost" onClick={() => move(i, -1)} disabled={i === 0} title="Move up">↑</button>
+                          <button type="button" className="small ghost" onClick={() => move(i, 1)} disabled={i === d.problems.length - 1} title="Move down">↓</button>
+                          <button type="button" className="small ghost" onClick={() => set({ problems: d.problems.filter((x) => x !== v) })} title="Remove">✕</button>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* 4. Options & Advanced Settings */}
+      <section className="card stack">
+        <h3 style={{ margin: 0 }}>4. Scoring &amp; options</h3>
+        <div className="row" style={{ gap: "1.25rem" }}>
+          <label className="check small">
+            <input type="checkbox" disabled={Boolean(created)} checked={d.requireFullscreen}
+              onChange={(e) => set({ requireFullscreen: e.target.checked, touchedTiming: true })} />
+            Require full screen in the arena
+          </label>
+          <label className="check small">
+            <input type="checkbox" disabled={Boolean(created)} checked={d.rated}
+              onChange={(e) => set({ rated: e.target.checked, touchedScoring: true })} />
+            Counts for player rating
+          </label>
+          <label className="check small">
+            <input type="checkbox" disabled={Boolean(created)} checked={d.publishToPractice}
+              onChange={(e) => set({ publishToPractice: e.target.checked, touchedScoring: true })} />
+            Publish problems to Problem Set when contest ends
+          </label>
+        </div>
+
+        <details>
+          <summary className="small" style={{ cursor: "pointer" }}>
+            <strong>Scoring details, languages, pre-registered participants &amp; rules</strong>{" "}
+            <span className="muted">— {SCORING_INFO[d.scoring].name} · freeze {d.freezeMinutes}m · {d.languages.length} languages{handles.length ? ` · ${handles.length} pre-registered` : ""}</span>
+          </summary>
+          <div className="stack" style={{ marginTop: "1rem" }}>
+            <div className="grid grid-3">
+              <Field label="Scoring system" hint={SCORING_INFO[d.scoring].summary}>
+                <select value={d.scoring} disabled={Boolean(created)} onChange={(e) => {
+                  const next = e.target.value as Draft["scoring"];
+                  const defaultRuleValues = Object.values(RULES_BY_SCORING);
+                  set({
+                    scoring: next,
+                    points: {},
+                    rules: defaultRuleValues.includes(d.rules) ? RULES_BY_SCORING[next] : d.rules,
+                    touchedScoring: true,
+                  });
+                }}>
                   <option value="ICPC">ICPC — solved count, then time + penalty</option>
-                  <option value="IOI">IOI — partial points per test passed</option>
+                  <option value="IOI">IOI — best submission / partial points, no time penalty</option>
                   <option value="CODEFORCES">Codeforces — points decrease over time</option>
                   <option value="ATCODER">AtCoder — fixed points, time tie-break</option>
                 </select>
-              </Field>}
-              {!warmup && d.scoring === "ICPC" && <Field label="Penalty per rejected attempt (minutes)"><input type="number" min={0} value={d.penaltyMinutes} onChange={(e) => set({ penaltyMinutes: Number(e.target.value) })} /></Field>}
-              <Field label="Languages"><LanguagePicker value={d.languages} onChange={(languages) => set({ languages })} /></Field>
+              </Field>
+              <Field label="Freeze scoreboard before end (min)" hint="0 = never freeze">
+                <input type="number" min={0} max={Math.max(0, Math.floor(d.durationSeconds / 60) - 1)} disabled={Boolean(created)}
+                  value={d.freezeMinutes} onChange={(e) => set({ freezeMinutes: Number(e.target.value), touchedTiming: true })} />
+              </Field>
+              {d.scoring === "ICPC" && (
+                <Field label="Penalty per rejected attempt (min)">
+                  <input type="number" min={0} disabled={Boolean(created)} value={d.penaltyMinutes}
+                    onChange={(e) => set({ penaltyMinutes: Number(e.target.value), touchedScoring: true })} />
+                </Field>
+              )}
             </div>
-            {warmup && <label className="check small"><input type="checkbox" checked={d.publishToPractice} onChange={(e) => set({ publishToPractice: e.target.checked })} />When the warmup ends, publish its problems in Practice so everyone can keep solving them</label>}
-            {!warmup && d.scoring !== "IOI" && <label className="check small"><input type="checkbox" checked={d.penalizeCompilationErrors} onChange={(e) => set({ penalizeCompilationErrors: e.target.checked })} />Compilation errors also count as rejected attempts</label>}
-            <Field label="Description shown in the lobby (Markdown)"><textarea rows={3} value={d.description} onChange={(e) => set({ description: e.target.value })} /></Field>
-            <Field label="Rules (Markdown)"><textarea rows={4} value={d.rules} onChange={(e) => set({ rules: e.target.value })} /></Field>
-          </div>
-        )}
-        {step === 1 && (
-          <div className="grid grid-2" style={{ alignItems: "start" }}>
-            <div className="stack">
-              <div className="row-between"><strong>Approved problems</strong><a className="small" href="#/admin/problems/new">+ Create a problem</a></div>
-              {lab.loading ? <Loading /> : approved.length === 0 ? <Empty>No approved problems yet. Create one with the problem wizard first.</Empty> : approved.map((p) => (
-                <label key={p.version_id} className="check card-flat" style={{ justifyContent: "space-between" }}>
-                  <span className="row"><input type="checkbox" disabled={Boolean(created)} checked={d.problems.includes(p.version_id)}
-                    onChange={(e) => set({ problems: e.target.checked ? [...d.problems, p.version_id] : d.problems.filter((x) => x !== p.version_id) })} />{p.title}</span>
-                  <span className="small muted mono">{p.slug}</span>
-                </label>
-              ))}
-            </div>
-            <div className="stack">
-              <strong>Contest problem set ({d.problems.length})</strong>
-              {warmup && d.problems.length > 0 && emptyDays.length > 0 && <div className="notice warn small">No problems on day {emptyDays.join(", ")} yet.</div>}
-              {d.problems.length === 0 ? <Empty>Tick problems on the left. Order them here; letters are assigned automatically.</Empty> : ordered.map((v, i) => (
-                <div key={v} className="row-between card-flat">
-                  <span className="row"><span className="problem-letter">{label(i)}</span>{titles[v] ?? v}</span>
-                  {warmup && <label className="row small" style={{ flexWrap: "nowrap" }}>Day <select style={{ width: "auto" }} disabled={Boolean(created)} value={dayOf(v)}
-                    onChange={(e) => set({ dayOf: { ...d.dayOf, [v]: Number(e.target.value) } })} aria-label={"Day for " + (titles[v] ?? v)}>
-                    {Array.from({ length: d.days }, (_, k) => <option key={k} value={k + 1}>{k + 1}</option>)}</select></label>}
-                  {!warmup && d.scoring !== "ICPC" && <label className="row small" style={{ flexWrap: "nowrap" }}>points <input type="number" min={1} max={100000} style={{ width: 90 }} disabled={Boolean(created)}
-                    value={d.points[v] ?? defaultPoints(d.scoring, i)} onChange={(e) => set({ points: { ...d.points, [v]: Number(e.target.value) } })} /></label>}
-                  {!created && <span className="row"><button className="small ghost" onClick={() => move(i, -1)} disabled={i === 0}>↑</button><button className="small ghost" onClick={() => move(i, 1)} disabled={i === d.problems.length - 1}>↓</button></span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {step === 2 && (d.mode === "TEAM" ? (
-          <div className="notice">Team contests are entered by team captains from the Teams page and the contest lobby after scheduling.</div>
-        ) : (
-          <div className="stack">
-            <p className="muted" style={{ margin: 0 }}>Optional. Public contests also allow self-registration in the lobby. Private contests only admit the people you add here.</p>
-            <Field label="Handles or emails (one per line, or separated by commas)" hint={handles.length + " entered. Create missing accounts first in Users → Import users."}>
-              <textarea rows={8} className="mono" value={d.participants} onChange={(e) => set({ participants: e.target.value })} placeholder={"contestant1\nali@example.com"} />
+            {d.scoring !== "IOI" && (
+              <label className="check small">
+                <input type="checkbox" disabled={Boolean(created)} checked={d.penalizeCompilationErrors}
+                  onChange={(e) => set({ penalizeCompilationErrors: e.target.checked })} />
+                Compilation errors also count as rejected attempts
+              </label>
+            )}
+            <Field label="Allowed languages">
+              <LanguagePicker value={d.languages} onChange={(languages) => !created && set({ languages })} />
             </Field>
-          </div>
-        ))}
-        {step === 3 && (
-          <div className="stack">
+            {d.mode === "INDIVIDUAL" && (
+              <Field label="Pre-register participants (optional — handles or emails, one per line or comma-separated)"
+                hint={`${handles.length} entered. Public contests also allow self-registration in the lobby.`}>
+                <textarea rows={3} className="mono" value={d.participants} onChange={(e) => set({ participants: e.target.value })} placeholder={"student1\nali@example.com"} />
+              </Field>
+            )}
             <div className="grid grid-2">
-              <Field label={`Start time (${displayTimeZone()})`}><input type="datetime-local" value={d.startsAt} onChange={(e) => set({ startsAt: e.target.value })} /></Field>
-              <Field label="Who can see and join"><select value={d.visibility} onChange={(e) => set({ visibility: e.target.value })}>
-                <option value="PUBLIC">Public — listed, anyone can register</option><option value="UNLISTED">Unlisted — link only</option><option value="PRIVATE">Private — only added participants</option></select></Field>
+              <Field label="Lobby description (Markdown, optional)">
+                <textarea rows={3} value={d.description} disabled={Boolean(created)} onChange={(e) => set({ description: e.target.value })} />
+              </Field>
+              <Field label="Rules (Markdown)">
+                <textarea rows={3} value={d.rules} disabled={Boolean(created)} onChange={(e) => set({ rules: e.target.value })} />
+              </Field>
             </div>
-            <div className="card-flat small">
-              <strong>{d.title || "Untitled"}</strong> · {warmup ? `Warmup · ${d.days} days · best submission scoring` : `${SCORING_INFO[d.scoring].name} scoring`} · {d.mode === "TEAM" ? "teams" : "individual"}{warmup ? "" : ` · ${d.hours}h ${d.minutes}m`} · {d.problems.length} problems ({d.problems.map((_, i) => label(i)).join(", ")}) ·
-              {" "}{handles.length} pre-registered · starts {!Number.isNaN(fromZoneInput(d.startsAt)) ? when(startIso(d.startsAt)) : "—"} · ends {!Number.isNaN(fromZoneInput(d.startsAt)) ? when(new Date(fromZoneInput(d.startsAt) + duration * 1000).toISOString()) : "—"}
-            </div>
-            {issues.length > 0 && <div className="notice warn"><ul className="small" style={{ margin: 0 }}>{issues.map((i) => <li key={i}>{i}</li>)}</ul></div>}
-            {!(fromZoneInput(d.startsAt) >= serverNow() + 60_000) && <div className="notice warn small">To schedule, pick a start time in the future — or use “Create & start now”.</div>}
-            <div className="row">
-              <button className="primary" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>▶ Create & start now</button>
-              <button className="primary" disabled={busy || issues.length > 0 || !(fromZoneInput(d.startsAt) >= serverNow() + 60_000)} onClick={() => finish(true)}>Create & schedule</button>
-              <button disabled={busy || issues.length > 0} onClick={() => finish(false)}>Save as draft</button>
-              {created && <a className="btn ghost" href={"#/admin/contests/" + created}>Open contest page</a>}
-            </div>
-            <ProgressLog lines={log} />
-            {log.some((l) => l.state === "error") && created && <div className="notice small">The contest was created. Fix the issue above, then finish from the contest page or click “Create & schedule” again.</div>}
+          </div>
+        </details>
+      </section>
+
+      {/* 5. Launch Bar */}
+      <section className="card stack accent">
+        <div className="small">
+          <strong>{d.title || "Untitled contest"}</strong> · <Badge tone="info">{CONTEST_FORMAT_LABEL[d.kind]}</Badge> · {SCORING_INFO[d.scoring].name} · {d.mode === "TEAM" ? `Teams ≤${d.maxTeamSize}` : "Individual"} ·{" "}
+          <strong>{formatDuration(d.durationSeconds)}</strong> · {d.problems.length} problem{d.problems.length === 1 ? "" : "s"}
+          {d.problems.length > 0 ? ` (${d.problems.map((_, i) => label(i)).join(", ")})` : ""} · {d.requireFullscreen ? "Full screen on" : "No full screen"} · {d.rated ? "Rated" : "Unrated"}
+        </div>
+        {issues.length > 0 && (
+          <div className="notice warn">
+            <ul className="small" style={{ margin: 0 }}>{issues.map((i) => <li key={i}>{i}</li>)}</ul>
           </div>
         )}
-        <StepNav current={step} last={STEPS.length - 1} onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} nextDisabled={step === 0 && (!d.title.trim() || !d.slug)} />
+        {!canScheduleFuture && issues.length === 0 && (
+          <div className="notice small">Start time is not in the future — pick a future start time to schedule, or click <strong>▶ Create &amp; start now</strong> to open immediately.</div>
+        )}
+        <div className="row">
+          <button type="button" className="primary" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>
+            ▶ Create &amp; start now ({formatDuration(d.durationSeconds)})
+          </button>
+          <button type="button" className="primary" disabled={busy || issues.length > 0 || !canScheduleFuture} onClick={() => finish(true, false)}>
+            🗓 Create &amp; schedule ({!Number.isNaN(startMs) ? when(startIso(d.startsAt)) : "pick start"})
+          </button>
+          <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(false)}>
+            Save as draft
+          </button>
+          {created && <a className="btn ghost" href={"#/admin/contests/" + created}>Open contest page →</a>}
+        </div>
+        <ProgressLog lines={log} />
+        {log.some((l) => l.state === "error") && created && (
+          <div className="notice small">The contest draft was created on the server. Fix the issue above and retry, or open the contest page to finish launching.</div>
+        )}
       </section>
-      {created && <span className="small muted">Settings can still be edited on the contest page before scheduling. <Badge>draft saved on server</Badge></span>}
     </div>
   );
 }

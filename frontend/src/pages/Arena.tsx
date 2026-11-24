@@ -5,7 +5,7 @@ import { verdictShown } from "../lib/latency";
 import { markFullscreenEntered, reportFullscreen, sendFullscreenReports, wasFullscreenEntered } from "../lib/fullscreenLog";
 import { ProblemStatement, SubmissionModal, SubmissionTable, SubmitPanel, pending, uuid, type ProblemDetail, type SubmissionRow } from "../components/Problem";
 import Standings, { SCORING_INFO, firstSolves, totalOf, useBoard, type Board } from "../components/Standings";
-import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, timeOf, when } from "../ui";
+import { Badge, ErrorBox, Field, LiveDot, Loading, Markdown, Ring, clock, shortClock, timeOf, when } from "../ui";
 import type { RunDetail } from "./Lobby";
 import { parseSignature } from "../lib/functionMode";
 
@@ -84,11 +84,11 @@ export default function Arena({ runId }: { runId: string }) {
   const entry = mine.data?.find((m) => m.run_id === runId);
   const isTeam = detail.data?.configuration.mode === "TEAM";
   const scoring = (detail.data?.configuration.scoring_system ?? "ICPC") as keyof typeof SCORING_INFO;
-  // A warmup runs for days: it is open all the time and never asks for full screen.
   const warmup = detail.data?.configuration.contest_format === "WARMUP";
-  const mustStayFullscreen = phase === "live" && Boolean(entry) && !warmup;
+  const fullscreenRequired = detail.data ? Boolean(detail.data.configuration.require_fullscreen ?? !warmup) : false;
+  const mustStayFullscreen = phase === "live" && Boolean(entry) && fullscreenRequired;
   const fullscreen = useFullscreen(mustStayFullscreen, runId);
-  const showFullscreen = fullscreen.supported && !fullscreen.active && !warmup;
+  const showFullscreen = fullscreen.supported && !fullscreen.active && fullscreenRequired;
 
   // Problems are withheld until the start; refetch the run as soon as the clock passes it.
   const reloadRun = detail.reload;
@@ -184,8 +184,8 @@ export default function Arena({ runId }: { runId: string }) {
   const problemList = detail.data.problems ?? [];
   const totalDays = Math.max(1, Math.round(detail.data.configuration.duration_seconds / 86400));
   const upcomingDays = detail.data.upcomingDays ?? [];
-  // Warmup problems grouped by their day (a single group in other contests).
-  const days = warmup
+  const staggeredWarmup = warmup && (upcomingDays.length > 0 || problemList.some((p) => (p.release_day ?? 1) > 1));
+  const days = staggeredWarmup
     ? [...new Set(problemList.map((p) => p.release_day ?? 1))].sort((a, b) => a - b).map((day) => ({ day, problems: problemList.filter((p) => (p.release_day ?? 1) === day) }))
     : [{ day: 0, problems: problemList }];
   const solvedCount = Object.values(status).filter((s) => s.solved).length;
@@ -206,8 +206,8 @@ export default function Arena({ runId }: { runId: string }) {
         </div>
         {r.kind === "REHEARSAL" && <Badge tone="warn">Rehearsal</Badge>}
         {r.submissions_paused && <Badge tone="warn">Submissions paused</Badge>}
-        {fullscreen.denied && !fullscreen.active && !warmup && <Badge tone="warn">Full screen blocked by this browser</Badge>}
-        {warmup && phase !== "upcoming" && <Badge tone="info">Day {Math.min(totalDays, Math.floor((Math.min(now, end - 1) - start) / 86_400_000) + 1)} of {totalDays}</Badge>}
+        {fullscreen.denied && !fullscreen.active && fullscreenRequired && <Badge tone="warn">Full screen blocked by this browser</Badge>}
+        {staggeredWarmup && phase !== "upcoming" && <Badge tone="info">Day {Math.min(totalDays, Math.floor((Math.min(now, end - 1) - start) / 86_400_000) + 1)} of {totalDays}</Badge>}
         <div className="spacer" />
         {phase === "live" && <span className={"clock" + (remaining < 15 * 60_000 ? " low" : "")} title="Time remaining (server clock)">{clock(remaining)}</span>}
         {phase === "ended" && <span className="clock">Contest over</span>}
@@ -224,7 +224,7 @@ export default function Arena({ runId }: { runId: string }) {
             <div className="countdown">{clock(start - now)}</div>
             <p style={{ maxWidth: 560 }}>Problems appear automatically at {when(r.starts_at)}. Scoring: <strong>{SCORING_INFO[scoring]?.name}</strong> — {SCORING_INFO[scoring]?.summary}</p>
             {entry ? <p>{isTeam ? <>You compete as team <strong>{entry.entry_name}</strong> ({entry.members}). Everyone in the team can submit; results are shared.</> : "You are registered."}</p> : <p>You are not registered for this contest.</p>}
-            {warmup && <p>This is a <strong>{totalDays}-day warmup</strong>: new problems open every day at this time, earlier days stay open, and there is no full screen.</p>}
+            {!fullscreenRequired && <p>Full screen is not required for this contest — solve comfortably at your own pace.</p>}
             {showFullscreen && entry && <button className="primary" onClick={fullscreen.enter}>Enter full screen now</button>}
           </div>
         </div>
@@ -247,8 +247,8 @@ export default function Arena({ runId }: { runId: string }) {
              <div className="arena-split">
              <div>
               {days.map(({ day, problems: dayProblems }) => (
-              <div key={day} className={warmup ? "warmup-day" : undefined}>
-              {warmup && <h3>Day {day}<span className="small muted">{dayProblems.length} problem{dayProblems.length === 1 ? "" : "s"}</span></h3>}
+              <div key={day} className={staggeredWarmup ? "warmup-day" : undefined}>
+              {staggeredWarmup && <h3>Day {day}<span className="small muted">{dayProblems.length} problem{dayProblems.length === 1 ? "" : "s"}</span></h3>}
               <table className="problem-table">
                 <thead><tr><th>#</th><th>Problem</th><th>Limits</th>{scoring !== "ICPC" && <th className="right">Points</th>}<th>Solved by</th><th>{isTeam ? "Your team" : "You"}</th></tr></thead>
                 <tbody>
@@ -282,7 +282,7 @@ export default function Arena({ runId }: { runId: string }) {
               </table>
               </div>
               ))}
-              {warmup && upcomingDays.map((u) => (
+              {staggeredWarmup && upcomingDays.map((u) => (
                 <div key={u.day} className="warmup-day">
                   <div className="warmup-locked">
                     <span><strong>Day {u.day}</strong> · {u.count} problem{u.count === 1 ? "" : "s"}</span>
@@ -290,7 +290,7 @@ export default function Arena({ runId }: { runId: string }) {
                   </div>
                 </div>
               ))}
-              <p className="small muted">Click a problem to open it.{warmup ? " Earlier days stay open until the end of the warmup." : ""} {SCORING_INFO[scoring]?.summary} “Solved by” counts {isTeam ? "teams" : "contestants"} that solved / tried the problem{board.data?.frozen ? " (frozen near the end)" : ""}.</p>
+              <p className="small muted">Click a problem to open it.{staggeredWarmup ? " Earlier days stay open until the end of the warmup." : ""} {SCORING_INFO[scoring]?.summary} “Solved by” counts {isTeam ? "teams" : "contestants"} that solved / tried the problem{board.data?.frozen ? " (frozen near the end)" : ""}.</p>
              </div>
              <ContestPulse board={board.data} me={entry?.entry_id} start={start} end={end} now={now} labels={labels}
                attempts={(submissions.data ?? []).filter((s) => s.verdict && s.verdict !== "JUDGE_ERROR").length} onScoreboard={() => setView({ kind: "scoreboard" })} />
@@ -362,7 +362,7 @@ function ContestPulse({ board, me, start, end, now, labels, attempts, onScoreboa
   return (
     <aside className="pulse-panel">
       <div className="card row" style={{ gap: "1rem", flexWrap: "nowrap" }}>
-        <Ring value={elapsed} max={end - start}><span className="muted">left</span><strong>{clock(end - now).slice(0, 5)}</strong></Ring>
+        <Ring value={elapsed} max={end - start}><span className="muted">left</span><strong>{shortClock(end - now)}</strong></Ring>
         <div className="stack" style={{ gap: "0.35rem" }}>
           <div className="small muted">Your progress</div>
           <div><strong style={{ fontSize: "1.5rem", fontFamily: "var(--font-display)" }}>{mine ? "#" + mine.rank : "—"}</strong><span className="small muted"> of {board?.standings.length ?? 0}</span></div>

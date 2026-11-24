@@ -33,7 +33,7 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   };
   const where = (problem: BankProblem, index: number) => {
     const x = placed(problem, index);
-    return x.mission ? { label: "Mission: " + x.mission.title, tone: "info" } : x.td ? { label: "TD " + x.td.number, tone: "info" } : { label: "Public Practice", tone: "warn" };
+    return x.mission ? { label: "Mission: " + x.mission.title, tone: "info" } : x.td ? { label: "TD " + x.td.number, tone: "info" } : { label: "Problem Set", tone: "warn" };
   };
   const destinationOk = mode !== "publish" || dest !== "mission" || slugify(missionTitle).length >= 2;
   const stop = useRef(false), active = useRef(false), mounted = useRef(true);
@@ -81,7 +81,7 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
     <div className="stack" style={{ gap: "1.25rem" }}>
       <a href={duel ? "#/admin/duel-problems" : "#/admin/problems"} className="small">{duel ? "Back to duel problems" : "Back to problems"}</a>
       <div className="page-head"><div><h1>{duel ? "Bulk import duel problems" : "Bulk import problems"}</h1>
-        <p>{duel ? "Load a bank of short problems for duels. They go to the duel pool only, never to the public Practice page." : "Load a complete bank: statements, limits, samples, hidden tests and reference solutions."}</p></div></div>
+        <p>{duel ? "Load a bank of short problems for duels. They go to the duel pool only, never to the public Problem Set." : "Load a complete bank: statements, limits, samples, hidden tests and reference solutions."}</p></div></div>
       <section className="card stack">
         <Field label="Problem bank file (.json or .json.gz)" hint="Choose problem-bank.import.json.gz for the smaller download; the original JSON also works.">
           <input type="file" accept=".json,.json.gz,.gz,application/json,application/gzip,application/x-gzip" disabled={busy || reading} onChange={e => { const file = e.target.files?.[0]; if (file) void read(file); e.target.value = ""; }} />
@@ -97,10 +97,10 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
           </select>
         </Field>
         {mode === "publish" && !duel && <>
-          <Field label="Publish to" hint="Mission and TD problems never appear in the public Practice page. Only 'Public Practice' does.">
+          <Field label="Publish to" hint="Mission and TD problems never appear in the public Problem Set. Only 'Problem Set' does.">
             <select disabled={busy || reading} value={dest} onChange={e => setDest(e.target.value as Dest)}>
               <option value="file">As named in the file (see the Goes to column)</option>
-              <option value="practice">Public Practice page (everyone signed in sees them)</option>
+              <option value="practice">Problem Set (everyone signed in sees them)</option>
               <option value="td">A TD (academic section)</option>
               <option value="mission">A mission (scored TP)</option>
             </select>

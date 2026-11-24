@@ -56,7 +56,7 @@ export default function TdList() {
 
       <ErrorBox error={catalog.error} />
       {catalog.loading ? <Loading /> : all.length === 0 ? (
-        <Empty>No TD problems yet. They install themselves once a judge is online, or organizers can move practice problems into a TD from the Control room → Practice set.</Empty>
+        <Empty>No TD problems yet. They install themselves once a judge is online, or organizers can move problems into a TD from Control room → Problem set.</Empty>
       ) : groups.map(([td, problems]) => {
         const done = problems.filter((p) => p.my_status === "SOLVED").length;
         return (

@@ -1,15 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { post } from "../api";
 import { navigate, useAction, useAuth, useData, useServerClock } from "../app";
 import Standings, { SCORING_INFO } from "../components/Standings";
-import { Badge, ErrorBox, Field, Loading, Markdown, UserList, clock, when } from "../ui";
+import { Badge, CONTEST_FORMAT_LABEL, ErrorBox, Field, Loading, Markdown, UserList, clock, formatDuration, when } from "../ui";
 import { runPhase } from "./Home";
 
 export type RunDetail = {
   run: { id: string; competition_id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean };
   configuration: { title?: string; description_md: string; rules_md: string; mode: string; duration_seconds: number; scoring_system?: string; wrong_attempt_penalty_seconds?: number; freeze_before_end_seconds?: number; max_team_size?: number;
-    /** WARMUP: problems open day by day, no full screen (see the backend V26 migration). */
-    contest_format?: "STANDARD" | "WARMUP"; publish_to_practice?: boolean };
+    contest_format?: "STANDARD" | "BASIC" | "WARMUP"; publish_to_practice?: boolean; require_fullscreen?: boolean };
   problems?: { slot: number; label: string; title: string; time_limit_ms: number; memory_limit_mb: number; points?: number | null; release_day?: number; opens_at?: string; released?: boolean }[];
   /** Warmup days still locked: only how many problems each holds, never their titles. */
   upcomingDays?: { day: number; opensAt: string; count: number }[];
@@ -23,12 +22,26 @@ export default function Lobby({ runId }: { runId: string }) {
   const now = useServerClock();
   const [team, setTeam] = useState("");
   const { busy, run } = useAction();
-  if (detail.loading) return <Loading />;
-  if (!detail.data) return <main className="page"><ErrorBox error={detail.error} /></main>;
-  const { run: r, configuration: cfg } = detail.data;
+  const wasUpcoming = useRef(false);
+  const r = detail.data?.run;
+  const cfg = detail.data?.configuration;
   const entry = mine.data?.find((m) => m.run_id === runId);
-  const phase = runPhase(now, r.starts_at, r.ends_at);
+  const phase = r ? runPhase(now, r.starts_at, r.ends_at) : null;
+
+  useEffect(() => {
+    if (!phase) return;
+    if (phase.phase === "upcoming") wasUpcoming.current = true;
+    else if (phase.phase === "live" && wasUpcoming.current && entry) {
+      wasUpcoming.current = false;
+      navigate("/arena/" + runId);
+    }
+  }, [phase, entry, runId]);
+
+  if (detail.loading) return <Loading />;
+  if (!detail.data || !r || !cfg || !phase) return <main className="page"><ErrorBox error={detail.error} /></main>;
   const labels = Object.fromEntries((detail.data.problems ?? []).map((p) => [p.slot, p.label]));
+  const fullscreenRequired = Boolean(cfg.require_fullscreen ?? (cfg.contest_format !== "WARMUP"));
+  const formatName = CONTEST_FORMAT_LABEL[cfg.contest_format ?? "STANDARD"] ?? "Normal";
 
   const register = () => run(async () => {
     await post("/api/competitions/" + r.competition_id + "/register", cfg.mode === "TEAM" ? { teamId: team } : {});
@@ -39,11 +52,9 @@ export default function Lobby({ runId }: { runId: string }) {
     <main className="page">
       <div className="page-head">
         <div>
-          <div className="eyebrow">{r.kind === "REHEARSAL" ? "Rehearsal" : "Official contest"} · {cfg.mode === "TEAM" ? "Team" : "Individual"}</div>
+          <div className="eyebrow">{r.kind === "REHEARSAL" ? "Rehearsal" : `${formatName} contest`} · {cfg.mode === "TEAM" ? "Team" : "Individual"}</div>
           <h1>{cfg.title ?? "Contest lobby"}</h1>
-          <p>{when(r.starts_at)} → {when(r.ends_at)} · {cfg.contest_format === "WARMUP"
-            ? `${Math.round(cfg.duration_seconds / 86400)}-day warmup: new problems every day, earlier days stay open`
-            : `${Math.round(cfg.duration_seconds / 60)} minutes`}</p>
+          <p>{when(r.starts_at)} → {when(r.ends_at)} · {formatDuration(cfg.duration_seconds)}</p>
         </div>
         <div className="stack" style={{ alignItems: "flex-end" }}>
           {phase.phase === "upcoming" && <div className="countdown">{clock(phase.ms)}</div>}
@@ -59,7 +70,7 @@ export default function Lobby({ runId }: { runId: string }) {
           {entry ? (
             <>
               <div className="notice ok">{cfg.mode === "TEAM" ? <>You are registered as team <strong>{entry.entry_name}</strong> (<UserList handles={entry.members} />). Every member can submit; results are shared.</> : "You are registered."}</div>
-              {phase.phase === "live" && <button className="primary" onClick={() => navigate("/arena/" + runId)}>Enter the arena (full screen) ▸</button>}
+              {phase.phase === "live" && <button className="primary" onClick={() => navigate("/arena/" + runId)}>Enter the arena{fullscreenRequired ? " (full screen)" : ""} ▸</button>}
               {phase.phase === "upcoming" && <p className="muted">The arena opens automatically at the start. Keep this page open; the countdown follows the server clock.</p>}
               {phase.phase === "upcoming" && <button onClick={() => navigate("/arena/" + runId)}>Wait in the arena</button>}
             </>
@@ -92,7 +103,8 @@ export default function Lobby({ runId }: { runId: string }) {
             {cfg.freeze_before_end_seconds ? ` The scoreboard freezes ${Math.round(cfg.freeze_before_end_seconds / 60)} minutes before the end.` : ""}</p>
           <h3>How it works</h3>
           <ul className="small">
-            <li>The arena runs in full screen. Leaving full screen blocks the arena until you return.</li>
+            {fullscreenRequired && <li>The arena runs in full screen. Leaving full screen blocks the arena until you return.</li>}
+            <li>All problems open at {when(r.starts_at)} and close together at {when(r.ends_at)}.</li>
             <li>Submit as often as you need; each submission is judged on all hidden tests.</li>
             <li>A submission may wait in the queue during busy moments — your submission time counts, not the judging time.</li>
             <li>Use clarifications for questions about the statements. Announcements appear automatically.</li>

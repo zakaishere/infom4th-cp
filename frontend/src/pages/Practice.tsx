@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, post } from "../api";
-import { navigate, useData, useToast } from "../app";
+import { navigate, useData, useServerClock, useToast } from "../app";
 import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey, readDraft, templateFor, useDocs, useDraftSaver, uuid,
   type ProblemDetail, type SubmissionDetail, type SubmissionRow } from "../components/Problem";
 import { submissionAccepted, verdictShown } from "../lib/latency";
-import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, Loading, Ring, VERDICTS } from "../ui";
+import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, LiveDot, Loading, Ring, VERDICTS, clock } from "../ui";
 import { parseSignature } from "../lib/functionMode";
 import { DocsPanel } from "../components/DocsPanel";
 
@@ -38,6 +38,9 @@ function loadFilters(): Filters {
 
 export function PracticeList() {
   const catalog = useData<Catalog>("/api/practice", 60000);
+  const contests = useData<{ id: string; title: string; run_id: string; starts_at: string; ends_at: string }[]>("/api/competitions", 60000);
+  const now = useServerClock();
+  const liveContests = (contests.data ?? []).filter((c) => now >= new Date(c.starts_at).getTime() && now < new Date(c.ends_at).getTime());
   const [f, setF] = useState<Filters>(loadFilters);
   const set = (patch: Partial<Filters>) => setF((old) => {
     const next = { ...old, ...patch };
@@ -68,15 +71,21 @@ export function PracticeList() {
   const random = () => {
     const pool = shown.filter((p) => p.my_status !== "SOLVED");
     const pick = (pool.length ? pool : shown)[Math.floor(Math.random() * (pool.length || shown.length))];
-    if (pick) navigate("/practice/" + pick.id);
+    if (pick) navigate("/problems/" + pick.id);
   };
 
   return (
     <main className="page page-wide">
+      {liveContests.map((c) => (
+        <a key={c.id} href={"#/run/" + c.run_id} className="notice ok row-between rise" style={{ marginBottom: "1rem", color: "inherit", textDecoration: "none" }}>
+          <span className="row"><LiveDot /><strong>{c.title} is live</strong><span className="muted">{clock(new Date(c.ends_at).getTime() - now)} left</span></span>
+          <span className="btn primary small">Open contest ▸</span>
+        </a>
+      ))}
       <section className="practice-hero">
         <div className="stack" style={{ gap: "0.4rem" }}>
-          <div className="eyebrow">Train between contests</div>
-          <h1 style={{ margin: 0 }}>Practice problems</h1>
+          <div className="eyebrow">Solve &amp; sharpen your skills</div>
+          <h1 style={{ margin: 0 }}>Problem Set</h1>
           <p className="muted" style={{ margin: 0, maxWidth: 560 }}>Solve at your own pace. Run your code on the examples, then submit: every submission is
             compiled and judged on the hidden tests by the same sandbox as the contests.</p>
         </div>
@@ -124,7 +133,7 @@ export function PracticeList() {
       )}
 
       <ErrorBox error={catalog.error} />
-      {catalog.loading ? <Loading /> : all.length === 0 ? <Empty>No practice problems yet. Organizers publish them from the Control room → Practice set.</Empty>
+      {catalog.loading ? <Loading /> : all.length === 0 ? <Empty>No problems in the Problem Set yet. Organizers publish them from Control room → Problem set.</Empty>
         : shown.length === 0 ? <Empty>No problem matches these filters. <button className="ghost small" onClick={() => set(DEFAULT_FILTERS)}>Clear filters</button></Empty> : (
         <div className="card table-wrap" style={{ padding: 0 }}>
           <table className="practice-table">
@@ -133,10 +142,10 @@ export function PracticeList() {
               {shown.map((p) => {
                 const rate = acceptance(p);
                 return (
-                  <tr key={p.id} className={p.my_status === "SOLVED" ? "row-solved" : ""} onClick={() => navigate("/practice/" + p.id)}>
+                  <tr key={p.id} className={p.my_status === "SOLVED" ? "row-solved" : ""} onClick={() => navigate("/problems/" + p.id)}>
                     <td><StatusIcon status={p.my_status} /></td>
                     <td>
-                      <a href={"#/practice/" + p.id} className="problem-link" onClick={(e) => e.stopPropagation()}>{p.title}</a>
+                      <a href={"#/problems/" + p.id} className="problem-link" onClick={(e) => e.stopPropagation()}>{p.title}</a>
                       {p.tags.length > 0 && <div className="tags">{p.tags.map((t) => <span key={t} className="tag-chip small" onClick={(e) => { e.stopPropagation(); if (!f.tags.includes(t)) set({ tags: [...f.tags, t] }); }}>{t}</span>)}</div>}
                     </td>
                     <td><DifficultyPill value={p.difficulty} /></td>
@@ -164,8 +173,9 @@ export function PracticeProblem({ versionId, section = "practice", mission }: { 
   const problem = useData<Practice>("/api/practice/" + versionId);
   const catalog = useData<Catalog>(section === "td" ? "/api/td" : section === "practice" ? "/api/practice" : null);
   const missionData = useData<{ title: string; me: { problems: { version: string }[] } }>(section === "mission" ? "/api/missions/" + mission : null);
-  const base = section === "mission" ? "/missions/" + mission : "/" + section;
-  const backLabel = section === "td" ? "← TD" : section === "mission" ? "← " + (missionData.data?.title ?? "Mission") : "← Problems";
+  const base = section === "mission" ? "/missions/" + mission : section === "td" ? "/td" : "/problems";
+  const listHref = section === "practice" ? "#/" : "#" + base;
+  const backLabel = section === "td" ? "← TD" : section === "mission" ? "← " + (missionData.data?.title ?? "Mission") : "← Problem Set";
   const history = useData<SubmissionRow[]>("/api/submissions");
   const toast = useToast();
   const [tab, setTab] = useState<"statement" | "submissions">("statement");
@@ -247,7 +257,7 @@ export function PracticeProblem({ versionId, section = "practice", mission }: { 
   }, [split]);
 
   if (problem.loading) return <Loading label="Opening the problem…" />;
-  if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href={"#" + base}>{section === "practice" ? "← Practice problems" : backLabel}</a></main>;
+  if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href={listHref}>{backLabel}</a></main>;
   const p = problem.data, stats = p.stats, rate = acceptance(stats);
   const result = outcome?.detail?.judging[0];
 
@@ -255,7 +265,7 @@ export function PracticeProblem({ versionId, section = "practice", mission }: { 
     <div className="workspace" style={{ gridTemplateColumns: `${split}% 6px minmax(0, 1fr)` }}>
       <section className="ws-left">
         <div className="ws-bar">
-          <a href={"#" + base} className="small">{backLabel}</a>
+          <a href={listHref} className="small">{backLabel}</a>
           <span className="spacer" />
           <button className="ghost small" disabled={!neighbour(-1)} onClick={() => neighbour(-1) && navigate(base + "/" + neighbour(-1).id)} title="Previous problem">‹ Prev</button>
           <button className="ghost small" disabled={!neighbour(1)} onClick={() => neighbour(1) && navigate(base + "/" + neighbour(1).id)} title="Next problem">Next ›</button>

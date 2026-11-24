@@ -118,7 +118,7 @@ export default function Leaderboard() {
         <div className="stack" style={{ gap: "1rem" }}>
           {tab === "players" && d.me && <MyPlace label="Your place" totals={d.me} count={d.playerCount} next={above(d.me.rank)} />}
           {tab === "teams" && d.myTeams.map((t) => <MyPlace key={t.id} label="Your team" name={t.name} totals={t} count={d.teamCount} next={above(t.rank)} />)}
-          {lines.length === 0 ? <Empty>{tab === "players" ? "Nobody is on the board yet. Solve a practice problem and take first place." : "No team is on the board yet. Team members earn Sigma for their team by solving problems."}</Empty> : (
+          {lines.length === 0 ? <Empty>{tab === "players" ? "Nobody is on the board yet. Solve a problem from the Problem Set and take first place." : "No team is on the board yet. Team members earn Sigma for their team by solving problems."}</Empty> : (
             <>
               {lines[0].totals.score > 0 && <Podium lines={lines.filter((l) => l.totals.score > 0).slice(0, 3)} />}
               <Board lines={lines} who={tab === "players" ? "Player" : "Team"} />
@@ -129,7 +129,7 @@ export default function Leaderboard() {
             <ul>
               <li>Each problem pays once: Easy {d.values.EASY}, Medium {d.values.MEDIUM}, Hard {d.values.HARD}.</li>
               <li>Rare problems pay up to 50% more. The bonus shrinks as more players solve them, so every score can move.</li>
-              <li>Practice solves count, and so do solves from public contests once their results are final.</li>
+              <li>Problem Set solves count, and so do solves from public contests once their results are final.</li>
               <li>Submit once and you are on the board at Σ 0, even before your first accepted solution.</li>
               <li>A team earns from its team contests and from what members solve after joining. Each problem still pays the team once.</li>
               <li>Example runs, rehearsals and private contests do not count. Staff accounts are not ranked because they can read the tests.</li>

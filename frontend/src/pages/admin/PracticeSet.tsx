@@ -46,9 +46,9 @@ export default function PracticeSet() {
   return (
     <div className="stack" style={{ gap: "1.5rem" }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><div className="eyebrow">Problem lab</div><h1>Practice set</h1>
-          <p>Public problems anyone signed in can solve on the Practice page. Add approved problems, tag them by topic so people can filter, and hide one at any time.</p></div>
-        <a className="btn" href="#/practice">Open the Practice page ↗</a>
+        <div><div className="eyebrow">Problem lab</div><h1>Problem Set</h1>
+          <p>Public problems anyone signed in can solve on the Problem Set page. Add approved problems, tag them by topic so people can filter, and hide one at any time.</p></div>
+        <a className="btn" href="#/">Open Problem Set ↗</a>
       </div>
 
       <div className="stat-tiles">
@@ -61,7 +61,7 @@ export default function PracticeSet() {
       <section className="card stack">
         <div className="section-title"><h3>Add problems</h3><span className="count">{candidates.length}</span></div>
         {candidates.length === 0 ? (
-          <Empty>Every approved problem is already in practice. Create one in the Problem lab (+ New problem); once it is validated and approved it appears here.</Empty>
+          <Empty>Every approved problem is already in the Problem Set. Create one in the Problem lab (+ New problem); once it is validated and approved it appears here.</Empty>
         ) : (
           <div className="table-wrap"><table>
             <thead><tr><th>Problem</th><th>Difficulty</th><th>Version</th><th /></tr></thead>
@@ -73,8 +73,8 @@ export default function PracticeSet() {
                   <td><DifficultyPill value={c.difficulty} /></td>
                   <td className="small">v{c.version_number}{replaces ? <span className="muted"> · replaces the public version</span> : ""}</td>
                   <td className="right"><button className="primary small" disabled={busy}
-                    onClick={() => run(async () => { await post("/api/lab/problems/" + c.version_id + "/publish-practice"); data.reload(); }, replaces ? "Practice version updated" : "Added to practice")}>
-                    {replaces ? "Update public version" : "+ Add to practice"}</button></td>
+                    onClick={() => run(async () => { await post("/api/lab/problems/" + c.version_id + "/publish-practice"); data.reload(); }, replaces ? "Problem Set version updated" : "Added to Problem Set")}>
+                    {replaces ? "Update public version" : "+ Add to Problem Set"}</button></td>
                 </tr>
               );
             })}</tbody>
@@ -96,9 +96,9 @@ export default function PracticeSet() {
                 <tr key={p.problem_id} className={p.hidden ? "hidden-row" : ""}>
                   <td><strong>{p.title}</strong><div className="small muted mono">{p.slug}</div></td>
                   <td><DifficultyPill value={p.difficulty} /></td>
-                  <td><select value={p.td_number ?? ""} disabled={busy} style={{ width: "auto" }} title="Practice list, or a TD of the academic section"
-                    onChange={(e) => save(p, { td: e.target.value ? Number(e.target.value) : null, tdPosition: p.td_position }, e.target.value ? "Moved to TD " + e.target.value : "Moved to the practice list")}>
-                    <option value="">Practice</option>
+                  <td><select value={p.td_number ?? ""} disabled={busy} style={{ width: "auto" }} title="Problem Set list, or a TD of the academic section"
+                    onChange={(e) => save(p, { td: e.target.value ? Number(e.target.value) : null, tdPosition: p.td_position }, e.target.value ? "Moved to TD " + e.target.value : "Moved to Problem Set")}>
+                    <option value="">Problem Set</option>
                     {Array.from({ length: Math.max(12, p.td_number ?? 0) }, (_, i) => <option key={i + 1} value={i + 1}>TD {i + 1}</option>)}
                   </select></td>
                   <td style={{ minWidth: 240 }}><TagEditor tags={p.tags} suggestions={suggestions} onSave={(next) => save(p, { tags: next }, "Topics saved")} /></td>
@@ -106,15 +106,15 @@ export default function PracticeSet() {
                   <td className="right mono">{rate == null ? "—" : rate + "%"}</td>
                   <td>{p.hidden ? <span className="badge neutral">Hidden</span> : <span className="badge ok">Public</span>}</td>
                   <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
-                    {!p.hidden && <a className="btn small ghost" href={(p.td_number ? "#/td/" : "#/practice/") + p.id}>Open</a>}
-                    <button className="small" disabled={busy} onClick={() => save(p, { hidden: !p.hidden, reason: p.hidden ? "Shown again" : "Hidden from practice" }, p.hidden ? "Visible in practice again" : "Hidden from practice")}>{p.hidden ? "Show" : "Hide"}</button>
+                    {!p.hidden && <a className="btn small ghost" href={(p.td_number ? "#/td/" : "#/problems/") + p.id}>Open</a>}
+                    <button className="small" disabled={busy} onClick={() => save(p, { hidden: !p.hidden, reason: p.hidden ? "Shown again" : "Hidden from Problem Set" }, p.hidden ? "Visible in Problem Set again" : "Hidden from Problem Set")}>{p.hidden ? "Show" : "Hide"}</button>
                   </div></td>
                 </tr>
               );
             })}</tbody>
           </table></div>
         )}
-        <span className="small muted">Topics appear as filters on the Practice page (up to 8 per problem). Press Enter to add one. Hidden problems keep their statistics. Problems in a TD are listed on the TD page (academic section) instead of Practice.</span>
+        <span className="small muted">Topics appear as filters on the Problem Set page (up to 8 per problem). Press Enter to add one. Hidden problems keep their statistics. Problems in a TD are listed on the TD page (academic section) instead of Problem Set.</span>
       </section>
     </div>
   );

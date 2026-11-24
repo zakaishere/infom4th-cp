@@ -119,7 +119,7 @@ export default function ProblemWizard() {
     setBusy(true);
     try {
       await runStep("Approving", () => post("/api/lab/problems/" + d.versionId + "/approve", { reason: approveReason }));
-      if (practice) await runStep("Publishing to practice", () => post("/api/lab/problems/" + d.versionId + "/publish-practice"));
+      if (practice) await runStep("Publishing to Problem Set", () => post("/api/lab/problems/" + d.versionId + "/publish-practice"));
       toast("success", "Problem approved — it can now be added to contests.");
       const id = d.versionId;
       try { localStorage.removeItem(KEY); } catch { /* ignore */ }
@@ -238,7 +238,7 @@ export default function ProblemWizard() {
               <div className="card-flat stack">
                 <div className="notice ok">The reference solution passed every test.</div>
                 <Field label="Approval note (audit log)"><input value={approveReason} onChange={(e) => setApproveReason(e.target.value)} /></Field>
-                <label className="check"><input type="checkbox" checked={practice} onChange={(e) => setPractice(e.target.checked)} />Also publish to the Practice section</label>
+                <label className="check"><input type="checkbox" checked={practice} onChange={(e) => setPractice(e.target.checked)} />Also publish to the Problem Set</label>
                 <div><button className="primary" disabled={busy || !approveReason.trim()} onClick={approve}>Approve problem</button></div>
               </div>
             )}

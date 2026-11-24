@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { displayTimeZone, serverNow } from "./api";
+import { serverNow } from "./api";
 
 export const VERDICTS: Record<string, { label: string; short: string; tone: string }> = {
   ACCEPTED: { label: "Accepted", short: "AC", tone: "ok" },
@@ -58,38 +58,73 @@ export function clock(ms: number) {
   return (total >= 86400 ? Math.floor(total / 86400) + "d " : "") + pad(h % 24) + ":" + pad(m) + ":" + pad(s);
 }
 
+/** Compact remaining time for small rings/chips (e.g. "5d 12h" or "01:29"). */
+export function shortClock(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  if (total >= 86400) {
+    const d = Math.floor(total / 86400), h = Math.floor((total % 86400) / 3600);
+    return `${d}d ${h}h`;
+  }
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}`;
+}
+
+/** Human-readable contest duration from seconds (minutes up to multi-day). */
+export function formatDuration(seconds: number) {
+  const totalMin = Math.max(1, Math.round(seconds / 60));
+  const d = Math.floor(totalMin / 1440);
+  const remMin = totalMin % 1440;
+  const h = Math.floor(remMin / 60);
+  const m = remMin % 60;
+  if (d > 0) {
+    const parts = [`${d}d`];
+    if (h > 0) parts.push(`${h}h`);
+    if (m > 0) parts.push(`${m}m`);
+    return parts.length === 1 ? `${d} day${d === 1 ? "" : "s"}` : parts.join(" ");
+  }
+  if (h > 0) return m > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${h}h`;
+  return `${m} min`;
+}
+
+export const CONTEST_FORMAT_LABEL: Record<string, string> = {
+  STANDARD: "Normal",
+  BASIC: "Basic",
+  WARMUP: "Warmup",
+};
+
+/** Browser local IANA time zone so every input and display matches the user's wall clock while following serverNow(). */
+export function localTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 export function when(value?: string | null) {
   if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, { timeZone: displayTimeZone(), year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" });
+  return new Date(value).toLocaleString(undefined, { timeZone: localTimeZone(), year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" });
 }
 
-/** Time of day in the platform's time zone, so a submission shows the same time on every screen. */
+/** Time of day in the user's local time zone. */
 export function timeOf(value: string) {
-  return new Date(value).toLocaleTimeString(undefined, { timeZone: displayTimeZone(), hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+  return new Date(value).toLocaleTimeString(undefined, { timeZone: localTimeZone(), hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
 }
 
-function zoneParts(ms: number) {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: displayTimeZone(), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(ms);
-  const part = (type: string) => parts.find((p) => p.type === type)!.value;
-  return { year: part("year"), month: part("month"), day: part("day"), hour: part("hour"), minute: part("minute"), second: part("second") };
-}
-
-/** Value for a datetime-local input, read in the platform's time zone instead of the laptop's. */
+/** Value for a datetime-local input, formatted in the user's local time zone from an epoch millisecond instant. */
 export function toZoneInput(ms: number) {
-  const p = zoneParts(ms);
-  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** The instant a datetime-local value means in the platform's time zone. Returns NaN when it is empty or invalid. */
+/** Epoch milliseconds for a datetime-local value in the user's local time zone. Returns NaN when empty or invalid. */
 export function fromZoneInput(value: string) {
-  const wall = new Date(value + "Z").getTime();
-  if (Number.isNaN(wall)) return NaN;
-  const offsetAt = (ms: number) => {
-    const p = zoneParts(ms);
-    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
-  };
-  // A second pass gets the right answer when daylight saving changes between the two instants.
-  return wall - offsetAt(wall - offsetAt(wall));
+  if (!value) return NaN;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return NaN;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0).getTime();
 }
 
 export function ago(value?: string | null) {

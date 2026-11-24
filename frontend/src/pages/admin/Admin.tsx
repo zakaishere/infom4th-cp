@@ -32,7 +32,7 @@ export default function Admin({ parts }: { parts: string[] }) {
     ] },
     { title: "Build", items: [
       setter && { key: "problems", label: "Problem lab", icon: "✎", count: review || undefined },
-      organizer && { key: "practice", label: "Practice set", icon: "★" },
+      organizer && { key: "practice", label: "Problem set", icon: "★" },
       organizer && { key: "duel-problems", label: "Duel problems", icon: "⚔" },
     ] },
     { title: "System", items: [

@@ -216,9 +216,9 @@ export default function Profile({ handle }: { handle: string }) {
           </section>
           <section className="card stack">
             <h3>Skills</h3>
-            {d.skills.length < 3 ? <Empty>Skills appear once practice problems have tags.</Empty> : <SkillRadar skills={d.skills} />}
+            {d.skills.length < 3 ? <Empty>Skills appear once Problem Set problems have tags.</Empty> : <SkillRadar skills={d.skills} />}
             {d.nextProblem && (
-              <a className="notice small next-problem" href={"#/practice/" + d.nextProblem.version_id}>
+              <a className="notice small next-problem" href={"#/problems/" + d.nextProblem.version_id}>
                 <span>Weakest tag: <strong>{d.nextProblem.tag}</strong>. Next up: {d.nextProblem.title}</span><span className="btn small primary">Train ▸</span>
               </a>
             )}
