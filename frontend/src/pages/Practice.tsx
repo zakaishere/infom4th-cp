@@ -6,6 +6,7 @@ import { ProblemStatement, SubmissionModal, SubmissionTable, TestCases, draftKey
 import { submissionAccepted, verdictShown } from "../lib/latency";
 import { CodeEditor, Empty, ErrorBox, LANGUAGE_NAMES, LiveDot, Loading, Ring, VERDICTS, clock } from "../ui";
 import { parseSignature } from "../lib/functionMode";
+import { topicLabel } from "../lib/topics";
 import { DocsPanel } from "../components/DocsPanel";
 
 export type PracticeProblem = {
@@ -42,12 +43,18 @@ export function PracticeList() {
   const now = useServerClock();
   const liveContests = (contests.data ?? []).filter((c) => now >= new Date(c.starts_at).getTime() && now < new Date(c.ends_at).getTime());
   const [f, setF] = useState<Filters>(loadFilters);
+  const [topicsExpanded, setTopicsExpanded] = useState(false);
   const set = (patch: Partial<Filters>) => setF((old) => {
     const next = { ...old, ...patch };
     try { localStorage.setItem("cp.practice.filters", JSON.stringify(next)); } catch { /* ignore */ }
     return next;
   });
   const all = catalog.data?.problems ?? [];
+  const topicCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of all) for (const t of p.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [all]);
   const shown = useMemo(() => {
     const q = f.q.trim().toLowerCase();
     const rows = all.filter((p) =>
@@ -104,8 +111,44 @@ export function PracticeList() {
         </div>
       </section>
 
+      {topicCounts.length > 0 && (
+        <section className="topic-bar">
+          <div className="topic-pills">
+            <button className={"topic-pill" + (f.tags.length === 0 ? " active" : "")} onClick={() => set({ tags: [] })}>
+              <span>All Topics</span><span className="topic-count">{all.length}</span>
+            </button>
+            {(topicsExpanded ? topicCounts : topicCounts.slice(0, 10)).map(([t, count]) => {
+              const active = f.tags.includes(t);
+              return (
+                <button key={t} className={"topic-pill" + (active ? " active" : "")}
+                  onClick={() => set({ tags: active ? f.tags.filter((x) => x !== t) : [...f.tags, t] })}>
+                  <span>{topicLabel(t)}</span><span className="topic-count">{count}</span>
+                </button>
+              );
+            })}
+            {topicCounts.length > 10 && (
+              <button className="ghost small" onClick={() => setTopicsExpanded(!topicsExpanded)}>
+                {topicsExpanded ? "Show less ▴" : `+${topicCounts.length - 10} more ▾`}
+              </button>
+            )}
+          </div>
+          {f.tags.length > 0 && (
+            <div className="row small" style={{ gap: "0.4rem", marginTop: "0.5rem" }}>
+              <span className="muted">Active topics:</span>
+              {f.tags.map((t) => (
+                <span key={t} className="tag-chip small active">
+                  {topicLabel(t)}
+                  <button className="ghost small" style={{ padding: "0 0 0 0.3rem", color: "inherit" }} aria-label={"Remove " + t}
+                    onClick={() => set({ tags: f.tags.filter((x) => x !== t) })}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="practice-filters">
-        <input className="search" placeholder="Search by title or tag…" value={f.q} onChange={(e) => set({ q: e.target.value })} />
+        <input className="search" placeholder="Search by title or topic…" value={f.q} onChange={(e) => set({ q: e.target.value })} />
         <div className="filters">
           {["", "EASY", "MEDIUM", "HARD"].map((d) => (
             <button key={d || "all"} className={f.difficulty === d ? "active" : ""} onClick={() => set({ difficulty: d })}>{d ? DIFFICULTY[d].label : "All levels"}</button>
@@ -122,15 +165,6 @@ export function PracticeList() {
         <button onClick={random} disabled={!shown.length} title="Open a random unsolved problem from this list">🎲 Random</button>
         {filtered && <button className="ghost small" onClick={() => set({ ...DEFAULT_FILTERS, sort: f.sort })}>Clear filters</button>}
       </section>
-      {(catalog.data?.tags.length ?? 0) > 0 && (
-        <div className="tag-filter">
-          <span className="small muted">Topics:</span>
-          {catalog.data!.tags.map((t) => (
-            <button key={t} className={"tag-chip" + (f.tags.includes(t) ? " active" : "")}
-              onClick={() => set({ tags: f.tags.includes(t) ? f.tags.filter((x) => x !== t) : [...f.tags, t] })}>{t}</button>
-          ))}
-        </div>
-      )}
 
       <ErrorBox error={catalog.error} />
       {catalog.loading ? <Loading /> : all.length === 0 ? <Empty>No problems in the Problem Set yet. Organizers publish them from Control room → Problem set.</Empty>
@@ -146,7 +180,7 @@ export function PracticeList() {
                     <td><StatusIcon status={p.my_status} /></td>
                     <td>
                       <a href={"#/problems/" + p.id} className="problem-link" onClick={(e) => e.stopPropagation()}>{p.title}</a>
-                      {p.tags.length > 0 && <div className="tags">{p.tags.map((t) => <span key={t} className="tag-chip small" onClick={(e) => { e.stopPropagation(); if (!f.tags.includes(t)) set({ tags: [...f.tags, t] }); }}>{t}</span>)}</div>}
+                      {p.tags.length > 0 && <div className="tags">{p.tags.map((t) => <span key={t} className="tag-chip small" onClick={(e) => { e.stopPropagation(); if (!f.tags.includes(t)) set({ tags: [...f.tags, t] }); }}>{topicLabel(t)}</span>)}</div>}
                     </td>
                     <td><DifficultyPill value={p.difficulty} /></td>
                     <td className="right mono">{rate == null ? <span className="muted">—</span> : rate + "%"}</td>
@@ -281,7 +315,7 @@ export function PracticeProblem({ versionId, section = "practice", mission }: { 
             {stats.my_status === "TRIED" && <span className="badge warn">Attempted</span>}
             <span className="small muted">Solved by <strong>{stats.solved_by}</strong> · Acceptance <strong>{rate == null ? "—" : rate + "%"}</strong></span>
           </div>
-          {stats.tags.length > 0 && <div className="tags" style={{ marginBottom: "0.75rem" }}>{stats.tags.map((t) => <span key={t} className="tag-chip small">{t}</span>)}</div>}
+          {stats.tags.length > 0 && <div className="tags" style={{ marginBottom: "0.75rem" }}>{stats.tags.map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}</div>}
           {tab === "statement" ? <ProblemStatement problem={p} /> : (
             <div className="stack">
               <SubmissionTable rows={mine} onOpen={setOpen} />

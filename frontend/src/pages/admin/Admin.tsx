@@ -31,8 +31,8 @@ export default function Admin({ parts }: { parts: string[] }) {
       organizer && { key: "analytics", label: "Analytics", icon: "▤" },
     ] },
     { title: "Build", items: [
-      setter && { key: "problems", label: "Problem lab", icon: "✎", count: review || undefined },
-      organizer && { key: "practice", label: "Problem set", icon: "★" },
+      setter && { key: "problems", label: "Problem library", icon: "✎", count: review || undefined },
+      organizer && { key: "practice", label: "Public Problem Set", icon: "★" },
       organizer && { key: "duel-problems", label: "Duel problems", icon: "⚔" },
     ] },
     { title: "System", items: [

@@ -82,7 +82,7 @@ type Detail = Competition & {
 export function ContestDetail({ id }: { id: string }) {
   const d = useData<Detail>("/api/manage/competitions/" + id, 15000);
   const readiness = useData<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness", 15000);
-  const lab = useData<{ version_id: string; title: string; slug: string; status: string; difficulty?: string }[]>("/api/lab/problems");
+  const lab = useData<{ version_id: string; title: string; slug: string; status: string; difficulty?: string; contest_flag?: string | null }[]>("/api/lab/problems");
   const [attach, setAttach] = useState({ versionId: "", label: "" });
   const [startsAt, setStartsAt] = useState(() => toZoneInput(serverNow() + 3600_000).slice(0, 14) + "00");
   const [visibility, setVisibility] = useState("PUBLIC");
@@ -123,7 +123,7 @@ export function ContestDetail({ id }: { id: string }) {
               run(async () => { await post("/api/manage/competitions/" + id + "/problems", { versionId: attach.versionId, slot, label: attach.label || String.fromCharCode(64 + slot), releaseDay: 1 }); setAttach({ versionId: "", label: "" }); refresh(); }, "Problem attached");
             }}>
               <Field label="Approved problem"><select required value={attach.versionId} onChange={(e) => setAttach({ ...attach, versionId: e.target.value })}>
-                <option value="">Choose…</option>{approved.map((p) => <option key={p.version_id} value={p.version_id}>[{p.difficulty ?? "MEDIUM"}] {p.title} ({p.slug})</option>)}</select></Field>
+                <option value="">Choose…</option>{approved.map((p) => <option key={p.version_id} value={p.version_id}>{p.contest_flag ? `[${p.contest_flag}] ` : ""}[{p.difficulty ?? "MEDIUM"}] {p.title} ({p.slug})</option>)}</select></Field>
               <Field label="Label"><input maxLength={8} placeholder="auto" value={attach.label} onChange={(e) => setAttach({ ...attach, label: e.target.value })} style={{ width: 80 }} /></Field>
               <button disabled={busy}>Attach</button>
             </form>

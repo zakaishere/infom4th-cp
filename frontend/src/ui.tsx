@@ -93,6 +93,44 @@ export const CONTEST_FORMAT_LABEL: Record<string, string> = {
   WARMUP: "Warmup",
 };
 
+export const PROBLEM_FLAG_LABEL: Record<string, string> = {
+  BASIC: "Basic",
+  WARMUP: "Warmup",
+  STANDARD: "Contest",
+};
+
+export function formatProblemFlag(flag?: string | null) {
+  if (!flag) return "";
+  return PROBLEM_FLAG_LABEL[flag] ?? flag;
+}
+
+export function FlagBadge({ flag }: { flag?: string | null }) {
+  if (!flag) return null;
+  const style =
+    flag === "BASIC" ? { borderColor: "var(--ok)", color: "var(--ok)" }
+    : flag === "WARMUP" ? { borderColor: "#35c7e8", color: "#35c7e8" }
+    : flag === "STANDARD" ? { borderColor: "var(--primary)", color: "var(--primary)" }
+    : undefined;
+  return <span className="tag" style={style}>{formatProblemFlag(flag)}</span>;
+}
+
+const CONTEST_HANDOFF_KEY = "cp.contest-builder.handoff";
+export function queueProblemsForContest(versionIds: string[], kind?: "STANDARD" | "BASIC" | "WARMUP") {
+  try {
+    sessionStorage.setItem(CONTEST_HANDOFF_KEY, JSON.stringify({ versionIds, kind }));
+  } catch { /* ignore */ }
+}
+export function consumeQueuedContestProblems(): { versionIds: string[]; kind?: "STANDARD" | "BASIC" | "WARMUP" } | null {
+  try {
+    const raw = sessionStorage.getItem(CONTEST_HANDOFF_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(CONTEST_HANDOFF_KEY);
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** Browser local IANA time zone so every input and display matches the user's wall clock while following serverNow(). */
 export function localTimeZone() {
   try {

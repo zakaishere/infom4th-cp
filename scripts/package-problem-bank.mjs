@@ -52,10 +52,11 @@ export function buildProblemBank(source) {
       statement:meta.statement,inputFormat:meta.inputFormat,outputFormat:meta.outputFormat,constraints:meta.constraints,
       // Generated "explanation" is an algorithm editorial, not a public sample note.
       explanation:'',setterNotes:[meta.explanation,meta.source,meta.tags?.length?'Topics: '+meta.tags.join(', '):''].filter(Boolean).join('\n\n'),
-      // TD problems name their TD and position, and keep their topics as practice tags.
-      ...(meta.td?{td:{number:meta.td,position:meta.tdOrder??0},tags:meta.tags??[]}:{}),
-      // Mission problems name their mission (created on first import), position and points.
-      ...(meta.mission?{mission:meta.mission,tags:meta.tags??[]}:{}),
+      // Keep tags and optional contestFlag on every problem, plus TD / Mission placement when present.
+      ...(meta.tags?.length?{tags:meta.tags}:{}),
+      ...(meta.contestFlag?{contestFlag:meta.contestFlag}:{}),
+      ...(meta.td?{td:{number:meta.td,position:meta.tdOrder??0}} : {}),
+      ...(meta.mission?{mission:meta.mission}:{}),
       tests,reference:{label:'Main solution',language:meta.referenceLanguage,sourceCode:readWithin(directory,meta.referenceFile)}});
   }
   if(!problems.length)throw new Error('No problem manifests found');

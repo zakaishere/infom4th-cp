@@ -1,56 +1,349 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { post, put, patch } from "../../api";
-import { navigate, useAction, useData } from "../../app";
-import { Badge, CodeEditor, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, when } from "../../ui";
+import { navigate, useAction, useAuth, useData } from "../../app";
+import { Badge, CodeEditor, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, formatProblemFlag, queueProblemsForContest, when } from "../../ui";
+import { DifficultyPill } from "../Practice";
+import { topicLabel } from "../../lib/topics";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SignatureEditor } from "../../components/SignatureEditor";
 import { templateFor } from "../../components/Problem";
 import { EMPTY_SIGNATURE, FUNCTION_LANGUAGES, describe, parseSignature, type Signature } from "../../lib/functionMode";
 
 const STATUS_TONE: Record<string, string> = { DRAFT: "neutral", IN_TESTING: "info", READY_FOR_REVIEW: "warn", APPROVED: "ok", PUBLISHED: "ok", ARCHIVED: "neutral" };
+const DIFF_RANK: Record<string, number> = { EASY: 1, MEDIUM: 2, HARD: 3 };
 
-type LabRow = { id: string; slug: string; version_id: string; title: string; version_number: number; status: string; deleted_at: string | null };
+type LabRow = { id: string; slug: string; version_id: string; title: string; version_number: number; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; tags?: string[]; contest_flag?: string | null; folder?: string | null; in_problem_set?: boolean; deleted_at: string | null };
+
+function matchesFolder(problemFolder: string | null | undefined, selected: string) {
+  if (!selected) return true;
+  if (selected === "__UNFILED__") return !problemFolder;
+  if (!problemFolder) return false;
+  return problemFolder === selected || problemFolder.startsWith(selected + "/");
+}
+
+function buildFolderTree(paths: string[]) {
+  const set = new Set<string>();
+  for (const p of paths) {
+    const segs = p.split("/").filter(Boolean);
+    for (let i = 1; i <= segs.length; i++) set.add(segs.slice(0, i).join("/"));
+  }
+  return [...set].sort((a, b) => a.localeCompare(b)).map((full) => {
+    const segs = full.split("/");
+    return { full, name: segs[segs.length - 1], depth: segs.length - 1 };
+  });
+}
 
 export function ProblemList() {
+  const { organizer } = useAuth();
   const [showDeleted, setShowDeleted] = useState(false);
   const list = useData<LabRow[]>("/api/lab/problems" + (showDeleted ? "?deleted=true" : ""));
   const [filter, setFilter] = useState("");
+  const [difficulty, setDifficulty] = useState<"" | "EASY" | "MEDIUM" | "HARD">("");
+  const [flagFilter, setFlagFilter] = useState("");
+  const [folderFilter, setFolderFilter] = useState("");
+  const [extraFolders, setExtraFolders] = useState<string[]>(["Warmup/Week 1", "Warmup/Week 2", "Basic", "Contests"]);
+  const [newFolderInput, setNewFolderInput] = useState("");
+  const [moveTarget, setMoveTarget] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<"" | "PRIVATE" | "PUBLIC_SET">("");
+  const [statusFilter, setStatusFilter] = useState<"" | "READY_CONTEST" | "REVIEW" | "DRAFT">("");
+  const [sort, setSort] = useState<"newest" | "easiest" | "hardest" | "title">("newest");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [customFlag, setCustomFlag] = useState("");
   const [target, setTarget] = useState<{ row: LabRow; action: "delete" | "restore" } | null>(null);
-  const { run } = useAction();
-  const rows = (list.data ?? []).filter((p) => (p.title + " " + p.slug).toLowerCase().includes(filter.toLowerCase()));
+  const { busy, run } = useAction();
+
+  const all = list.data ?? [];
+  const allFlags = useMemo(() => {
+    const custom = new Set<string>();
+    for (const p of all) if (p.contest_flag && !["BASIC", "WARMUP", "STANDARD"].includes(p.contest_flag)) custom.add(p.contest_flag);
+    return ["BASIC", "WARMUP", "STANDARD", ...[...custom].sort()];
+  }, [all]);
+
+  const folderTree = useMemo(() => {
+    const paths = [...extraFolders, ...all.map((p) => p.folder).filter((x): x is string => Boolean(x))];
+    return buildFolderTree(paths);
+  }, [all, extraFolders]);
+
+  const rows = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const filtered = all.filter((p) => {
+      if (q && !(p.title + " " + p.slug + " " + (p.tags ?? []).join(" ") + " " + (p.contest_flag ?? "") + " " + (p.folder ?? "")).toLowerCase().includes(q)) return false;
+      if (difficulty && (p.difficulty ?? "MEDIUM") !== difficulty) return false;
+      if (flagFilter === "__NONE__" && p.contest_flag) return false;
+      if (flagFilter && flagFilter !== "__NONE__" && p.contest_flag !== flagFilter) return false;
+      if (!matchesFolder(p.folder, folderFilter)) return false;
+      if (scopeFilter === "PRIVATE" && p.in_problem_set) return false;
+      if (scopeFilter === "PUBLIC_SET" && !p.in_problem_set) return false;
+      if (statusFilter === "READY_CONTEST" && !["APPROVED", "PUBLISHED"].includes(p.status)) return false;
+      if (statusFilter === "REVIEW" && p.status !== "READY_FOR_REVIEW") return false;
+      if (statusFilter === "DRAFT" && !["DRAFT", "IN_TESTING"].includes(p.status)) return false;
+      return true;
+    });
+    if (sort === "easiest") return [...filtered].sort((a, b) => (DIFF_RANK[a.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_RANK[b.difficulty ?? "MEDIUM"] ?? 2) || a.title.localeCompare(b.title));
+    if (sort === "hardest") return [...filtered].sort((a, b) => (DIFF_RANK[b.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_RANK[a.difficulty ?? "MEDIUM"] ?? 2) || a.title.localeCompare(b.title));
+    if (sort === "title") return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+    return filtered;
+  }, [all, filter, difficulty, flagFilter, folderFilter, scopeFilter, statusFilter, sort]);
+
+  const flagProblems = (ids: string[], flag: string | null) =>
+    run(async () => {
+      await post("/api/lab/problems/flag", { ids, flag });
+      list.reload();
+    }, flag ? `Flagged as ${formatProblemFlag(flag)}` : "Flag cleared");
+
+  const moveProblems = (ids: string[], folder: string | null) =>
+    run(async () => {
+      await post("/api/lab/problems/move", { ids, folder });
+      if (folder) setExtraFolders((old) => (old.includes(folder) ? old : [...old, folder]));
+      list.reload();
+    }, folder ? `Moved to ${folder}` : "Removed from folder");
+
+  const publishSelectedToProblemSet = () =>
+    run(async () => {
+      for (const p of selectedApproved.filter((x) => !x.in_problem_set)) {
+        await post("/api/lab/problems/" + p.version_id + "/publish-practice");
+      }
+      setSelected(new Set());
+      list.reload();
+    }, "Published selected problems to Public Problem Set");
+
+  const toggleOne = (versionId: string) => setSelected((old) => {
+    const next = new Set(old);
+    if (next.has(versionId)) next.delete(versionId);
+    else next.add(versionId);
+    return next;
+  });
+  const allShownSelected = rows.length > 0 && rows.every((p) => selected.has(p.version_id));
+  const toggleAllShown = () => setSelected((old) => {
+    const next = new Set(old);
+    if (allShownSelected) rows.forEach((p) => next.delete(p.version_id));
+    else rows.forEach((p) => next.add(p.version_id));
+    return next;
+  });
+
+  const selectedRows = all.filter((p) => selected.has(p.version_id));
+  const selectedApproved = selectedRows.filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
+  const selectedPrivateApproved = selectedApproved.filter((p) => !p.in_problem_set);
+  const shownApproved = rows.filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
+  const hasFilters = Boolean(filter || difficulty || flagFilter || folderFilter || scopeFilter || statusFilter);
+
+  const launchContestFrom = (items: LabRow[]) => {
+    if (!items.length) return;
+    const uniqueFlags = [...new Set(items.map((p) => p.contest_flag).filter(Boolean))];
+    const kind = uniqueFlags.length === 1 && (uniqueFlags[0] === "BASIC" || uniqueFlags[0] === "WARMUP" || uniqueFlags[0] === "STANDARD")
+      ? uniqueFlags[0]
+      : folderFilter.toLowerCase().startsWith("warmup") ? "WARMUP"
+      : folderFilter.toLowerCase().startsWith("basic") ? "BASIC"
+      : undefined;
+    queueProblemsForContest(items.map((p) => p.version_id), kind);
+    navigate("/admin/contests/new");
+  };
+
+  const privateCount = all.filter((p) => !p.in_problem_set).length;
+  const publicCount = all.filter((p) => p.in_problem_set).length;
+  const unfiledCount = all.filter((p) => !p.folder).length;
+
   return (
-    <div className="stack" style={{ gap: "1.5rem" }}>
+    <div className="stack" style={{ gap: "1.25rem" }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><div className="eyebrow">Problem lab</div><h1>{showDeleted ? "Deleted problems" : "Problems"}</h1>
+        <div><div className="eyebrow">Master vault</div><h1>{showDeleted ? "Deleted problems" : "Problem library"}</h1>
           <p>{showDeleted ? "Restore a problem to use it again. Contest history and submissions were never removed."
-            : "The wizard walks you through statement, tests, a reference solution, validation and approval. Open a problem for advanced editing."}</p></div>
+            : "Organize all your problems in nested folders (Warmup/Week 1, Basic, Contests…), move problems in bulk, and launch contests from any folder."}</p></div>
         <div className="row">
-          <button className="ghost" onClick={() => setShowDeleted(!showDeleted)}>{showDeleted ? "← Back to problems" : "🗑 Show deleted"}</button>
+          <button className="ghost" onClick={() => { setShowDeleted(!showDeleted); setSelected(new Set()); }}>{showDeleted ? "← Back to library" : "🗑 Show deleted"}</button>
           {!showDeleted && <><button onClick={() => navigate("/admin/problems/import")}>Bulk import</button><button className="primary" onClick={() => navigate("/admin/problems/new")}>+ New problem</button></>}
         </div>
       </div>
-      <input placeholder="Filter by title" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ maxWidth: 320 }} />
-      <ErrorBox error={list.error} />
-      {list.loading ? <Loading /> : !rows.length ? <Empty>{showDeleted ? "No deleted problems." : "No problems yet."}</Empty> : (
-        <div className="card table-wrap">
-          <table>
-            <thead><tr><th>Problem</th><th>Version</th><th>Status</th><th /></tr></thead>
-            <tbody>{rows.map((p) => (
-              <tr key={p.version_id}>
-                <td><strong>{p.title}</strong><div className="small muted mono">{p.slug}</div></td>
-                <td>v{p.version_number}</td>
-                <td>{showDeleted ? <Badge>Deleted {p.deleted_at ? when(p.deleted_at) : ""}</Badge> : <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>}</td>
-                <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
-                  {showDeleted ? <button className="small primary" onClick={() => setTarget({ row: p, action: "restore" })}>Restore</button> : <>
-                    <a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a>
-                    <button className="small danger" onClick={() => setTarget({ row: p, action: "delete" })} title="Delete this problem">Delete</button>
-                  </>}
-                </div></td>
-              </tr>
-            ))}</tbody>
-          </table>
+
+      <div className={showDeleted ? "stack" : "library-layout"}>
+        {!showDeleted && (
+          <aside className="card folder-sidebar" aria-label="Library folders">
+            <strong className="small muted" style={{ padding: "0.2rem 0.6rem" }}>FOLDERS</strong>
+            <button type="button" className={"folder-btn" + (folderFilter === "" && scopeFilter === "" ? " active" : "")}
+              onClick={() => { setFolderFilter(""); setScopeFilter(""); }}>
+              <span>📚 All library</span><span className="fcount">{all.length}</span>
+            </button>
+            <button type="button" className={"folder-btn" + (scopeFilter === "PUBLIC_SET" ? " active" : "")}
+              onClick={() => { setFolderFilter(""); setScopeFilter("PUBLIC_SET"); }}>
+              <span>★ Public Problem Set</span><span className="fcount">{publicCount}</span>
+            </button>
+            <button type="button" className={"folder-btn" + (scopeFilter === "PRIVATE" && folderFilter === "" ? " active" : "")}
+              onClick={() => { setFolderFilter(""); setScopeFilter("PRIVATE"); }}>
+              <span>🔒 Private / Contests</span><span className="fcount">{privateCount}</span>
+            </button>
+            <hr style={{ margin: "0.35rem 0" }} />
+            {folderTree.map((node) => {
+              const count = all.filter((p) => matchesFolder(p.folder, node.full)).length;
+              return (
+                <button key={node.full} type="button"
+                  className={"folder-btn" + (folderFilter === node.full ? " active" : "")}
+                  style={{ paddingLeft: `${0.6 + node.depth * 0.9}rem` }}
+                  onClick={() => { setFolderFilter(node.full); setScopeFilter(""); }}>
+                  <span>{node.depth > 0 ? "↳ 📁 " : "📁 "}{node.name}</span>
+                  <span className="fcount">{count}</span>
+                </button>
+              );
+            })}
+            <button type="button" className={"folder-btn" + (folderFilter === "__UNFILED__" ? " active" : "")}
+              onClick={() => { setFolderFilter("__UNFILED__"); setScopeFilter(""); }}>
+              <span>○ Unfiled</span><span className="fcount">{unfiledCount}</span>
+            </button>
+            {organizer && (
+              <form className="row" style={{ gap: "0.3rem", marginTop: "0.5rem" }} onSubmit={(e) => {
+                e.preventDefault();
+                const clean = newFolderInput.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                if (!clean) return;
+                setExtraFolders((old) => (old.includes(clean) ? old : [...old, clean]));
+                setFolderFilter(clean);
+                setScopeFilter("");
+                setNewFolderInput("");
+              }}>
+                <input placeholder="+ Folder (e.g. Warmup/Week 3)" value={newFolderInput} onChange={(e) => setNewFolderInput(e.target.value)} style={{ fontSize: "0.8rem", padding: "0.3rem 0.5rem" }} />
+                <button className="small" type="submit" disabled={!newFolderInput.trim()}>+</button>
+              </form>
+            )}
+          </aside>
+        )}
+
+        <div className="stack" style={{ gap: "1rem", minWidth: 0 }}>
+          {!showDeleted && folderFilter && folderFilter !== "__UNFILED__" && (
+            <div className="row-between card-flat">
+              <span className="small">📁 Folder: <strong>{folderFilter}</strong> ({rows.length} shown)</span>
+              {organizer && shownApproved.length > 0 && (
+                <button className="primary small" onClick={() => launchContestFrom(shownApproved)}>
+                  → Create contest from this folder ({shownApproved.length})
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="practice-filters" style={{ marginBottom: 0 }}>
+            <input className="search" placeholder="Search title, slug, topic, flag, or folder…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <div className="filters">
+              {([["", "All"], ["EASY", "Easy"], ["MEDIUM", "Medium"], ["HARD", "Hard"]] as const).map(([v, label]) => (
+                <button key={v || "all"} className={difficulty === v ? "active" : ""} onClick={() => setDifficulty(v)}>{label}</button>
+              ))}
+            </div>
+            {!showDeleted && (
+              <>
+                <select value={flagFilter} onChange={(e) => setFlagFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by contest flag">
+                  <option value="">All flags</option>
+                  {allFlags.map((fl) => <option key={fl} value={fl}>Flag: {formatProblemFlag(fl)}</option>)}
+                  <option value="__NONE__">Unflagged</option>
+                </select>
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ width: "auto" }} aria-label="Filter by status">
+                  <option value="">All statuses</option>
+                  <option value="READY_CONTEST">Contest-ready (Approved / Published)</option>
+                  <option value="REVIEW">Ready for review</option>
+                  <option value="DRAFT">Draft / Testing</option>
+                </select>
+              </>
+            )}
+            <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={{ width: "auto" }} aria-label="Sort problems">
+              <option value="newest">Newest first</option>
+              <option value="easiest">Easiest first</option>
+              <option value="hardest">Hardest first</option>
+              <option value="title">Title A–Z</option>
+            </select>
+            {hasFilters && <button className="ghost small" onClick={() => { setFilter(""); setDifficulty(""); setFlagFilter(""); setFolderFilter(""); setScopeFilter(""); setStatusFilter(""); }}>Clear filters</button>}
+          </div>
+
+          {!showDeleted && organizer && selectedRows.length > 0 && (
+            <div className="notice stack" style={{ gap: "0.6rem" }}>
+              <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+                <div className="row" style={{ gap: "0.45rem" }}>
+                  <strong>{selectedRows.length} selected</strong>
+                  <span className="small muted">📁 Move to:</span>
+                  <input list="library-move-folders" placeholder="e.g. Warmup/Week 1" value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)} style={{ width: 170 }} />
+                  <datalist id="library-move-folders">{folderTree.map((n) => <option key={n.full} value={n.full} />)}</datalist>
+                  <button className="small primary" disabled={busy || !moveTarget.trim()} onClick={() => { void moveProblems(selectedRows.map((p) => p.id), moveTarget.trim()); setMoveTarget(""); }}>Move</button>
+                  <button className="small ghost" disabled={busy} onClick={() => moveProblems(selectedRows.map((p) => p.id), null)}>Unfile</button>
+                </div>
+                <div className="row" style={{ gap: "0.5rem" }}>
+                  {selectedPrivateApproved.length > 0 && (
+                    <button className="small" disabled={busy} onClick={publishSelectedToProblemSet}>
+                      + Publish {selectedPrivateApproved.length} to Problem Set
+                    </button>
+                  )}
+                  <button className="primary small" disabled={selectedApproved.length === 0} onClick={() => launchContestFrom(selectedApproved)}>
+                    → Create contest ({selectedApproved.length})
+                  </button>
+                  <button className="ghost small" onClick={() => setSelected(new Set())}>Deselect</button>
+                </div>
+              </div>
+              <div className="row" style={{ gap: "0.45rem" }}>
+                <span className="small muted">Flag as:</span>
+                <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "BASIC")}>Basic</button>
+                <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "WARMUP")}>Warmup</button>
+                <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "STANDARD")}>Contest</button>
+                <input placeholder="Custom flag…" maxLength={32} value={customFlag} onChange={(e) => setCustomFlag(e.target.value)} style={{ width: 120 }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && customFlag.trim()) { e.preventDefault(); void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); } }} />
+                {customFlag.trim() && <button className="small" disabled={busy} onClick={() => { void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); }}>Apply</button>}
+                <button className="small ghost" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), null)}>Clear flag</button>
+              </div>
+            </div>
+          )}
+
+          <ErrorBox error={list.error} />
+          {list.loading ? <Loading /> : !rows.length ? <Empty>{showDeleted ? "No deleted problems." : hasFilters ? "No problem in this folder / filter yet." : "No problems yet."}</Empty> : (
+            <div className="card table-wrap">
+              <table>
+                <thead><tr>
+                  {!showDeleted && organizer && <th style={{ width: 32 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" /></th>}
+                  <th>Problem</th><th>Difficulty</th>{!showDeleted && <th>Folder</th>}{!showDeleted && <th>Flag</th>}{!showDeleted && <th>Visibility</th>}<th>Status</th><th />
+                </tr></thead>
+                <tbody>{rows.map((p) => (
+                  <tr key={p.version_id}>
+                    {!showDeleted && organizer && <td><input type="checkbox" checked={selected.has(p.version_id)} onChange={() => toggleOne(p.version_id)} aria-label={"Select " + p.title} /></td>}
+                    <td>
+                      <strong>{p.title}</strong>
+                      <div className="small muted mono">{p.slug} · v{p.version_number}</div>
+                      {(p.tags?.length ?? 0) > 0 && <div className="tags">{p.tags!.map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}</div>}
+                    </td>
+                    <td><DifficultyPill value={p.difficulty ?? "MEDIUM"} /></td>
+                    {!showDeleted && (
+                      <td>
+                        {organizer ? (
+                          <select value={p.folder ?? ""} disabled={busy} style={{ width: "auto", maxWidth: 155 }} aria-label={"Folder for " + p.title}
+                            onChange={(e) => moveProblems([p.id], e.target.value || null)}>
+                            <option value="">— Unfiled</option>
+                            {folderTree.map((n) => <option key={n.full} value={n.full}>{n.full}</option>)}
+                          </select>
+                        ) : <span className="small muted">{p.folder || "—"}</span>}
+                      </td>
+                    )}
+                    {!showDeleted && (
+                      <td>
+                        {organizer ? (
+                          <select value={p.contest_flag ?? ""} disabled={busy} style={{ width: "auto" }} aria-label={"Flag for " + p.title}
+                            onChange={(e) => flagProblems([p.id], e.target.value || null)}>
+                            <option value="">— None</option>
+                            <option value="BASIC">Basic</option>
+                            <option value="WARMUP">Warmup</option>
+                            <option value="STANDARD">Contest</option>
+                            {p.contest_flag && !["BASIC", "WARMUP", "STANDARD"].includes(p.contest_flag) && <option value={p.contest_flag}>{p.contest_flag}</option>}
+                          </select>
+                        ) : <span className="small muted">{formatProblemFlag(p.contest_flag) || "—"}</span>}
+                      </td>
+                    )}
+                    {!showDeleted && (
+                      <td>{p.in_problem_set ? <Badge tone="ok">Public Set</Badge> : <Badge tone="neutral">Private</Badge>}</td>
+                    )}
+                    <td>{showDeleted ? <Badge>Deleted {p.deleted_at ? when(p.deleted_at) : ""}</Badge> : <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>}</td>
+                    <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                      {showDeleted ? <button className="small primary" onClick={() => setTarget({ row: p, action: "restore" })}>Restore</button> : <>
+                        <a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a>
+                        <button className="small danger" onClick={() => setTarget({ row: p, action: "delete" })} title="Delete this problem">Delete</button>
+                      </>}
+                    </div></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          <span className="small muted">Showing {rows.length} of {all.length} problems.</span>
         </div>
-      )}
+      </div>
       {target && (
         <ReasonDialog title={(target.action === "delete" ? "Delete “" : "Restore “") + target.row.title + "”"} confirm={target.action === "delete" ? "Delete problem" : "Restore"}
           danger={target.action === "delete"} onClose={() => setTarget(null)}

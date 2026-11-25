@@ -48,4 +48,16 @@ public class LaboratoryController {
     Object practice(Authentication auth,@PathVariable UUID version,@RequestBody(required=false) Map<String,Object> body){lab.publishPractice(Actor.of(auth),version,body==null?Map.of():body);return Map.of("ok",true);}
     @PostMapping("/{version}/publish-duel")
     Object duel(Authentication auth,@PathVariable UUID version){lab.publishDuel(Actor.of(auth),version);return Map.of("ok",true);}
+    @PostMapping("/flag")
+    Object flag(Authentication auth,@RequestBody Map<String,Object> body) {
+        Api.require(body.get("ids") instanceof List<?> l && !l.isEmpty() && l.size()<=500,HttpStatus.BAD_REQUEST,"Send 1-500 problem IDs");
+        var ids=((List<?>)body.get("ids")).stream().map(Api::uuid).toList();
+        return Map.of("updated",lab.setContestFlags(Actor.of(auth),ids,body.get("flag")));
+    }
+    @PostMapping("/move")
+    Object move(Authentication auth,@RequestBody Map<String,Object> body) {
+        Api.require(body.get("ids") instanceof List<?> l && !l.isEmpty() && l.size()<=500,HttpStatus.BAD_REQUEST,"Send 1-500 problem IDs");
+        var ids=((List<?>)body.get("ids")).stream().map(Api::uuid).toList();
+        return Map.of("updated",lab.moveToFolder(Actor.of(auth),ids,body.get("folder")));
+    }
 }

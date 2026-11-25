@@ -11,6 +11,9 @@ export type BankProblem = {
   functionSignature?: ObjectValue;
   /** TD problems: the TD and position they take in the academic section when published, and their topics. */
   td?: { number: number; position: number }; tags?: string[];
+  /** Optional organizer contest pool flag (BASIC, WARMUP, STANDARD, or custom) and library folder path (e.g. "Warmup/Week 1"). */
+  contestFlag?: string;
+  folder?: string;
   /** Mission problems: the mission (created on first import), their order and points. */
   mission?: { slug: string; title: string; description?: string; position: number; weight: number };
 };

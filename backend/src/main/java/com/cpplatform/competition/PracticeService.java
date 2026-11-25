@@ -23,7 +23,7 @@ public class PracticeService {
             +"JOIN problem_versions v2 ON v2.id=s.problem_version_id "
             +"JOIN LATERAL (SELECT j.id FROM judging_jobs j WHERE j.submission_id=s.id ORDER BY j.generation DESC LIMIT 1) j ON true "
             +"JOIN judging_results r ON r.job_id=j.id WHERE s.context='PRACTICE' AND NOT s.samples_only) ";
-    private static final String COLUMNS="pp.problem_id,v.id,v.title,p.slug,v.difficulty,pp.tags,pp.hidden,pp.published_at,pp.td_number,pp.td_position,v.time_limit_ms,v.memory_limit_mb,"
+    private static final String COLUMNS="pp.problem_id,v.id,v.title,p.slug,p.contest_flag,v.difficulty,pp.tags,pp.hidden,pp.published_at,pp.td_number,pp.td_position,v.time_limit_ms,v.memory_limit_mb,"
             +"(SELECT count(DISTINCT submitted_by) FROM res WHERE res.problem_id=pp.problem_id AND verdict='ACCEPTED') AS solved_by,"
             +"(SELECT count(DISTINCT submitted_by) FROM res WHERE res.problem_id=pp.problem_id) AS tried_by,"
             +"(SELECT count(*) FROM res WHERE res.problem_id=pp.problem_id) AS submissions,"
@@ -61,7 +61,7 @@ public class PracticeService {
         access.organizer(actor);
         var published=plain(db.jdbc.queryForList(RESULTS+"SELECT "+COLUMNS+"FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id "
                 +"JOIN problems p ON p.id=pp.problem_id ORDER BY pp.published_at DESC",actor.id()));
-        var candidates=db.jdbc.queryForList("SELECT v.id AS version_id,v.title,p.slug,v.difficulty,v.status,v.version_number FROM problem_versions v JOIN problems p ON p.id=v.problem_id "
+        var candidates=db.jdbc.queryForList("SELECT p.id AS problem_id,p.contest_flag,v.id AS version_id,v.title,p.slug,v.difficulty,v.status,v.version_number FROM problem_versions v JOIN problems p ON p.id=v.problem_id "
                 +"WHERE v.status IN ('APPROVED','PUBLISHED') AND p.archived_at IS NULL AND NOT EXISTS(SELECT 1 FROM practice_publications pp WHERE pp.problem_version_id=v.id) ORDER BY v.created_at DESC LIMIT 500");
         return Map.of("published",published,"candidates",candidates,"tags",allTags());
     }
@@ -84,7 +84,9 @@ public class PracticeService {
                 tags.add(tag);
             }
             Api.require(tags.size()<=8,HttpStatus.BAD_REQUEST,"At most 8 tags");
-            db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=?",tags.toArray(new String[0]),problem);
+            String[] arr=tags.toArray(new String[0]);
+            db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=?",arr,problem);
+            db.jdbc.update("UPDATE problems SET tags=?::text[] WHERE id=?",arr,problem);
         }
         if(body.containsKey("td")) {
             // null moves the problem back to the general practice list; a number puts it in that TD.

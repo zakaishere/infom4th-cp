@@ -6,11 +6,12 @@ import { LanguagePicker } from "../../components/LanguagePicker";
 import { SignatureEditor } from "../../components/SignatureEditor";
 import { templateFor } from "../../components/Problem";
 import { CodeEditor, Field, LANGUAGE_NAMES, Markdown, TEMPLATES } from "../../ui";
+import { STANDARD_TOPICS, topicLabel } from "../../lib/topics";
 import { EMPTY_SIGNATURE, FUNCTION_LANGUAGES, checkSignature, checkTest, describe, labelInput, type Signature } from "../../lib/functionMode";
 
 type Test = { input: string; expected: string; sample: boolean };
 type Draft = {
-  title: string; slug: string; difficulty: string; timeLimitMs: number; memoryLimitMb: number; checker: string; languages: string[];
+  title: string; slug: string; difficulty: string; tags: string[]; timeLimitMs: number; memoryLimitMb: number; checker: string; languages: string[];
   statement: string; inputFormat: string; outputFormat: string; constraints: string; explanation: string;
   tests: Test[]; referenceLanguage: string; referenceCode: string; versionId?: string;
   /** Set for a function problem (LeetCode style); null when the program reads standard input. */
@@ -18,7 +19,7 @@ type Draft = {
 };
 const KEY = "cp.problem-wizard";
 const EMPTY: Draft = {
-  title: "", slug: "", difficulty: "MEDIUM", timeLimitMs: 2000, memoryLimitMb: 256, checker: "TRIMMED_LINES", languages: ["CPP", "C", "JAVA", "PYTHON"],
+  title: "", slug: "", difficulty: "MEDIUM", tags: [], timeLimitMs: 2000, memoryLimitMb: 256, checker: "TRIMMED_LINES", languages: ["CPP", "C", "JAVA", "PYTHON"],
   statement: "", inputFormat: "", outputFormat: "", constraints: "", explanation: "",
   tests: [{ input: "", expected: "", sample: true }], referenceLanguage: "CPP", referenceCode: TEMPLATES.CPP, functionSignature: null,
 };
@@ -90,7 +91,7 @@ export default function ProblemWizard() {
         else if (known.sealed_at) { setLog([{ text: "This version is already sealed; open the problem page and clone it to change it", state: "error" }]); setValidation("FAILED"); return; }
       }
       if (!id) {
-        const created = await runStep("Creating draft", () => post("/api/lab/problems", { slug: d.slug, title: d.title, statement: d.statement, languages: d.languages }));
+        const created = await runStep("Creating draft", () => post("/api/lab/problems", { slug: d.slug, title: d.title, statement: d.statement, languages: d.languages, tags: d.tags ?? [] }));
         id = (created as { versionId: string }).versionId;
         set({ versionId: id });
       }
@@ -153,6 +154,21 @@ export default function ProblemWizard() {
               <select value={d.checker} onChange={(e) => set({ checker: e.target.value })}><option value="TRIMMED_LINES">Trimmed lines (recommended)</option><option value="TOKENS">Tokens</option><option value="EXACT">Exact</option></select></Field>}
             {signature && <div style={{ gridColumn: "1 / -1" }}><Field label="Function"><SignatureEditor value={signature} onChange={setSignature} /></Field></div>}
             <Field label="Allowed languages"><LanguagePicker value={d.languages} onChange={(languages) => set({ languages })} allowed={signature ? FUNCTION_LANGUAGES : undefined} /></Field>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <Field label={`Topic categories (${(d.tags ?? []).length}/8)`} hint="Helps participants filter on Problem Set like LeetCode (Hash Map, Math, DP, Graphs…).">
+                <div className="tag-filter" style={{ margin: 0 }}>
+                  {STANDARD_TOPICS.map((t) => {
+                    const active = (d.tags ?? []).includes(t);
+                    return (
+                      <button key={t} type="button" className={"tag-chip" + (active ? " active" : "")}
+                        onClick={() => set({ tags: active ? (d.tags ?? []).filter((x) => x !== t) : [...(d.tags ?? []), t].slice(0, 8) })}>
+                        {topicLabel(t)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+            </div>
           </div>
         )}
         {step === 1 && (

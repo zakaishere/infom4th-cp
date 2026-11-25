@@ -33,8 +33,25 @@ button.tag-chip { font-weight: 500; }
 .practice-progress .ring-label strong { font-size: 1.3rem; font-family: var(--font-display); }
 .progress-line { display: grid; grid-template-columns: 74px 1fr 46px; gap: 0.5rem; align-items: center; }
 .bar.diff-easy > div { background: #17b26a; } .bar.diff-medium > div { background: #f2b84b; } .bar.diff-hard > div { background: #ff6b5b; }
-.practice-filters { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.6rem; }
+.practice-filters { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.9rem; }
 .practice-filters .search { flex: 1 1 240px; max-width: 380px; }
+
+.topic-bar { margin-bottom: 1rem; padding: 0.85rem 1rem; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.topic-pills { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+.topic-pill { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.32rem 0.72rem; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 0.84rem; font-weight: 500; cursor: pointer; transition: border-color 0.15s, background 0.15s, color 0.15s; }
+.topic-pill:hover { border-color: var(--primary); }
+.topic-pill.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.topic-pill .topic-count { font-size: 0.75rem; font-family: var(--font-mono); padding: 0.05rem 0.4rem; border-radius: 999px; background: color-mix(in srgb, var(--fg) 10%, transparent); color: var(--muted); }
+.topic-pill.active .topic-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+
+/* Problem Library folder explorer */
+.library-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 900px) { .library-layout { grid-template-columns: 1fr; } }
+.folder-sidebar { padding: 0.85rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.folder-btn { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; width: 100%; text-align: left; padding: 0.42rem 0.6rem; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--fg); font-size: 0.88rem; cursor: pointer; }
+.folder-btn:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.folder-btn.active { background: color-mix(in srgb, var(--primary) 14%, transparent); border-color: color-mix(in srgb, var(--primary) 40%, transparent); font-weight: 600; }
+.folder-btn .fcount { font-size: 0.75rem; font-family: var(--font-mono); color: var(--muted); }
 .tag-filter { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
 table.practice-table td { vertical-align: middle; padding: 0.75rem 0.8rem; }
 .practice-table tbody tr { cursor: pointer; }

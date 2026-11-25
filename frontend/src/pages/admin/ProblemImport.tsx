@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { get, post } from "../../api";
-import { useAuth } from "../../app";
-import { Badge, ErrorBox, Field } from "../../ui";
+import { useAuth, useData } from "../../app";
+import { Badge, ErrorBox, Field, FlagBadge } from "../../ui";
+import { DifficultyPill } from "../Practice";
+import { FUNCTION_LANGUAGES } from "../../lib/functionMode";
+import { STANDARD_TOPICS, suggestTopics, topicLabel } from "../../lib/topics";
 import { importProblem, readProblemBankFile, type BankProblem, type ImportMode, type ImportTransport, type ImportUpdate } from "../../lib/problemImport";
 
 type Row = { problem: BankProblem; selected: boolean; state: "ready" | "running" | "done" | "skipped" | "error"; message: string; versionId?: string; ownedAttempt?: boolean };
@@ -18,18 +21,42 @@ const slugify = (text: string) => text.toLowerCase().normalize("NFD").replace(/[
 /** Bulk import for the Problem lab, or (duel) straight into the duel problem pool. */
 export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   const { organizer } = useAuth();
+  const serverLangs = useData<{ code: string; enabled: boolean }[]>("/api/languages");
+  const enabledLangs = (serverLangs.data ?? []).filter((l) => l.enabled).map((l) => l.code);
   const [rows, setRows] = useState<Row[]>([]);
   const [mode, setMode] = useState<ImportMode>(duel && organizer ? "duel" : "validate");
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false), [reading, setReading] = useState(false);
-  // Where published problems go. "file" keeps what the bank names (a TD, a mission, or Practice).
+  // Where published problems go. "file" keeps what the bank names (a TD, a mission, or Problem Set).
   const [dest, setDest] = useState<Dest>("file"), [tdNumber, setTdNumber] = useState(1), [missionTitle, setMissionTitle] = useState("");
+  const [flagPreset, setFlagPreset] = useState(""), [customFlag, setCustomFlag] = useState("");
+  const [folder, setFolder] = useState("");
+  const [autoTag, setAutoTag] = useState(true);
+  const [useAllServerLangs, setUseAllServerLangs] = useState(true);
+  const [extraTags, setExtraTags] = useState<string[]>([]);
+  const activeFlag = (flagPreset === "CUSTOM" ? customFlag.trim() : flagPreset) || undefined;
+  const activeFolder = folder.trim() || undefined;
+  const tagsFor = (problem: BankProblem) => {
+    const base = problem.tags?.length ? problem.tags.map((t) => t.trim().toLowerCase()).filter(Boolean) : autoTag ? suggestTopics(problem) : [];
+    return [...new Set([...base, ...extraTags])].slice(0, 8);
+  };
+  const langsFor = (problem: BankProblem) => {
+    if (!useAllServerLangs || enabledLangs.length === 0) return problem.languages;
+    const pool = problem.functionSignature ? enabledLangs.filter((l) => FUNCTION_LANGUAGES.includes(l)) : enabledLangs;
+    const merged = [...new Set([...pool, problem.reference.language])].filter((l) => enabledLangs.includes(l));
+    return merged.length > 0 ? merged : problem.languages;
+  };
   const placed = (problem: BankProblem, index: number): BankProblem => {
     const { td, mission, ...rest } = problem;
-    if (dest === "file") return problem;
-    if (dest === "practice") return rest;
-    if (dest === "td") return { ...rest, td: { number: tdNumber, position: td?.position ?? index + 1 } };
-    return { ...rest, mission: { slug: slugify(missionTitle), title: missionTitle.trim(), description: mission?.description ?? "", position: mission?.position ?? index + 1, weight: mission?.weight ?? 10 } };
+    const tags = tagsFor(problem);
+    const languages = langsFor(problem);
+    const contestFlag = activeFlag ?? problem.contestFlag;
+    const targetFolder = activeFolder ?? problem.folder;
+    const withMeta = (p: BankProblem): BankProblem => ({ ...p, languages, tags, ...(contestFlag ? { contestFlag } : {}), ...(targetFolder ? { folder: targetFolder } : {}) });
+    if (dest === "file") return withMeta(problem);
+    if (dest === "practice") return withMeta(rest);
+    if (dest === "td") return withMeta({ ...rest, td: { number: tdNumber, position: td?.position ?? index + 1 } });
+    return withMeta({ ...rest, mission: { slug: slugify(missionTitle), title: missionTitle.trim(), description: mission?.description ?? "", position: mission?.position ?? index + 1, weight: mission?.weight ?? 10 } });
   };
   const where = (problem: BankProblem, index: number) => {
     const x = placed(problem, index);
@@ -110,7 +137,57 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
             <input value={missionTitle} disabled={busy || reading} placeholder="Python — TP3" onChange={e => setMissionTitle(e.target.value)} />
           </Field>}
         </>}
-        <p className="small muted">Existing slugs are skipped. Validation runs one problem at a time on your internal judge; all allowed languages need a verified online worker. Failed problems remain in the lab for review.</p>
+        {!duel && organizer && (
+          <div className="grid grid-2">
+            <Field label="Library folder (optional)" hint="Use / for subfolders, e.g. Warmup/Week 1, Warmup/Week 2, Basic, Contests.">
+              <input list="import-folders" disabled={busy || reading} maxLength={120} value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="e.g. Warmup/Week 1 or Basic" />
+              <datalist id="import-folders">
+                <option value="Warmup/Week 1" />
+                <option value="Warmup/Week 2" />
+                <option value="Basic" />
+                <option value="Contests" />
+                <option value="Problem Set" />
+              </datalist>
+            </Field>
+            <Field label="Flag imported problems for" hint="Makes it 1 click to load these problems into a Basic, Warmup, or Normal contest.">
+              <select disabled={busy || reading} value={flagPreset} onChange={(e) => setFlagPreset(e.target.value)}>
+                <option value="">Keep file flag / none</option>
+                <option value="BASIC">Basic (small event / easy)</option>
+                <option value="WARMUP">Warmup (long round)</option>
+                <option value="STANDARD">Contest (normal round)</option>
+                <option value="CUSTOM">Custom flag…</option>
+              </select>
+            </Field>
+            {flagPreset === "CUSTOM" && (
+              <Field label="Custom flag name" hint="e.g. finals, round-1, spring-cup">
+                <input disabled={busy || reading} maxLength={32} value={customFlag} onChange={(e) => setCustomFlag(e.target.value)} placeholder="e.g. round-1" />
+              </Field>
+            )}
+          </div>
+        )}
+        {!duel && (
+          <div className="stack" style={{ gap: "0.5rem" }}>
+            <label className="check small">
+              <input type="checkbox" disabled={busy || reading} checked={useAllServerLangs} onChange={(e) => setUseAllServerLangs(e.target.checked)} />
+              Enable all active server languages ({enabledLangs.length ? `${enabledLangs.length} online` : "loading…"}) for every imported problem
+            </label>
+            <label className="check small">
+              <input type="checkbox" disabled={busy || reading} checked={autoTag} onChange={(e) => setAutoTag(e.target.checked)} />
+              Auto-detect topic categories (Hash Map, Math, DP, Graphs…) for untagged problems
+            </label>
+            <div className="tag-filter" style={{ margin: 0 }}>
+              <span className="small muted">Add topic to all:</span>
+              {STANDARD_TOPICS.slice(0, 12).map((t) => (
+                <button key={t} type="button" disabled={busy || reading}
+                  className={"tag-chip" + (extraTags.includes(t) ? " active" : "")}
+                  onClick={() => setExtraTags((old) => old.includes(t) ? old.filter((x) => x !== t) : [...old, t].slice(0, 4))}>
+                  {topicLabel(t)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <p className="small muted">Existing slugs are skipped (if a flag or topics are selected above, existing untagged slugs still receive them). Validation runs one problem at a time on your internal judge; all allowed languages need a verified online worker. Failed problems remain in the lab for review.</p>
         <p className="small muted">Keep this page open while importing. Stop pauses further steps; an in-flight save or judge job may finish. Retry continues saved versions from this page. Reopening a bank skips previously imported slugs.</p>
         <ErrorBox error={error} />
         {rows.length > 0 && <>
@@ -124,10 +201,12 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
         </>}
       </section>
       {rows.length > 0 && <div className="card table-wrap"><table>
-        <thead><tr><th>Select</th><th>Problem</th><th>Tests</th>{!duel && <th>Goes to</th>}<th>Status</th><th /></tr></thead>
+        <thead><tr><th>Select</th><th>Problem</th><th>Difficulty</th>{!duel && <th>Categories</th>}<th>Tests</th>{!duel && <th>Goes to</th>}<th>Status</th><th /></tr></thead>
         <tbody>{rows.map((r, index) => <tr key={r.problem.slug}>
           <td><input type="checkbox" aria-label={"Import " + r.problem.title} disabled={busy || r.state === "done" || r.state === "skipped"} checked={r.selected} onChange={e => update(r.problem.slug, { selected: e.target.checked })} /></td>
-          <td><strong>{r.problem.title}</strong><div className="small muted mono">{r.problem.slug} · {r.problem.reference.language}</div></td>
+          <td><strong>{r.problem.title}</strong><div className="small muted mono">{r.problem.slug} · {r.problem.reference.language}</div>{(activeFlag ?? r.problem.contestFlag) && <div style={{ marginTop: 2 }}><FlagBadge flag={activeFlag ?? r.problem.contestFlag} /></div>}</td>
+          <td><DifficultyPill value={r.problem.difficulty || "MEDIUM"} /></td>
+          {!duel && <td><div className="tags">{tagsFor(r.problem).map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}</div></td>}
           <td>{r.problem.tests.length}</td>
           {!duel && <td>{mode === "publish" ? (() => { const w = where(r.problem, index); return <Badge tone={w.tone}>{w.label}</Badge>; })() : <span className="small muted">Lab only</span>}</td>}
           <td><Badge tone={r.state === "error" ? "bad" : r.state === "done" ? "ok" : r.state === "running" ? "info" : "neutral"}>{r.state}</Badge><div className="small" style={{ maxWidth: 420 }}>{r.message}</div></td>

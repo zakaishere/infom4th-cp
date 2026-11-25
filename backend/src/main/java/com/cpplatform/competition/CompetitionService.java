@@ -376,8 +376,8 @@ public class CompetitionService {
                     +"JOIN problems p ON p.id=cp.problem_id WHERE cp.competition_version_id=? AND p.archived_at IS NULL",c.get("competition_version_id"));
             for(var p:problems) {
                 if("APPROVED".equals(p.get("status")))db.jdbc.update("UPDATE problem_versions SET status='PUBLISHED' WHERE id=?",p.get("problem_version_id"));
-                db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by) VALUES (?,?,?) ON CONFLICT DO NOTHING",
-                        p.get("problem_id"),p.get("problem_version_id"),c.get("owner_id"));
+                db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by,tags) SELECT ?,?,?,p.tags FROM problems p WHERE p.id=? ON CONFLICT DO NOTHING",
+                        p.get("problem_id"),p.get("problem_version_id"),c.get("owner_id"),p.get("problem_id"));
             }
             db.jdbc.update("UPDATE competitions SET practice_published_at=now() WHERE id=?",c.get("id"));
             db.audit((UUID)c.get("owner_id"),"PRACTICE_PUBLISH_CONTEST","competition",(UUID)c.get("id"),problems.size()+" problems");
