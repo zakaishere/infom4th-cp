@@ -17,7 +17,7 @@ type Draft = {
   freezeMinutes: number; penaltyMinutes: number; penalizeCompilationErrors: boolean;
   languages: string[]; description: string; rules: string;
   problems: string[]; participants: string; startsAt: string; visibility: string;
-  scoring: "ICPC" | "IOI" | "CODEFORCES" | "ATCODER"; points: Record<string, number>;
+  scoring: "ICPC" | "IOI" | "CODEFORCES" | "ATCODER"; points: Record<string, number>; releaseDays: Record<string, number>;
   publishToPractice: boolean; requireFullscreen: boolean; rated: boolean;
   touchedTiming?: boolean; touchedScoring?: boolean;
 };
@@ -60,7 +60,7 @@ const EMPTY: Draft = {
   launchMode: "manual",
   penalizeCompilationErrors: false, languages: ["CPP", "C", "JAVA", "PYTHON"],
   description: "", rules: RULES_BY_SCORING.ICPC,
-  problems: [], participants: "", startsAt: nextHour(), visibility: "PUBLIC", points: {},
+  problems: [], participants: "", startsAt: nextHour(), visibility: "PUBLIC", points: {}, releaseDays: {},
   touchedTiming: false, touchedScoring: false,
 };
 
@@ -201,6 +201,8 @@ export default function ContestWizard() {
   const endMs = Number.isNaN(startMs) ? NaN : startMs + d.durationSeconds * 1000;
   const endsAtInput = Number.isNaN(endMs) ? "" : toZoneInput(endMs);
   const { days, hours, minutes } = splitDuration(d.durationSeconds);
+  const maxDays = Math.max(1, Math.ceil(d.durationSeconds / 86400));
+  const showReleaseDay = d.kind === "WARMUP" && maxDays > 1;
 
   const handles = d.participants.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
   const issues: string[] = [];
@@ -255,7 +257,7 @@ export default function ContestWizard() {
             versionId: version,
             slot: i + 1,
             label: label(i),
-            releaseDay: 1,
+            releaseDay: d.kind === "WARMUP" ? Math.min(maxDays, Math.max(1, d.releaseDays?.[version] ?? 1)) : 1,
             ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }),
           }));
         }
@@ -558,13 +560,26 @@ export default function ContestWizard() {
           <div className="stack" style={{ gap: "0.5rem" }}>
             <div className="row-between">
               <strong>Contest problem set ({d.problems.length})</strong>
-              {!created && d.problems.length > 0 && <button type="button" className="ghost small" onClick={() => set({ problems: [] })}>Clear all</button>}
+              <span className="row" style={{ gap: "0.35rem" }}>
+                {!created && showReleaseDay && d.problems.length > 1 && (
+                  <button type="button" className="ghost small" title="Distribute problems evenly across Day 1 to Day N" onClick={() => {
+                    const next: Record<string, number> = { ...d.releaseDays };
+                    d.problems.forEach((id, idx) => { next[id] = Math.min(maxDays, Math.floor((idx * maxDays) / d.problems.length) + 1); });
+                    set({ releaseDays: next });
+                  }}>Spread across {maxDays} days</button>
+                )}
+                {!created && d.problems.length > 0 && <button type="button" className="ghost small" onClick={() => set({ problems: [] })}>Clear all</button>}
+              </span>
             </div>
+            {showReleaseDay && (
+              <div className="small muted">Day 1 opens immediately when the contest starts; Day 2 opens 24h later, and so on.</div>
+            )}
             {d.problems.length === 0 ? (
               <Empty>Tick problems on the left{d.kind === "BASIC" ? " (filtered to Easy for Basic events)" : ""}. Letters A, B, C… are assigned automatically.</Empty>
             ) : (
               d.problems.map((v, i) => {
                 const info = byId[v];
+                const relDay = Math.min(maxDays, Math.max(1, d.releaseDays?.[v] ?? 1));
                 return (
                   <div key={v} className="row-between card-flat">
                     <span className="row" style={{ gap: "0.5rem" }}>
@@ -573,6 +588,15 @@ export default function ContestWizard() {
                       {info?.difficulty && <DifficultyPill value={info.difficulty} />}
                     </span>
                     <span className="row" style={{ gap: "0.4rem", flexWrap: "nowrap" }}>
+                      {showReleaseDay && (
+                        <select aria-label={`Release day for ${info?.title ?? label(i)}`} disabled={Boolean(created)}
+                          style={{ width: "auto" }} value={relDay}
+                          onChange={(e) => set({ releaseDays: { ...d.releaseDays, [v]: Number(e.target.value) } })}>
+                          {Array.from({ length: maxDays }, (_, k) => k + 1).map((dayNum) => (
+                            <option key={dayNum} value={dayNum}>Day {dayNum}</option>
+                          ))}
+                        </select>
+                      )}
                       {d.scoring !== "ICPC" && (
                         <label className="row small" style={{ flexWrap: "nowrap" }}>
                           pts

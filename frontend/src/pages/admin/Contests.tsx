@@ -83,7 +83,7 @@ export function ContestDetail({ id }: { id: string }) {
   const d = useData<Detail>("/api/manage/competitions/" + id, 15000);
   const readiness = useData<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness", 15000);
   const lab = useData<{ version_id: string; title: string; slug: string; status: string; difficulty?: string; contest_flag?: string | null }[]>("/api/lab/problems");
-  const [attach, setAttach] = useState({ versionId: "", label: "" });
+  const [attach, setAttach] = useState({ versionId: "", label: "", releaseDay: 1 });
   const [startsAt, setStartsAt] = useState(() => toZoneInput(serverNow() + 3600_000).slice(0, 14) + "00");
   const [visibility, setVisibility] = useState("PUBLIC");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -95,6 +95,8 @@ export function ContestDetail({ id }: { id: string }) {
   const c = d.data, sealed = Boolean(c.version.sealed_at);
   const formatName = CONTEST_FORMAT_LABEL[c.version.contest_format ?? "STANDARD"] ?? "Normal";
   const length = formatDuration(c.version.duration_seconds);
+  const maxDays = Math.max(1, Math.ceil(c.version.duration_seconds / 86400));
+  const showReleaseDay = c.version.contest_format === "WARMUP" && maxDays > 1;
   const hasStaggeredDays = c.problems.some((p) => (p.release_day ?? 1) > 1);
   const approved = (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
   const titles = Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p.title]));
@@ -112,7 +114,20 @@ export function ContestDetail({ id }: { id: string }) {
           {c.problems.length === 0 ? <Empty>Attach approved problems.</Empty> : (
             <table><tbody>{[...c.problems].sort((a, b) => (a.release_day ?? 1) - (b.release_day ?? 1) || a.slot - b.slot).map((p) => (
               <tr key={p.slot}><td><span className="problem-letter">{p.label}</span></td><td>{titles[p.problem_version_id] ?? <span className="mono small">{p.problem_version_id}</span>}</td>
-                {hasStaggeredDays && <td><span className="small muted">Day {p.release_day ?? 1}</span></td>}
+                {(showReleaseDay || hasStaggeredDays) && (
+                  <td>
+                    {!sealed && showReleaseDay ? (
+                      <select aria-label={`Release day for ${p.label}`} style={{ width: "auto" }} disabled={busy}
+                        value={Math.min(maxDays, p.release_day ?? 1)}
+                        onChange={(e) => {
+                          const releaseDay = Number(e.target.value);
+                          run(async () => { await patch("/api/manage/competitions/" + id + "/problems/" + p.slot, { releaseDay }); refresh(); }, `Moved ${p.label} to Day ${releaseDay}`);
+                        }}>
+                        {Array.from({ length: maxDays }, (_, k) => k + 1).map((dayNum) => <option key={dayNum} value={dayNum}>Day {dayNum}</option>)}
+                      </select>
+                    ) : <span className="small muted">Day {p.release_day ?? 1}</span>}
+                  </td>
+                )}
                 <td className="right">{!sealed && <button className="small danger" onClick={() => run(async () => { await del("/api/manage/competitions/" + id + "/problems/" + p.slot); refresh(); })}>Remove</button>}</td></tr>
             ))}</tbody></table>
           )}
@@ -120,11 +135,27 @@ export function ContestDetail({ id }: { id: string }) {
             <form className="row" style={{ alignItems: "flex-end" }} onSubmit={(e) => {
               e.preventDefault();
               const slot = (c.problems.reduce((m, p) => Math.max(m, p.slot), 0)) + 1;
-              run(async () => { await post("/api/manage/competitions/" + id + "/problems", { versionId: attach.versionId, slot, label: attach.label || String.fromCharCode(64 + slot), releaseDay: 1 }); setAttach({ versionId: "", label: "" }); refresh(); }, "Problem attached");
+              run(async () => {
+                await post("/api/manage/competitions/" + id + "/problems", {
+                  versionId: attach.versionId,
+                  slot,
+                  label: attach.label || String.fromCharCode(64 + slot),
+                  releaseDay: showReleaseDay ? Math.min(maxDays, Math.max(1, attach.releaseDay)) : 1,
+                });
+                setAttach({ versionId: "", label: "", releaseDay: attach.releaseDay });
+                refresh();
+              }, "Problem attached");
             }}>
               <Field label="Approved problem"><select required value={attach.versionId} onChange={(e) => setAttach({ ...attach, versionId: e.target.value })}>
                 <option value="">Choose…</option>{approved.map((p) => <option key={p.version_id} value={p.version_id}>{p.contest_flag ? `[${p.contest_flag}] ` : ""}[{p.difficulty ?? "MEDIUM"}] {p.title} ({p.slug})</option>)}</select></Field>
               <Field label="Label"><input maxLength={8} placeholder="auto" value={attach.label} onChange={(e) => setAttach({ ...attach, label: e.target.value })} style={{ width: 80 }} /></Field>
+              {showReleaseDay && (
+                <Field label="Release day">
+                  <select value={Math.min(maxDays, attach.releaseDay)} onChange={(e) => setAttach({ ...attach, releaseDay: Number(e.target.value) })} style={{ width: 96 }}>
+                    {Array.from({ length: maxDays }, (_, k) => k + 1).map((dayNum) => <option key={dayNum} value={dayNum}>Day {dayNum}</option>)}
+                  </select>
+                </Field>
+              )}
               <button disabled={busy}>Attach</button>
             </form>
           )}

@@ -41,7 +41,7 @@ public class CompetitionService {
         db.audit(actor.id(),"COMPETITION_CREATE","competition",id,null);return id;
     }
     static final String WARMUP="WARMUP",BASIC="BASIC";
-    static final int DAY=86400,MAX_WARMUP_DAYS=31,MAX_DURATION_SECONDS=60*DAY;
+    static final int DAY=86400,MAX_WARMUP_DAYS=60,MAX_DURATION_SECONDS=60*DAY;
     static final List<String> FORMATS=List.of("STANDARD",BASIC,WARMUP);
     static String format(Map<String,Object> body) {
         String value=Api.optional(body,"format","STANDARD",16);
