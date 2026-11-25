@@ -64,6 +64,22 @@ export function ProblemList() {
     return buildFolderTree(paths);
   }, [all, extraFolders]);
 
+  // Direct child folders of the currently open folder (desktop-style drill-down).
+  const currentChildren = useMemo(() => {
+    if (folderFilter === "__UNFILED__") return [];
+    const targetDepth = folderFilter ? folderFilter.split("/").length : 0;
+    const prefix = folderFilter ? folderFilter + "/" : "";
+    return folderTree.filter((node) => node.depth === targetDepth && (!prefix || node.full.startsWith(prefix)));
+  }, [folderTree, folderFilter]);
+
+  const crumbs = folderFilter && folderFilter !== "__UNFILED__" ? folderFilter.split("/") : [];
+  const goUp = () => {
+    if (!folderFilter || folderFilter === "__UNFILED__") { setFolderFilter(""); return; }
+    const parts = folderFilter.split("/");
+    parts.pop();
+    setFolderFilter(parts.join("/"));
+  };
+
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const filtered = all.filter((p) => {
@@ -156,61 +172,94 @@ export function ProblemList() {
       </div>
 
       {!showDeleted && (
-        <section className="card folder-shelf" aria-label="Library folders">
+        <section className="card folder-browser" aria-label="Library folders">
+          {/* Top row: Breadcrumb / Back + Scope tabs + New folder in current location */}
           <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
-            <div className="folder-shelf-row">
-              <button type="button" className={"folder-chip" + (folderFilter === "" && scopeFilter === "" ? " active" : "")}
+            <div className="folder-crumbs">
+              {folderFilter && (
+                <button type="button" className="small ghost" onClick={goUp} title="Go up one folder">← Back</button>
+              )}
+              <button type="button" className={"crumb" + (!folderFilter && !scopeFilter ? " current" : "")}
                 onClick={() => { setFolderFilter(""); setScopeFilter(""); }}>
-                <span>📚 All library</span><span className="fcount">{all.length}</span>
+                📚 Library
               </button>
-              <button type="button" className={"folder-chip" + (scopeFilter === "PUBLIC_SET" ? " active" : "")}
-                onClick={() => { setFolderFilter(""); setScopeFilter("PUBLIC_SET"); }}>
-                <span>★ Public Problem Set</span><span className="fcount">{publicCount}</span>
-              </button>
-              <button type="button" className={"folder-chip" + (scopeFilter === "PRIVATE" && folderFilter === "" ? " active" : "")}
-                onClick={() => { setFolderFilter(""); setScopeFilter("PRIVATE"); }}>
-                <span>🔒 Private / Contests</span><span className="fcount">{privateCount}</span>
-              </button>
-              <button type="button" className={"folder-chip" + (folderFilter === "__UNFILED__" ? " active" : "")}
-                onClick={() => { setFolderFilter("__UNFILED__"); setScopeFilter(""); }}>
-                <span>○ Unfiled</span><span className="fcount">{unfiledCount}</span>
-              </button>
+              {folderFilter === "__UNFILED__" && (
+                <><span className="muted">/</span><span className="crumb current">Unfiled</span></>
+              )}
+              {crumbs.map((seg, i) => {
+                const pathTo = crumbs.slice(0, i + 1).join("/");
+                const isLast = i === crumbs.length - 1;
+                return (
+                  <span key={pathTo} className="row" style={{ gap: "0.25rem" }}>
+                    <span className="muted">/</span>
+                    <button type="button" className={"crumb" + (isLast ? " current" : "")}
+                      onClick={() => { setFolderFilter(pathTo); setScopeFilter(""); }}>
+                      {seg}
+                    </button>
+                  </span>
+                );
+              })}
             </div>
-            {organizer && (
-              <form className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }} onSubmit={(e) => {
-                e.preventDefault();
-                const clean = newFolderInput.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-                if (!clean) return;
-                setExtraFolders((old) => (old.includes(clean) ? old : [...old, clean]));
-                setFolderFilter(clean);
-                setScopeFilter("");
-                setNewFolderInput("");
-              }}>
-                <input placeholder="+ New folder (e.g. Warmup/Week 3)" value={newFolderInput} onChange={(e) => setNewFolderInput(e.target.value)} style={{ width: 220, padding: "0.32rem 0.6rem", fontSize: "0.84rem" }} />
-                <button className="small" type="submit" disabled={!newFolderInput.trim()}>Add</button>
-              </form>
-            )}
+
+            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+              <div className="filters">
+                <button type="button" className={!scopeFilter && folderFilter !== "__UNFILED__" ? "active" : ""}
+                  onClick={() => { setScopeFilter(""); if (folderFilter === "__UNFILED__") setFolderFilter(""); }}>All ({all.length})</button>
+                <button type="button" className={scopeFilter === "PUBLIC_SET" ? "active" : ""}
+                  onClick={() => { setScopeFilter("PUBLIC_SET"); setFolderFilter(""); }}>Public Set ({publicCount})</button>
+                <button type="button" className={scopeFilter === "PRIVATE" ? "active" : ""}
+                  onClick={() => { setScopeFilter("PRIVATE"); setFolderFilter(""); }}>Private ({privateCount})</button>
+                <button type="button" className={folderFilter === "__UNFILED__" ? "active" : ""}
+                  onClick={() => { setFolderFilter("__UNFILED__"); setScopeFilter(""); }}>Unfiled ({unfiledCount})</button>
+              </div>
+              {organizer && folderFilter !== "__UNFILED__" && (
+                <form className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }} onSubmit={(e) => {
+                  e.preventDefault();
+                  const clean = newFolderInput.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                  if (!clean) return;
+                  const full = folderFilter ? `${folderFilter}/${clean}` : clean;
+                  setExtraFolders((old) => (old.includes(full) ? old : [...old, full]));
+                  setFolderFilter(full);
+                  setScopeFilter("");
+                  setNewFolderInput("");
+                }}>
+                  <input placeholder={folderFilter ? `+ Subfolder in ${crumbs[crumbs.length - 1]}` : "+ New folder"}
+                    value={newFolderInput} onChange={(e) => setNewFolderInput(e.target.value)}
+                    style={{ width: 185, padding: "0.3rem 0.55rem", fontSize: "0.84rem" }} />
+                  <button className="small" type="submit" disabled={!newFolderInput.trim()}>Create</button>
+                </form>
+              )}
+            </div>
           </div>
 
-          <div className="folder-shelf-row">
-            <span className="small muted" style={{ marginRight: "0.2rem" }}>Folders:</span>
-            {folderTree.map((node) => {
-              const count = all.filter((p) => matchesFolder(p.folder, node.full)).length;
-              return (
-                <button key={node.full} type="button"
-                  className={"folder-chip" + (node.depth > 0 ? " sub" : "") + (folderFilter === node.full ? " active" : "")}
-                  onClick={() => { setFolderFilter(folderFilter === node.full ? "" : node.full); setScopeFilter(""); }}>
-                  <span>📁 {node.full}</span>
-                  <span className="fcount">{count}</span>
-                </button>
-              );
-            })}
-            {organizer && folderFilter && folderFilter !== "__UNFILED__" && shownApproved.length > 0 && (
-              <button type="button" className="primary small" style={{ marginLeft: "auto" }} onClick={() => launchContestFrom(shownApproved)}>
-                → Create contest from “{folderFilter}” ({shownApproved.length})
+          {/* Direct child folders only (click to open like desktop folders) */}
+          {!scopeFilter && currentChildren.length > 0 && (
+            <div className="folder-grid">
+              {currentChildren.map((node) => {
+                const count = all.filter((p) => matchesFolder(p.folder, node.full)).length;
+                const subCount = folderTree.filter((n) => n.depth === node.depth + 1 && n.full.startsWith(node.full + "/")).length;
+                return (
+                  <button key={node.full} type="button" className="folder-tile"
+                    onClick={() => { setFolderFilter(node.full); setScopeFilter(""); }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="fname">📁 {node.name}</div>
+                      <div className="fmeta">{subCount > 0 ? `${subCount} subfolder${subCount === 1 ? "" : "s"}` : "Folder"}</div>
+                    </div>
+                    <span className="fcount">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {organizer && folderFilter && folderFilter !== "__UNFILED__" && shownApproved.length > 0 && (
+            <div className="row-between" style={{ paddingTop: "0.25rem", borderTop: "1px solid var(--line)" }}>
+              <span className="small muted">Showing problems inside <strong>{folderFilter}</strong></span>
+              <button type="button" className="primary small" onClick={() => launchContestFrom(shownApproved)}>
+                → Create contest from “{crumbs[crumbs.length - 1]}” ({shownApproved.length})
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </section>
       )}
 
