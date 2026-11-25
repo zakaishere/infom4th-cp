@@ -105,18 +105,22 @@ export function ContestDetail({ id }: { id: string }) {
   const refresh = () => { d.reload(); readiness.reload(); };
   // Once the official run starts, the live monitor is what organizers need first.
   const started = ["RUNNING", "FINISHED"].includes(c.status) || (official ? official.status !== "PENDING" : false);
+  const canEditProblems = !sealed || Boolean(official && official.status === "PENDING" && !started);
   const monitor = active ? <RunMonitor key={active} run={c.runs.find((r) => r.id === active)!} problems={c.problems} onChanged={refresh} holdsResults={c.visibility === "PUBLIC" && c.version.freeze_before_end_seconds > 0} /> : null;
   const setup = (
     <>
       <div className="grid grid-2" style={{ alignItems: "start" }}>
         <section className="card stack">
           <h3>Problems</h3>
+          {sealed && canEditProblems && (
+            <div className="small muted">Contest hasn't started yet — you can still add, remove, or change release days before clicking Start.</div>
+          )}
           {c.problems.length === 0 ? <Empty>Attach approved problems.</Empty> : (
             <table><tbody>{[...c.problems].sort((a, b) => (a.release_day ?? 1) - (b.release_day ?? 1) || a.slot - b.slot).map((p) => (
               <tr key={p.slot}><td><span className="problem-letter">{p.label}</span></td><td>{titles[p.problem_version_id] ?? <span className="mono small">{p.problem_version_id}</span>}</td>
                 {(showReleaseDay || hasStaggeredDays) && (
                   <td>
-                    {!sealed && showReleaseDay ? (
+                    {canEditProblems && showReleaseDay ? (
                       <select aria-label={`Release day for ${p.label}`} style={{ width: "auto" }} disabled={busy}
                         value={Math.min(maxDays, p.release_day ?? 1)}
                         onChange={(e) => {
@@ -128,10 +132,10 @@ export function ContestDetail({ id }: { id: string }) {
                     ) : <span className="small muted">Day {p.release_day ?? 1}</span>}
                   </td>
                 )}
-                <td className="right">{!sealed && <button className="small danger" onClick={() => run(async () => { await del("/api/manage/competitions/" + id + "/problems/" + p.slot); refresh(); })}>Remove</button>}</td></tr>
+                <td className="right">{canEditProblems && <button className="small danger" onClick={() => run(async () => { await del("/api/manage/competitions/" + id + "/problems/" + p.slot); refresh(); })}>Remove</button>}</td></tr>
             ))}</tbody></table>
           )}
-          {!sealed && (
+          {canEditProblems && (
             <form className="row" style={{ alignItems: "flex-end" }} onSubmit={(e) => {
               e.preventDefault();
               const slot = (c.problems.reduce((m, p) => Math.max(m, p.slot), 0)) + 1;

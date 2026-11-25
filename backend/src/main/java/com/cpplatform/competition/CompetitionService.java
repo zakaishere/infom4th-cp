@@ -107,10 +107,17 @@ public class CompetitionService {
             if(body.containsKey(field.getKey()))db.jdbc.update("UPDATE competition_versions SET "+field.getValue()+"=? WHERE id=?",Timestamp.from(Api.instant(body.get(field.getKey()))),v.get("id"));
         db.audit(actor.id(),"COMPETITION_EDIT","competition",competition,null);
     }
+    /** Problems can be edited before sealing, or while a scheduled/manual-start official run has not started yet. */
+    private boolean canEditProblems(Map<String,Object> v) {
+        if(v.get("sealed_at")==null)return true;
+        return db.exists("SELECT EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_version_id=? AND r.kind='OFFICIAL' AND r.status='PENDING' AND r.starts_at>now())",v.get("id"))
+                && !db.exists("SELECT EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_version_id=? AND r.kind='OFFICIAL' AND (r.status<>'PENDING' OR r.starts_at<=now()))",v.get("id"));
+    }
     @Transactional
     public void detach(Actor actor,UUID competition,int slot) {
         access.competition(actor,competition,false);db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competition);
-        var v=version(competition);Api.require(v.get("sealed_at")==null,HttpStatus.CONFLICT,"Clone the snapshot before editing");
+        var v=version(competition);Api.require(canEditProblems(v),HttpStatus.CONFLICT,"Problems are locked once the contest has started");
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM submissions WHERE competition_version_id=? AND problem_slot=?)",v.get("id"),slot),HttpStatus.CONFLICT,"Cannot remove a problem that already has submissions");
         db.jdbc.update("DELETE FROM competition_problems WHERE competition_version_id=? AND slot=?",v.get("id"),slot);
     }
     public Map<String,Object> version(UUID competition) {
@@ -141,17 +148,19 @@ public class CompetitionService {
         access.competition(actor,competition,false);access.problemRead(actor,problemVersion);
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=? AND p.system_benchmark)",problemVersion),HttpStatus.CONFLICT,"The benchmark problem cannot be used in a contest");
         db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competition);
-        var v=version(competition);Api.require(v.get("sealed_at")==null,HttpStatus.CONFLICT,"Clone the contest snapshot before editing");
+        var v=version(competition);Api.require(canEditProblems(v),HttpStatus.CONFLICT,"Problems are locked once the contest has started");
+        if(v.get("sealed_at")!=null)
+            Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions WHERE id=? AND sealed_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"Only approved problems can be added to a published contest");
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions pv JOIN problems p ON p.id=pv.problem_id WHERE pv.id=? AND p.archived_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"This problem was deleted; restore it first");
         Api.require(releaseDay>=1 && releaseDay<=(warmup(v)?days(v):1),HttpStatus.BAD_REQUEST,warmup(v)?"Pick a day from 1 to "+days(v):"Problems of this contest all open at the start");
         db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) SELECT ?,?,?,problem_id,id,?,? FROM problem_versions WHERE id=?",
                 v.get("id"),slot,label,points,releaseDay,problemVersion);
     }
-    /** Moves a warmup problem to another day before the contest is sealed. */
+    /** Moves a warmup problem to another day before the contest starts. */
     @Transactional
     public void setReleaseDay(Actor actor,UUID competition,int slot,int releaseDay) {
         access.competition(actor,competition,false);db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competition);
-        var v=version(competition);Api.require(v.get("sealed_at")==null,HttpStatus.CONFLICT,"Clone the contest snapshot before editing");
+        var v=version(competition);Api.require(canEditProblems(v),HttpStatus.CONFLICT,"Problems are locked once the contest has started");
         Api.require(warmup(v),HttpStatus.BAD_REQUEST,"Only warmup problems open by day");
         Api.require(releaseDay>=1 && releaseDay<=days(v),HttpStatus.BAD_REQUEST,"Pick a day from 1 to "+days(v));
         Api.require(db.jdbc.update("UPDATE competition_problems SET release_day=? WHERE competition_version_id=? AND slot=?",releaseDay,v.get("id"),slot)==1,HttpStatus.NOT_FOUND,"No problem in that slot");
@@ -339,6 +348,7 @@ public class CompetitionService {
             case "start-now" -> {
                 // Starts a scheduled or manual-start contest immediately; it still ends after its configured duration.
                 Api.require("OFFICIAL".equals(r.get("kind")) && "PENDING".equals(r.get("status")),HttpStatus.CONFLICT,"Only a contest that has not started yet can be started now");
+                Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=?)",r.get("competition_version_id")),HttpStatus.CONFLICT,"Attach at least one problem before starting the contest");
                 db.jdbc.update("UPDATE contest_runs SET starts_at=now(),ends_at=now()+(ends_at-starts_at),status='RUNNING',manual_start=false WHERE id=?",run);
                 db.jdbc.update("UPDATE competitions SET status='RUNNING' WHERE id=? AND status='SCHEDULED'",r.get("competition_id"));
             }
