@@ -25,6 +25,8 @@ public class CompetitionController {
     Object create(Authentication auth,@RequestBody Map<String,Object> body){return Map.of("competitionId",contests.create(Actor.of(auth),body));}
     @PatchMapping("/api/manage/competitions/{id}")
     Object edit(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body){contests.edit(Actor.of(auth),id,body);return Map.of("ok",true);}
+    @DeleteMapping("/api/manage/competitions/{id}")
+    Object delete(Authentication auth,@PathVariable UUID id,@RequestParam(required=false) String reason){contests.delete(Actor.of(auth),id,reason);return Map.of("ok",true);}
     @DeleteMapping("/api/manage/competitions/{id}/problems/{slot}")
     Object detach(Authentication auth,@PathVariable UUID id,@PathVariable int slot){contests.detach(Actor.of(auth),id,slot);return Map.of("ok",true);}
     @GetMapping("/api/manage/competitions/{id}")

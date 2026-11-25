@@ -107,6 +107,35 @@ public class CompetitionService {
             if(body.containsKey(field.getKey()))db.jdbc.update("UPDATE competition_versions SET "+field.getValue()+"=? WHERE id=?",Timestamp.from(Api.instant(body.get(field.getKey()))),v.get("id"));
         db.audit(actor.id(),"COMPETITION_EDIT","competition",competition,null);
     }
+    /** Permanently deletes a competition and all of its runs, registrations, entries, and submissions. */
+    @Transactional
+    public void delete(Actor actor,UUID competition,String reason) {
+        access.competition(actor,competition,true);
+        var c=db.one("SELECT id,title,slug FROM competitions WHERE id=? FOR UPDATE",competition);
+        db.jdbc.queryForList("SELECT set_config('cp.contest_delete','on',true)");
+        db.jdbc.update("DELETE FROM test_case_results WHERE job_id IN (SELECT j.id FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id JOIN contest_runs r ON r.id=s.run_id WHERE r.competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM judging_results WHERE job_id IN (SELECT j.id FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id JOIN contest_runs r ON r.id=s.run_id WHERE r.competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM judge_outbox WHERE job_id IN (SELECT j.id FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id JOIN contest_runs r ON r.id=s.run_id WHERE r.competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM judging_jobs WHERE submission_id IN (SELECT s.id FROM submissions s JOIN contest_runs r ON r.id=s.run_id WHERE r.competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM submissions WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM fullscreen_events WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM contest_results WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM contest_result_runs WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM clarifications WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM announcements WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM run_events WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM run_entry_members WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM run_entries WHERE run_id IN (SELECT id FROM contest_runs WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM contest_runs WHERE competition_id=?",competition);
+        db.jdbc.update("DELETE FROM registrations WHERE competition_id=?",competition);
+        db.jdbc.update("DELETE FROM competition_invitations WHERE competition_id=?",competition);
+        db.jdbc.update("DELETE FROM competition_problems WHERE competition_version_id IN (SELECT id FROM competition_versions WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM competition_version_languages WHERE competition_version_id IN (SELECT id FROM competition_versions WHERE competition_id=?)",competition);
+        db.jdbc.update("DELETE FROM competition_versions WHERE competition_id=?",competition);
+        db.jdbc.update("DELETE FROM competition_staff WHERE competition_id=?",competition);
+        db.jdbc.update("DELETE FROM competitions WHERE id=?",competition);
+        db.audit(actor.id(),"COMPETITION_DELETE","competition",competition,c.get("title")+" ("+c.get("slug")+")"+(reason!=null&&!reason.isBlank()?": "+reason:""));
+    }
     /** Problems can be edited before sealing, or while a scheduled/manual-start official run has not started yet. */
     private boolean canEditProblems(Map<String,Object> v) {
         if(v.get("sealed_at")==null)return true;
