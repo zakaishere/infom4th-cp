@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { post, put, patch } from "../../api";
 import { navigate, useAction, useAuth, useData } from "../../app";
-import { Badge, CodeEditor, Empty, ErrorBox, Field, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, formatProblemFlag, queueProblemsForContest, when } from "../../ui";
+import { Badge, CodeEditor, Empty, ErrorBox, Field, FlagBadge, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, formatProblemFlag, queueProblemsForContest, when } from "../../ui";
 import { DifficultyPill } from "../Practice";
 import { topicLabel } from "../../lib/topics";
 import { LanguagePicker } from "../../components/LanguagePicker";
@@ -155,41 +155,29 @@ export function ProblemList() {
         </div>
       </div>
 
-      <div className={showDeleted ? "stack" : "library-layout"}>
-        {!showDeleted && (
-          <aside className="card folder-sidebar" aria-label="Library folders">
-            <strong className="small muted" style={{ padding: "0.2rem 0.6rem" }}>FOLDERS</strong>
-            <button type="button" className={"folder-btn" + (folderFilter === "" && scopeFilter === "" ? " active" : "")}
-              onClick={() => { setFolderFilter(""); setScopeFilter(""); }}>
-              <span>📚 All library</span><span className="fcount">{all.length}</span>
-            </button>
-            <button type="button" className={"folder-btn" + (scopeFilter === "PUBLIC_SET" ? " active" : "")}
-              onClick={() => { setFolderFilter(""); setScopeFilter("PUBLIC_SET"); }}>
-              <span>★ Public Problem Set</span><span className="fcount">{publicCount}</span>
-            </button>
-            <button type="button" className={"folder-btn" + (scopeFilter === "PRIVATE" && folderFilter === "" ? " active" : "")}
-              onClick={() => { setFolderFilter(""); setScopeFilter("PRIVATE"); }}>
-              <span>🔒 Private / Contests</span><span className="fcount">{privateCount}</span>
-            </button>
-            <hr style={{ margin: "0.35rem 0" }} />
-            {folderTree.map((node) => {
-              const count = all.filter((p) => matchesFolder(p.folder, node.full)).length;
-              return (
-                <button key={node.full} type="button"
-                  className={"folder-btn" + (folderFilter === node.full ? " active" : "")}
-                  style={{ paddingLeft: `${0.6 + node.depth * 0.9}rem` }}
-                  onClick={() => { setFolderFilter(node.full); setScopeFilter(""); }}>
-                  <span>{node.depth > 0 ? "↳ 📁 " : "📁 "}{node.name}</span>
-                  <span className="fcount">{count}</span>
-                </button>
-              );
-            })}
-            <button type="button" className={"folder-btn" + (folderFilter === "__UNFILED__" ? " active" : "")}
-              onClick={() => { setFolderFilter("__UNFILED__"); setScopeFilter(""); }}>
-              <span>○ Unfiled</span><span className="fcount">{unfiledCount}</span>
-            </button>
+      {!showDeleted && (
+        <section className="card folder-shelf" aria-label="Library folders">
+          <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+            <div className="folder-shelf-row">
+              <button type="button" className={"folder-chip" + (folderFilter === "" && scopeFilter === "" ? " active" : "")}
+                onClick={() => { setFolderFilter(""); setScopeFilter(""); }}>
+                <span>📚 All library</span><span className="fcount">{all.length}</span>
+              </button>
+              <button type="button" className={"folder-chip" + (scopeFilter === "PUBLIC_SET" ? " active" : "")}
+                onClick={() => { setFolderFilter(""); setScopeFilter("PUBLIC_SET"); }}>
+                <span>★ Public Problem Set</span><span className="fcount">{publicCount}</span>
+              </button>
+              <button type="button" className={"folder-chip" + (scopeFilter === "PRIVATE" && folderFilter === "" ? " active" : "")}
+                onClick={() => { setFolderFilter(""); setScopeFilter("PRIVATE"); }}>
+                <span>🔒 Private / Contests</span><span className="fcount">{privateCount}</span>
+              </button>
+              <button type="button" className={"folder-chip" + (folderFilter === "__UNFILED__" ? " active" : "")}
+                onClick={() => { setFolderFilter("__UNFILED__"); setScopeFilter(""); }}>
+                <span>○ Unfiled</span><span className="fcount">{unfiledCount}</span>
+              </button>
+            </div>
             {organizer && (
-              <form className="row" style={{ gap: "0.3rem", marginTop: "0.5rem" }} onSubmit={(e) => {
+              <form className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }} onSubmit={(e) => {
                 e.preventDefault();
                 const clean = newFolderInput.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
                 if (!clean) return;
@@ -198,152 +186,150 @@ export function ProblemList() {
                 setScopeFilter("");
                 setNewFolderInput("");
               }}>
-                <input placeholder="+ Folder (e.g. Warmup/Week 3)" value={newFolderInput} onChange={(e) => setNewFolderInput(e.target.value)} style={{ fontSize: "0.8rem", padding: "0.3rem 0.5rem" }} />
-                <button className="small" type="submit" disabled={!newFolderInput.trim()}>+</button>
+                <input placeholder="+ New folder (e.g. Warmup/Week 3)" value={newFolderInput} onChange={(e) => setNewFolderInput(e.target.value)} style={{ width: 220, padding: "0.32rem 0.6rem", fontSize: "0.84rem" }} />
+                <button className="small" type="submit" disabled={!newFolderInput.trim()}>Add</button>
               </form>
             )}
-          </aside>
-        )}
-
-        <div className="stack" style={{ gap: "1rem", minWidth: 0 }}>
-          {!showDeleted && folderFilter && folderFilter !== "__UNFILED__" && (
-            <div className="row-between card-flat">
-              <span className="small">📁 Folder: <strong>{folderFilter}</strong> ({rows.length} shown)</span>
-              {organizer && shownApproved.length > 0 && (
-                <button className="primary small" onClick={() => launchContestFrom(shownApproved)}>
-                  → Create contest from this folder ({shownApproved.length})
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="practice-filters" style={{ marginBottom: 0 }}>
-            <input className="search" placeholder="Search title, slug, topic, flag, or folder…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <div className="filters">
-              {([["", "All"], ["EASY", "Easy"], ["MEDIUM", "Medium"], ["HARD", "Hard"]] as const).map(([v, label]) => (
-                <button key={v || "all"} className={difficulty === v ? "active" : ""} onClick={() => setDifficulty(v)}>{label}</button>
-              ))}
-            </div>
-            {!showDeleted && (
-              <>
-                <select value={flagFilter} onChange={(e) => setFlagFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by contest flag">
-                  <option value="">All flags</option>
-                  {allFlags.map((fl) => <option key={fl} value={fl}>Flag: {formatProblemFlag(fl)}</option>)}
-                  <option value="__NONE__">Unflagged</option>
-                </select>
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ width: "auto" }} aria-label="Filter by status">
-                  <option value="">All statuses</option>
-                  <option value="READY_CONTEST">Contest-ready (Approved / Published)</option>
-                  <option value="REVIEW">Ready for review</option>
-                  <option value="DRAFT">Draft / Testing</option>
-                </select>
-              </>
-            )}
-            <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={{ width: "auto" }} aria-label="Sort problems">
-              <option value="newest">Newest first</option>
-              <option value="easiest">Easiest first</option>
-              <option value="hardest">Hardest first</option>
-              <option value="title">Title A–Z</option>
-            </select>
-            {hasFilters && <button className="ghost small" onClick={() => { setFilter(""); setDifficulty(""); setFlagFilter(""); setFolderFilter(""); setScopeFilter(""); setStatusFilter(""); }}>Clear filters</button>}
           </div>
 
-          {!showDeleted && organizer && selectedRows.length > 0 && (
-            <div className="notice stack" style={{ gap: "0.6rem" }}>
-              <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
-                <div className="row" style={{ gap: "0.45rem" }}>
-                  <strong>{selectedRows.length} selected</strong>
-                  <span className="small muted">📁 Move to:</span>
-                  <input list="library-move-folders" placeholder="e.g. Warmup/Week 1" value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)} style={{ width: 170 }} />
-                  <datalist id="library-move-folders">{folderTree.map((n) => <option key={n.full} value={n.full} />)}</datalist>
-                  <button className="small primary" disabled={busy || !moveTarget.trim()} onClick={() => { void moveProblems(selectedRows.map((p) => p.id), moveTarget.trim()); setMoveTarget(""); }}>Move</button>
-                  <button className="small ghost" disabled={busy} onClick={() => moveProblems(selectedRows.map((p) => p.id), null)}>Unfile</button>
-                </div>
-                <div className="row" style={{ gap: "0.5rem" }}>
-                  {selectedPrivateApproved.length > 0 && (
-                    <button className="small" disabled={busy} onClick={publishSelectedToProblemSet}>
-                      + Publish {selectedPrivateApproved.length} to Problem Set
-                    </button>
-                  )}
-                  <button className="primary small" disabled={selectedApproved.length === 0} onClick={() => launchContestFrom(selectedApproved)}>
-                    → Create contest ({selectedApproved.length})
-                  </button>
-                  <button className="ghost small" onClick={() => setSelected(new Set())}>Deselect</button>
-                </div>
-              </div>
-              <div className="row" style={{ gap: "0.45rem" }}>
-                <span className="small muted">Flag as:</span>
-                <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "BASIC")}>Basic</button>
-                <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "WARMUP")}>Warmup</button>
-                <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "STANDARD")}>Contest</button>
-                <input placeholder="Custom flag…" maxLength={32} value={customFlag} onChange={(e) => setCustomFlag(e.target.value)} style={{ width: 120 }}
-                  onKeyDown={(e) => { if (e.key === "Enter" && customFlag.trim()) { e.preventDefault(); void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); } }} />
-                {customFlag.trim() && <button className="small" disabled={busy} onClick={() => { void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); }}>Apply</button>}
-                <button className="small ghost" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), null)}>Clear flag</button>
-              </div>
-            </div>
-          )}
+          <div className="folder-shelf-row">
+            <span className="small muted" style={{ marginRight: "0.2rem" }}>Folders:</span>
+            {folderTree.map((node) => {
+              const count = all.filter((p) => matchesFolder(p.folder, node.full)).length;
+              return (
+                <button key={node.full} type="button"
+                  className={"folder-chip" + (node.depth > 0 ? " sub" : "") + (folderFilter === node.full ? " active" : "")}
+                  onClick={() => { setFolderFilter(folderFilter === node.full ? "" : node.full); setScopeFilter(""); }}>
+                  <span>📁 {node.full}</span>
+                  <span className="fcount">{count}</span>
+                </button>
+              );
+            })}
+            {organizer && folderFilter && folderFilter !== "__UNFILED__" && shownApproved.length > 0 && (
+              <button type="button" className="primary small" style={{ marginLeft: "auto" }} onClick={() => launchContestFrom(shownApproved)}>
+                → Create contest from “{folderFilter}” ({shownApproved.length})
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
-          <ErrorBox error={list.error} />
-          {list.loading ? <Loading /> : !rows.length ? <Empty>{showDeleted ? "No deleted problems." : hasFilters ? "No problem in this folder / filter yet." : "No problems yet."}</Empty> : (
-            <div className="card table-wrap">
-              <table>
-                <thead><tr>
-                  {!showDeleted && organizer && <th style={{ width: 32 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" /></th>}
-                  <th>Problem</th><th>Difficulty</th>{!showDeleted && <th>Folder</th>}{!showDeleted && <th>Flag</th>}{!showDeleted && <th>Visibility</th>}<th>Status</th><th />
-                </tr></thead>
-                <tbody>{rows.map((p) => (
-                  <tr key={p.version_id}>
-                    {!showDeleted && organizer && <td><input type="checkbox" checked={selected.has(p.version_id)} onChange={() => toggleOne(p.version_id)} aria-label={"Select " + p.title} /></td>}
-                    <td>
-                      <strong>{p.title}</strong>
-                      <div className="small muted mono">{p.slug} · v{p.version_number}</div>
-                      {(p.tags?.length ?? 0) > 0 && <div className="tags">{p.tags!.map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}</div>}
-                    </td>
-                    <td><DifficultyPill value={p.difficulty ?? "MEDIUM"} /></td>
-                    {!showDeleted && (
-                      <td>
-                        {organizer ? (
-                          <select value={p.folder ?? ""} disabled={busy} style={{ width: "auto", maxWidth: 155 }} aria-label={"Folder for " + p.title}
-                            onChange={(e) => moveProblems([p.id], e.target.value || null)}>
-                            <option value="">— Unfiled</option>
-                            {folderTree.map((n) => <option key={n.full} value={n.full}>{n.full}</option>)}
-                          </select>
-                        ) : <span className="small muted">{p.folder || "—"}</span>}
-                      </td>
-                    )}
-                    {!showDeleted && (
-                      <td>
-                        {organizer ? (
-                          <select value={p.contest_flag ?? ""} disabled={busy} style={{ width: "auto" }} aria-label={"Flag for " + p.title}
-                            onChange={(e) => flagProblems([p.id], e.target.value || null)}>
-                            <option value="">— None</option>
-                            <option value="BASIC">Basic</option>
-                            <option value="WARMUP">Warmup</option>
-                            <option value="STANDARD">Contest</option>
-                            {p.contest_flag && !["BASIC", "WARMUP", "STANDARD"].includes(p.contest_flag) && <option value={p.contest_flag}>{p.contest_flag}</option>}
-                          </select>
-                        ) : <span className="small muted">{formatProblemFlag(p.contest_flag) || "—"}</span>}
-                      </td>
-                    )}
-                    {!showDeleted && (
-                      <td>{p.in_problem_set ? <Badge tone="ok">Public Set</Badge> : <Badge tone="neutral">Private</Badge>}</td>
-                    )}
-                    <td>{showDeleted ? <Badge>Deleted {p.deleted_at ? when(p.deleted_at) : ""}</Badge> : <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>}</td>
-                    <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
-                      {showDeleted ? <button className="small primary" onClick={() => setTarget({ row: p, action: "restore" })}>Restore</button> : <>
-                        <a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a>
-                        <button className="small danger" onClick={() => setTarget({ row: p, action: "delete" })} title="Delete this problem">Delete</button>
-                      </>}
-                    </div></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
-          <span className="small muted">Showing {rows.length} of {all.length} problems.</span>
+      <div className="practice-filters" style={{ marginBottom: 0 }}>
+        <input className="search" placeholder="Search title, slug, topic, flag, or folder…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <div className="filters">
+          {([["", "All"], ["EASY", "Easy"], ["MEDIUM", "Medium"], ["HARD", "Hard"]] as const).map(([v, label]) => (
+            <button key={v || "all"} className={difficulty === v ? "active" : ""} onClick={() => setDifficulty(v)}>{label}</button>
+          ))}
         </div>
+        {!showDeleted && (
+          <>
+            <select value={flagFilter} onChange={(e) => setFlagFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by contest flag">
+              <option value="">All flags</option>
+              {allFlags.map((fl) => <option key={fl} value={fl}>Flag: {formatProblemFlag(fl)}</option>)}
+              <option value="__NONE__">Unflagged</option>
+            </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ width: "auto" }} aria-label="Filter by status">
+              <option value="">All statuses</option>
+              <option value="READY_CONTEST">Contest-ready</option>
+              <option value="REVIEW">Ready for review</option>
+              <option value="DRAFT">Draft / Testing</option>
+            </select>
+          </>
+        )}
+        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={{ width: "auto" }} aria-label="Sort problems">
+          <option value="newest">Newest first</option>
+          <option value="easiest">Easiest first</option>
+          <option value="hardest">Hardest first</option>
+          <option value="title">Title A–Z</option>
+        </select>
+        {hasFilters && <button className="ghost small" onClick={() => { setFilter(""); setDifficulty(""); setFlagFilter(""); setFolderFilter(""); setScopeFilter(""); setStatusFilter(""); }}>Clear</button>}
       </div>
+
+      {!showDeleted && organizer && selectedRows.length > 0 && (
+        <div className="notice stack" style={{ gap: "0.6rem" }}>
+          <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+            <div className="row" style={{ gap: "0.45rem" }}>
+              <strong>{selectedRows.length} selected</strong>
+              <span className="small muted">📁 Move to:</span>
+              <input list="library-move-folders" placeholder="e.g. Warmup/Week 1" value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)} style={{ width: 180 }} />
+              <datalist id="library-move-folders">{folderTree.map((n) => <option key={n.full} value={n.full} />)}</datalist>
+              <button className="small primary" disabled={busy || !moveTarget.trim()} onClick={() => { void moveProblems(selectedRows.map((p) => p.id), moveTarget.trim()); setMoveTarget(""); }}>Move</button>
+              <button className="small ghost" disabled={busy} onClick={() => moveProblems(selectedRows.map((p) => p.id), null)}>Unfile</button>
+            </div>
+            <div className="row" style={{ gap: "0.5rem" }}>
+              {selectedPrivateApproved.length > 0 && (
+                <button className="small" disabled={busy} onClick={publishSelectedToProblemSet}>
+                  + Publish {selectedPrivateApproved.length} to Problem Set
+                </button>
+              )}
+              <button className="primary small" disabled={selectedApproved.length === 0} onClick={() => launchContestFrom(selectedApproved)}>
+                → Create contest ({selectedApproved.length})
+              </button>
+              <button className="ghost small" onClick={() => setSelected(new Set())}>Deselect</button>
+            </div>
+          </div>
+          <div className="row" style={{ gap: "0.45rem" }}>
+            <span className="small muted">Flag as:</span>
+            <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "BASIC")}>Basic</button>
+            <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "WARMUP")}>Warmup</button>
+            <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "STANDARD")}>Contest</button>
+            <input placeholder="Custom flag…" maxLength={32} value={customFlag} onChange={(e) => setCustomFlag(e.target.value)} style={{ width: 120 }}
+              onKeyDown={(e) => { if (e.key === "Enter" && customFlag.trim()) { e.preventDefault(); void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); } }} />
+            {customFlag.trim() && <button className="small" disabled={busy} onClick={() => { void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); }}>Apply</button>}
+            <button className="small ghost" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), null)}>Clear flag</button>
+          </div>
+        </div>
+      )}
+
+      <ErrorBox error={list.error} />
+      {list.loading ? <Loading /> : !rows.length ? <Empty>{showDeleted ? "No deleted problems." : hasFilters ? "No problem in this folder / filter yet." : "No problems yet."}</Empty> : (
+        <div className="card table-wrap" style={{ padding: 0 }}>
+          <table className="library-table">
+            <thead><tr>
+              {!showDeleted && organizer && <th style={{ width: 38 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" /></th>}
+              <th>Problem</th>
+              <th style={{ width: 110 }}>Difficulty</th>
+              {!showDeleted && <th style={{ width: 130 }}>Visibility</th>}
+              <th style={{ width: 120 }}>Status</th>
+              <th style={{ width: 140 }} className="right">Actions</th>
+            </tr></thead>
+            <tbody>{rows.map((p) => (
+              <tr key={p.version_id} onClick={() => !showDeleted && organizer && toggleOne(p.version_id)} style={{ cursor: !showDeleted && organizer ? "pointer" : "default" }}>
+                {!showDeleted && organizer && (
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(p.version_id)} onChange={() => toggleOne(p.version_id)} aria-label={"Select " + p.title} />
+                  </td>
+                )}
+                <td>
+                  <div className="lib-title-row">
+                    <strong>{p.title}</strong>
+                    {p.folder && <span className="tag" style={{ fontSize: "0.75rem" }}>📁 {p.folder}</span>}
+                    {p.contest_flag && <FlagBadge flag={p.contest_flag} />}
+                  </div>
+                  <div className="lib-sub-row">
+                    <span className="small muted mono">{p.slug} · v{p.version_number}</span>
+                    {(p.tags?.length ?? 0) > 0 && p.tags!.map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}
+                  </div>
+                </td>
+                <td><DifficultyPill value={p.difficulty ?? "MEDIUM"} /></td>
+                {!showDeleted && (
+                  <td>{p.in_problem_set ? <Badge tone="ok">Public Set</Badge> : <Badge tone="neutral">Private</Badge>}</td>
+                )}
+                <td>{showDeleted ? <Badge>Deleted {p.deleted_at ? when(p.deleted_at) : ""}</Badge> : <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>}</td>
+                <td className="right" onClick={(e) => e.stopPropagation()}>
+                  <div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap", gap: "0.4rem" }}>
+                    {showDeleted ? <button className="small primary" onClick={() => setTarget({ row: p, action: "restore" })}>Restore</button> : <>
+                      <a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a>
+                      <button className="small danger" onClick={() => setTarget({ row: p, action: "delete" })} title="Delete this problem">Delete</button>
+                    </>}
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      <span className="small muted">Showing {rows.length} of {all.length} problems. Click any row (or checkbox) to select problems for moving to a folder, flagging, publishing, or creating a contest.</span>
       {target && (
         <ReasonDialog title={(target.action === "delete" ? "Delete “" : "Restore “") + target.row.title + "”"} confirm={target.action === "delete" ? "Delete problem" : "Restore"}
           danger={target.action === "delete"} onClose={() => setTarget(null)}

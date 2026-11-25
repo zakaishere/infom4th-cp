@@ -200,17 +200,33 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
           </div>
         </>}
       </section>
-      {rows.length > 0 && <div className="card table-wrap"><table>
-        <thead><tr><th>Select</th><th>Problem</th><th>Difficulty</th>{!duel && <th>Categories</th>}<th>Tests</th>{!duel && <th>Goes to</th>}<th>Status</th><th /></tr></thead>
+      {rows.length > 0 && <div className="card table-wrap" style={{ padding: 0 }}><table className="library-table">
+        <thead><tr>
+          <th style={{ width: 38 }}>Sel</th>
+          <th>Problem</th>
+          <th style={{ width: 70 }}>Tests</th>
+          {!duel && <th style={{ width: 130 }}>Goes to</th>}
+          <th style={{ width: 240 }}>Status</th>
+          <th style={{ width: 80 }} />
+        </tr></thead>
         <tbody>{rows.map((r, index) => <tr key={r.problem.slug}>
           <td><input type="checkbox" aria-label={"Import " + r.problem.title} disabled={busy || r.state === "done" || r.state === "skipped"} checked={r.selected} onChange={e => update(r.problem.slug, { selected: e.target.checked })} /></td>
-          <td><strong>{r.problem.title}</strong><div className="small muted mono">{r.problem.slug} · {r.problem.reference.language}</div>{(activeFlag ?? r.problem.contestFlag) && <div style={{ marginTop: 2 }}><FlagBadge flag={activeFlag ?? r.problem.contestFlag} /></div>}</td>
-          <td><DifficultyPill value={r.problem.difficulty || "MEDIUM"} /></td>
-          {!duel && <td><div className="tags">{tagsFor(r.problem).map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}</div></td>}
-          <td>{r.problem.tests.length}</td>
-          {!duel && <td>{mode === "publish" ? (() => { const w = where(r.problem, index); return <Badge tone={w.tone}>{w.label}</Badge>; })() : <span className="small muted">Lab only</span>}</td>}
-          <td><Badge tone={r.state === "error" ? "bad" : r.state === "done" ? "ok" : r.state === "running" ? "info" : "neutral"}>{r.state}</Badge><div className="small" style={{ maxWidth: 420 }}>{r.message}</div></td>
-          <td>{r.versionId && <a href={"#/admin/problems/" + r.versionId} target="_blank" rel="noreferrer" className="btn small">Open</a>}</td>
+          <td>
+            <div className="lib-title-row">
+              <strong>{r.problem.title}</strong>
+              <DifficultyPill value={r.problem.difficulty || "MEDIUM"} />
+              {(activeFlag ?? r.problem.contestFlag) && <FlagBadge flag={activeFlag ?? r.problem.contestFlag} />}
+              {(activeFolder ?? r.problem.folder) && <span className="tag" style={{ fontSize: "0.75rem" }}>📁 {activeFolder ?? r.problem.folder}</span>}
+            </div>
+            <div className="lib-sub-row">
+              <span className="small muted mono">{r.problem.slug} · {r.problem.reference.language}</span>
+              {!duel && tagsFor(r.problem).map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}
+            </div>
+          </td>
+          <td className="mono small">{r.problem.tests.length}</td>
+          {!duel && <td>{mode === "publish" ? (() => { const w = where(r.problem, index); return <Badge tone={w.tone}>{w.label}</Badge>; })() : <span className="small muted">Library only</span>}</td>}
+          <td><Badge tone={r.state === "error" ? "bad" : r.state === "done" ? "ok" : r.state === "running" ? "info" : "neutral"}>{r.state}</Badge><div className="small muted">{r.message}</div></td>
+          <td className="right">{r.versionId && <a href={"#/admin/problems/" + r.versionId} target="_blank" rel="noreferrer" className="btn small">Open</a>}</td>
         </tr>)}</tbody>
       </table></div>}
     </div>

@@ -208,37 +208,39 @@ export default function PracticeSet() {
         {published.length === 0 ? <Empty>Nothing published yet.</Empty> : shown.length === 0 ? (
           <Empty>No problem matches these filters. <button className="ghost small" onClick={() => { setQ(""); setDifficulty(""); setFlagFilter(""); setSectionFilter(""); setTagFilter(""); }}>Clear filters</button></Empty>
         ) : (
-          <div className="table-wrap"><table>
+          <div className="table-wrap"><table className="library-table">
             <thead><tr>
-              <th style={{ width: 32 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" /></th>
-              <th>Problem</th><th>Difficulty</th><th>Contest flag</th><th>Section</th><th>Topics</th><th className="right">Solved</th><th>Visibility</th><th />
+              <th style={{ width: 36 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" /></th>
+              <th>Problem</th>
+              <th style={{ width: 96 }}>Level</th>
+              <th style={{ width: 126 }}>Section</th>
+              <th style={{ width: 220 }}>Topics</th>
+              <th style={{ width: 170 }} className="right">Actions</th>
             </tr></thead>
             <tbody>{shown.map((p) => {
               const rate = acceptance(p);
               return (
                 <tr key={p.problem_id} className={p.hidden ? "hidden-row" : ""}>
                   <td><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} aria-label={"Select " + p.title} /></td>
-                  <td><strong>{p.title}</strong><div className="small muted mono">{p.slug}</div></td>
-                  <td><DifficultyPill value={p.difficulty} /></td>
                   <td>
-                    <select value={p.contest_flag ?? ""} disabled={busy} style={{ width: "auto" }} aria-label={"Flag for " + p.title}
-                      onChange={(e) => flagProblems([p.problem_id], e.target.value || null)}>
-                      <option value="">— None</option>
-                      <option value="BASIC">Basic</option>
-                      <option value="WARMUP">Warmup</option>
-                      <option value="STANDARD">Contest</option>
-                      {p.contest_flag && !["BASIC", "WARMUP", "STANDARD"].includes(p.contest_flag) && <option value={p.contest_flag}>{p.contest_flag}</option>}
-                    </select>
+                    <div className="lib-title-row">
+                      <strong>{p.title}</strong>
+                      {p.contest_flag && <FlagBadge flag={p.contest_flag} />}
+                      {p.hidden && <span className="badge neutral">Hidden</span>}
+                    </div>
+                    <div className="lib-sub-row">
+                      <span className="small muted mono">{p.slug}</span>
+                      <span className="small muted" title={rate == null ? "" : `Acceptance ${rate}%`}>· {p.solved_by}/{p.tried_by} solved</span>
+                    </div>
                   </td>
-                  <td><select value={p.td_number ?? ""} disabled={busy} style={{ width: "auto" }} title="Problem Set list, or a TD of the academic section"
+                  <td><DifficultyPill value={p.difficulty} /></td>
+                  <td><select value={p.td_number ?? ""} disabled={busy} style={{ width: "100%", padding: "0.3rem 0.45rem", fontSize: "0.84rem" }} title="Problem Set list, or a TD of the academic section"
                     onChange={(e) => save(p, { td: e.target.value ? Number(e.target.value) : null, tdPosition: p.td_position }, e.target.value ? "Moved to TD " + e.target.value : "Moved to Problem Set")}>
                     <option value="">Problem Set</option>
                     {Array.from({ length: Math.max(12, p.td_number ?? 0) }, (_, i) => <option key={i + 1} value={i + 1}>TD {i + 1}</option>)}
                   </select></td>
-                  <td style={{ minWidth: 200 }}><TagEditor tags={p.tags} suggestions={suggestions} onSave={(next) => save(p, { tags: next }, "Topics saved")} /></td>
-                  <td className="right mono small" title={rate == null ? "" : `Acceptance ${rate}%`}>{p.solved_by}<span className="muted">/{p.tried_by}</span></td>
-                  <td>{p.hidden ? <span className="badge neutral">Hidden</span> : <span className="badge ok">Public</span>}</td>
-                  <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                  <td><TagEditor tags={p.tags} suggestions={suggestions} onSave={(next) => save(p, { tags: next }, "Topics saved")} /></td>
+                  <td className="right"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap", gap: "0.4rem" }}>
                     {!p.hidden && <a className="btn small ghost" href={(p.td_number ? "#/td/" : "#/problems/") + p.id}>Open</a>}
                     <button className="small" disabled={busy} onClick={() => save(p, { hidden: !p.hidden, reason: p.hidden ? "Shown again" : "Hidden from Problem Set" }, p.hidden ? "Visible in Problem Set again" : "Hidden from Problem Set")}>{p.hidden ? "Show" : "Hide"}</button>
                   </div></td>

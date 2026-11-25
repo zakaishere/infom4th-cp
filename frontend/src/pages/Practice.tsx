@@ -34,7 +34,12 @@ export function StatusIcon({ status }: { status: PracticeProblem["my_status"] })
 type Filters = { q: string; difficulty: string; status: string; tags: string[]; sort: string };
 const DEFAULT_FILTERS: Filters = { q: "", difficulty: "", status: "", tags: [], sort: "newest" };
 function loadFilters(): Filters {
-  try { return { ...DEFAULT_FILTERS, ...JSON.parse(localStorage.getItem("cp.practice.filters") ?? "{}") }; } catch { return DEFAULT_FILTERS; }
+  try {
+    const saved = JSON.parse(localStorage.getItem("cp.practice.filters") ?? "{}");
+    return { ...DEFAULT_FILTERS, sort: typeof saved.sort === "string" ? saved.sort : DEFAULT_FILTERS.sort };
+  } catch {
+    return DEFAULT_FILTERS;
+  }
 }
 
 export function PracticeList() {
@@ -193,7 +198,12 @@ export function PracticeList() {
           </table>
         </div>
       )}
-      {shown.length > 0 && <p className="small muted" style={{ marginTop: "0.6rem" }}>Showing {shown.length} of {all.length} problems. Acceptance = accepted ÷ all judged submissions.</p>}
+      {shown.length > 0 && (
+        <div className="row-between small muted" style={{ marginTop: "0.6rem" }}>
+          <span>Showing {shown.length} of {all.length} problems{filtered ? " (filtered)" : ""}. Acceptance = accepted ÷ all judged submissions.</span>
+          {filtered && <button className="ghost small" onClick={() => set({ ...DEFAULT_FILTERS, sort: f.sort })}>Show all {all.length} problems</button>}
+        </div>
+      )}
     </main>
   );
 }
