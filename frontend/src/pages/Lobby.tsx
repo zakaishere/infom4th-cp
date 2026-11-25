@@ -6,7 +6,7 @@ import { Badge, CONTEST_FORMAT_LABEL, ErrorBox, Field, Loading, Markdown, UserLi
 import { runPhase } from "./Home";
 
 export type RunDetail = {
-  run: { id: string; competition_id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean };
+  run: { id: string; competition_id: string; kind: string; status: string; starts_at: string; ends_at: string; manual_start?: boolean; submissions_paused: boolean };
   configuration: { title?: string; description_md: string; rules_md: string; mode: string; duration_seconds: number; scoring_system?: string; wrong_attempt_penalty_seconds?: number; freeze_before_end_seconds?: number; max_team_size?: number;
     contest_format?: "STANDARD" | "BASIC" | "WARMUP"; publish_to_practice?: boolean; require_fullscreen?: boolean };
   problems?: { slot: number; label: string; title: string; time_limit_ms: number; memory_limit_mb: number; points?: number | null; release_day?: number; opens_at?: string; released?: boolean }[];
@@ -15,7 +15,7 @@ export type RunDetail = {
 };
 
 export default function Lobby({ runId }: { runId: string }) {
-  const detail = useData<RunDetail>("/api/runs/" + runId, 15000);
+  const detail = useData<RunDetail>("/api/runs/" + runId, 5000);
   const mine = useData<{ run_id: string; entry_id: string; entry_name: string; members: string | null }[]>("/api/me/runs", 15000);
   const { organizer } = useAuth();
   const teams = useData<{ id: string; name: string; captain_id: string }[]>("/api/teams");
@@ -42,6 +42,7 @@ export default function Lobby({ runId }: { runId: string }) {
   const labels = Object.fromEntries((detail.data.problems ?? []).map((p) => [p.slot, p.label]));
   const fullscreenRequired = Boolean(cfg.require_fullscreen ?? (cfg.contest_format !== "WARMUP"));
   const formatName = CONTEST_FORMAT_LABEL[cfg.contest_format ?? "STANDARD"] ?? "Normal";
+  const waitingManual = Boolean(r.manual_start && phase.phase === "upcoming");
 
   const register = () => run(async () => {
     await post("/api/competitions/" + r.competition_id + "/register", cfg.mode === "TEAM" ? { teamId: team } : {});
@@ -54,10 +55,12 @@ export default function Lobby({ runId }: { runId: string }) {
         <div>
           <div className="eyebrow">{r.kind === "REHEARSAL" ? "Rehearsal" : `${formatName} contest`} · {cfg.mode === "TEAM" ? "Team" : "Individual"}</div>
           <h1>{cfg.title ?? "Contest lobby"}</h1>
-          <p>{when(r.starts_at)} → {when(r.ends_at)} · {formatDuration(cfg.duration_seconds)}</p>
+          {waitingManual
+            ? <p>Registration open · Duration: {formatDuration(cfg.duration_seconds)} · Starts when the organizer opens the contest</p>
+            : <p>{when(r.starts_at)} → {when(r.ends_at)} · {formatDuration(cfg.duration_seconds)}</p>}
         </div>
         <div className="stack" style={{ alignItems: "flex-end" }}>
-          {phase.phase === "upcoming" && <div className="countdown">{clock(phase.ms)}</div>}
+          {phase.phase === "upcoming" && (waitingManual ? <Badge tone="info">Registration open · Waiting for start</Badge> : <div className="countdown">{clock(phase.ms)}</div>)}
           {phase.phase === "live" && <Badge tone="ok">LIVE · {clock(phase.ms)} left</Badge>}
           {phase.phase === "ended" && <Badge>Contest ended</Badge>}
           {r.submissions_paused && <Badge tone="warn">Submissions paused by organizers</Badge>}
@@ -71,7 +74,7 @@ export default function Lobby({ runId }: { runId: string }) {
             <>
               <div className="notice ok">{cfg.mode === "TEAM" ? <>You are registered as team <strong>{entry.entry_name}</strong> (<UserList handles={entry.members} />). Every member can submit; results are shared.</> : "You are registered."}</div>
               {phase.phase === "live" && <button className="primary" onClick={() => navigate("/arena/" + runId)}>Enter the arena{fullscreenRequired ? " (full screen)" : ""} ▸</button>}
-              {phase.phase === "upcoming" && <p className="muted">The arena opens automatically at the start. Keep this page open; the countdown follows the server clock.</p>}
+              {phase.phase === "upcoming" && <p className="muted">{waitingManual ? "Keep this page open — the arena opens automatically as soon as the organizer starts the contest." : "The arena opens automatically at the start. Keep this page open; the countdown follows the server clock."}</p>}
               {phase.phase === "upcoming" && <button onClick={() => navigate("/arena/" + runId)}>Wait in the arena</button>}
             </>
           ) : phase.phase !== "ended" && r.kind === "OFFICIAL" && !organizer ? (
@@ -104,7 +107,7 @@ export default function Lobby({ runId }: { runId: string }) {
           <h3>How it works</h3>
           <ul className="small">
             {fullscreenRequired && <li>The arena runs in full screen. Leaving full screen blocks the arena until you return.</li>}
-            <li>All problems open at {when(r.starts_at)} and close together at {when(r.ends_at)}.</li>
+            <li>{waitingManual ? `All problems open together as soon as the organizer starts the contest (duration: ${formatDuration(cfg.duration_seconds)}).` : `All problems open at ${when(r.starts_at)} and close together at ${when(r.ends_at)}.`}</li>
             <li>Submit as often as you need; each submission is judged on all hidden tests.</li>
             <li>A submission may wait in the queue during busy moments — your submission time counts, not the judging time.</li>
             <li>Use clarifications for questions about the statements. Announcements appear automatically.</li>

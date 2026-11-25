@@ -5,11 +5,11 @@ import { Badge, CONTEST_FORMAT_LABEL, Empty, ErrorBox, LiveDot, Loading, clock, 
 
 type ContestFormat = "STANDARD" | "BASIC" | "WARMUP";
 type Competition = {
-  id: string; slug: string; title: string; status: string; run_id: string; starts_at: string; ends_at: string;
+  id: string; slug: string; title: string; status: string; run_id: string; starts_at: string; ends_at: string; manual_start?: boolean;
   mode?: string; scoring_system?: keyof typeof SCORING_INFO; max_team_size?: number; problem_count?: number; entrant_count?: number;
   contest_format?: ContestFormat; require_fullscreen?: boolean;
 };
-type MyRun = { run_id: string; kind: string; status: string; starts_at: string; ends_at: string; title: string; competition_id: string; submissions_paused: boolean; contest_format?: ContestFormat; entry_name?: string; members?: string | null; team_id?: string | null };
+type MyRun = { run_id: string; kind: string; status: string; starts_at: string; ends_at: string; manual_start?: boolean; title: string; competition_id: string; submissions_paused: boolean; contest_format?: ContestFormat; entry_name?: string; members?: string | null; team_id?: string | null };
 
 export function runPhase(now: number, start: string, end: string) {
   const s = new Date(start).getTime(), e = new Date(end).getTime();
@@ -18,9 +18,9 @@ export function runPhase(now: number, start: string, end: string) {
   return { phase: "ended" as const, ms: 0 };
 }
 
-export function PhaseBadge({ phase, ms }: { phase: string; ms: number }) {
+export function PhaseBadge({ phase, ms, manualStart }: { phase: string; ms: number; manualStart?: boolean }) {
   if (phase === "live") return <Badge tone="ok">LIVE · {clock(ms)} left</Badge>;
-  if (phase === "upcoming") return <Badge tone="info">Starts in {clock(ms)}</Badge>;
+  if (phase === "upcoming") return <Badge tone="info">{manualStart ? "Registration open" : `Starts in ${clock(ms)}`}</Badge>;
   return <Badge>Ended</Badge>;
 }
 
@@ -37,6 +37,7 @@ function ContestCard({ c, now, registered, organizer }: { c: Competition; now: n
   const p = runPhase(now, c.starts_at, c.ends_at);
   const total = new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime();
   const enter = p.phase === "live" && registered;
+  const waitingManual = Boolean(c.manual_start && p.phase === "upcoming");
   const fmt: ContestFormat = c.contest_format ?? "STANDARD";
   return (
     <div className={"card hover contest-card rise " + p.phase}>
@@ -50,17 +51,24 @@ function ContestCard({ c, now, registered, organizer }: { c: Competition; now: n
             {registered && <span className="tag" style={{ color: "var(--ok)", borderColor: "var(--ok)" }}>Registered</span>}
           </div>
         </div>
-        {p.phase === "live" ? <span className="tag live">● Live</span> : p.phase === "upcoming" ? <span className="tag">Upcoming</span> : <span className="tag">Finished</span>}
+        {p.phase === "live" ? <span className="tag live">● Live</span> : waitingManual ? <span className="tag" style={{ borderColor: "#35c7e8", color: "#35c7e8" }}>Registration open</span> : p.phase === "upcoming" ? <span className="tag">Upcoming</span> : <span className="tag">Finished</span>}
       </div>
-      {p.phase !== "ended" ? (
+      {p.phase === "ended" ? (
+        <div className="small muted">Ended {when(c.ends_at)}</div>
+      ) : waitingManual ? (
+        <div>
+          <div className="small muted">Start time</div>
+          <div style={{ fontWeight: 700, fontSize: "1.05rem", color: "#35c7e8", marginTop: "0.15rem" }}>Waiting for organizer to start</div>
+        </div>
+      ) : (
         <div>
           <div className="small muted">{p.phase === "live" ? "Time left" : "Starts in"}</div>
           <div className="big-clock">{clock(p.ms)}</div>
           {p.phase === "live" && <div className="bar" style={{ marginTop: 6 }}><div style={{ width: (100 * (total - p.ms)) / total + "%" }} /></div>}
         </div>
-      ) : <div className="small muted">Ended {when(c.ends_at)}</div>}
+      )}
       <div className="meta-row">
-        <span>🗓 {when(c.starts_at)}</span><span>⏱ {duration(c)}</span>
+        <span>{waitingManual ? "📢 Starts when organizer opens" : `🗓 ${when(c.starts_at)}`}</span><span>⏱ {duration(c)}</span>
         {c.problem_count != null && <span>▤ {c.problem_count} problems</span>}
         {c.entrant_count != null && <span>👥 {c.entrant_count} {c.mode === "TEAM" ? "teams" : "entrants"}</span>}
       </div>
@@ -86,14 +94,15 @@ export default function Home() {
   const byKind = kindFilter === "ALL" ? all : all.filter((c) => (c.contest_format ?? "STANDARD") === kindFilter);
   const phaseOf = (c: Competition) => runPhase(now, c.starts_at, c.ends_at).phase;
   const live = byKind.filter((c) => phaseOf(c) === "live");
-  const upcoming = byKind.filter((c) => phaseOf(c) === "upcoming").sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const upcoming = byKind.filter((c) => phaseOf(c) === "upcoming").sort((a, b) => (a.manual_start ? 0 : 1) - (b.manual_start ? 0 : 1) || a.starts_at.localeCompare(b.starts_at));
   const ended = byKind.filter((c) => phaseOf(c) === "ended");
   const shown = filter === "live" ? live : filter === "upcoming" ? upcoming : filter === "ended" ? ended : [...live, ...upcoming, ...ended];
   const allLive = all.filter((c) => phaseOf(c) === "live");
   const allUpcoming = all.filter((c) => phaseOf(c) === "upcoming").sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const scheduledUpcoming = allUpcoming.filter((c) => !c.manual_start);
   // Rehearsals and private contests the user entered are not in the public list.
   const privateActive = (mine.data ?? []).filter((r) => !all.some((c) => c.run_id === r.run_id) && runPhase(now, r.starts_at, r.ends_at).phase !== "ended" && r.status !== "FINISHED");
-  const next = allUpcoming.find((c) => myRuns.has(c.run_id)) ?? allUpcoming[0];
+  const next = scheduledUpcoming.find((c) => myRuns.has(c.run_id)) ?? scheduledUpcoming[0];
   const countOfKind = (k: ContestFormat) => all.filter((c) => (c.contest_format ?? "STANDARD") === k).length;
 
   return (
@@ -132,7 +141,7 @@ export default function Home() {
               return (
                 <div key={r.run_id} className="card hover contest-card">
                   <div className="contest-top"><h3>{r.title}</h3>{r.kind === "REHEARSAL" && <span className="tag">Rehearsal</span>}</div>
-                  <PhaseBadge {...p} />
+                  <PhaseBadge {...p} manualStart={r.manual_start} />
                   <a className={"btn" + (p.phase === "live" ? " primary" : "")} href={(p.phase === "live" ? "#/arena/" : "#/run/") + r.run_id}>{p.phase === "live" ? "Enter arena ▸" : "Open lobby"}</a>
                 </div>
               );

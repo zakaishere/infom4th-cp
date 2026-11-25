@@ -197,12 +197,23 @@ public class CompetitionService {
         }
         db.audit(actor.id(),"REHEARSAL_START","run",run,null);return run;
     }
+    private UUID createRun(UUID competition,Map<String,Object> v,String kind,UUID actor,Instant start,boolean manualStart) {
+        return db.id("INSERT INTO contest_runs(competition_id,competition_version_id,kind,created_by,starts_at,ends_at,status,manual_start) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
+                competition,v.get("id"),kind,actor,Timestamp.from(start),Timestamp.from(start.plusSeconds(((Number)v.get("duration_seconds")).longValue())),kind.equals("REHEARSAL")?"RUNNING":"PENDING",manualStart);
+    }
     private UUID createRun(UUID competition,Map<String,Object> v,String kind,UUID actor,Instant start) {
-        return db.id("INSERT INTO contest_runs(competition_id,competition_version_id,kind,created_by,starts_at,ends_at,status) VALUES (?,?,?,?,?,?,?) RETURNING id",
-                competition,v.get("id"),kind,actor,Timestamp.from(start),Timestamp.from(start.plusSeconds(((Number)v.get("duration_seconds")).longValue())),kind.equals("REHEARSAL")?"RUNNING":"PENDING");
+        return createRun(competition,v,kind,actor,start,false);
+    }
+    /** Publishes the contest for registration without auto-starting; it begins only when the organizer clicks Start now. */
+    @Transactional
+    public UUID scheduleManual(Actor actor,UUID competition,String visibility) {
+        return scheduleInternal(actor,competition,Instant.now().plusSeconds(3650L*DAY),visibility,true);
     }
     @Transactional
     public UUID schedule(Actor actor,UUID competition,Instant start,String visibility) {
+        return scheduleInternal(actor,competition,start,visibility,false);
+    }
+    private UUID scheduleInternal(Actor actor,UUID competition,Instant start,String visibility,boolean manualStart) {
         access.competition(actor,competition,true);
         var c=db.one("SELECT * FROM competitions WHERE id=? FOR UPDATE",competition);
         Api.require(List.of("INTERNAL_TESTING","READY").contains(c.get("status")),HttpStatus.CONFLICT,"Run internal testing first");
@@ -213,10 +224,10 @@ public class CompetitionService {
         if(v.get("sealed_at")==null)db.jdbc.update("UPDATE competition_versions SET sealed_at=now() WHERE id=?",v.get("id"));
         if("INTERNAL_TESTING".equals(c.get("status")))db.jdbc.update("UPDATE competitions SET status='READY' WHERE id=?",competition);
         db.jdbc.update("UPDATE competitions SET status='SCHEDULED',published_at=now(),visibility=? WHERE id=?",visibility,competition);
-        UUID run=createRun(competition,v,"OFFICIAL",actor.id(),start);
+        UUID run=createRun(competition,v,"OFFICIAL",actor.id(),start,manualStart);
         for(var reg:db.jdbc.queryForList("SELECT * FROM registrations WHERE competition_id=? AND status='APPROVED'",competition))
             if(reg.get("user_id")!=null)addIndividual(run,(UUID)reg.get("user_id"));else addTeam(run,(UUID)reg.get("team_id"),((Number)v.get("max_team_size")).intValue());
-        db.audit(actor.id(),"COMPETITION_SCHEDULE","competition",competition,null);return run;
+        db.audit(actor.id(),"COMPETITION_SCHEDULE","competition",competition,manualStart?"Manual start (registration open)":null);return run;
     }
     @Transactional
     public UUID register(Actor actor,UUID competition,UUID team) {
@@ -326,9 +337,9 @@ public class CompetitionService {
             case "pause" -> db.jdbc.update("UPDATE contest_runs SET submissions_paused=true WHERE id=?",run);
             case "resume" -> db.jdbc.update("UPDATE contest_runs SET submissions_paused=false WHERE id=?",run);
             case "start-now" -> {
-                // Starts a scheduled contest immediately; it still ends after its configured duration.
+                // Starts a scheduled or manual-start contest immediately; it still ends after its configured duration.
                 Api.require("OFFICIAL".equals(r.get("kind")) && "PENDING".equals(r.get("status")),HttpStatus.CONFLICT,"Only a contest that has not started yet can be started now");
-                db.jdbc.update("UPDATE contest_runs SET starts_at=now(),ends_at=now()+(ends_at-starts_at),status='RUNNING' WHERE id=?",run);
+                db.jdbc.update("UPDATE contest_runs SET starts_at=now(),ends_at=now()+(ends_at-starts_at),status='RUNNING',manual_start=false WHERE id=?",run);
                 db.jdbc.update("UPDATE competitions SET status='RUNNING' WHERE id=? AND status='SCHEDULED'",r.get("competition_id"));
             }
             case "end-now" -> {
@@ -357,9 +368,9 @@ public class CompetitionService {
     }
     @Transactional
     public void tick() {
-        db.jdbc.update("UPDATE contest_runs SET status='RUNNING' WHERE status='PENDING' AND starts_at<=now() AND ends_at>now()");
-        db.jdbc.update("UPDATE contest_runs SET status='FINISHED' WHERE status IN ('PENDING','RUNNING') AND ends_at<=now()");
-        db.jdbc.update("UPDATE competitions c SET status='RUNNING' WHERE c.status='SCHEDULED' AND EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_id=c.id AND r.kind='OFFICIAL' AND r.starts_at<=now())");
+        db.jdbc.update("UPDATE contest_runs SET status='RUNNING' WHERE status='PENDING' AND NOT manual_start AND starts_at<=now() AND ends_at>now()");
+        db.jdbc.update("UPDATE contest_runs SET status='FINISHED' WHERE status IN ('PENDING','RUNNING') AND NOT manual_start AND ends_at<=now()");
+        db.jdbc.update("UPDATE competitions c SET status='RUNNING' WHERE c.status='SCHEDULED' AND EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_id=c.id AND r.kind='OFFICIAL' AND NOT r.manual_start AND r.starts_at<=now())");
         db.jdbc.update("UPDATE competitions c SET status='FINISHED' WHERE c.status='RUNNING' AND EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_id=c.id AND r.kind='OFFICIAL' AND r.ends_at<=now())");
         publishFinishedToPractice();
     }

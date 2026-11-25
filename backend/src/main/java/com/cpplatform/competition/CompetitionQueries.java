@@ -37,13 +37,13 @@ public class CompetitionQueries {
     }
     /** Published public competitions with their official run. */
     public List<Map<String,Object>> published() {
-        return db.jdbc.queryForList("SELECT c.id,c.slug,c.title,c.status,r.id AS run_id,r.starts_at,r.ends_at,v.mode,v.scoring_system,v.max_team_size,v.contest_format,v.require_fullscreen,"
+        return db.jdbc.queryForList("SELECT c.id,c.slug,c.title,c.status,r.id AS run_id,r.starts_at,r.ends_at,r.manual_start,v.mode,v.scoring_system,v.max_team_size,v.contest_format,v.require_fullscreen,"
                 +"(SELECT count(*) FROM competition_problems p WHERE p.competition_version_id=v.id) AS problem_count,(SELECT count(*) FROM run_entries e WHERE e.run_id=r.id) AS entrant_count "
-                +"FROM competitions c JOIN contest_runs r ON r.competition_id=c.id AND r.kind='OFFICIAL' JOIN competition_versions v ON v.id=r.competition_version_id WHERE c.published_at IS NOT NULL AND c.visibility='PUBLIC' ORDER BY r.starts_at DESC LIMIT 200");
+                +"FROM competitions c JOIN contest_runs r ON r.competition_id=c.id AND r.kind='OFFICIAL' JOIN competition_versions v ON v.id=r.competition_version_id WHERE c.published_at IS NOT NULL AND c.visibility='PUBLIC' ORDER BY r.manual_start DESC,r.starts_at DESC LIMIT 200");
     }
     /** Runs the actor is an entrant of, including rehearsals and unlisted/private contests. */
     public List<Map<String,Object>> runsOf(Actor actor) {
-        return db.jdbc.queryForList("SELECT r.id AS run_id,r.kind,r.status,r.starts_at,r.ends_at,r.submissions_paused,c.id AS competition_id,c.slug,c.title,v.contest_format,m.entry_id,e.display_name AS entry_name,e.team_id,(SELECT string_agg(u.handle,', ' ORDER BY u.handle) FROM run_entry_members x JOIN users u ON u.id=x.user_id WHERE x.entry_id=m.entry_id) AS members FROM run_entry_members m JOIN contest_runs r ON r.id=m.run_id JOIN competitions c ON c.id=r.competition_id JOIN competition_versions v ON v.id=r.competition_version_id JOIN run_entries e ON e.id=m.entry_id WHERE m.user_id=? ORDER BY r.starts_at DESC LIMIT 100",actor.id());
+        return db.jdbc.queryForList("SELECT r.id AS run_id,r.kind,r.status,r.starts_at,r.ends_at,r.manual_start,r.submissions_paused,c.id AS competition_id,c.slug,c.title,v.contest_format,m.entry_id,e.display_name AS entry_name,e.team_id,(SELECT string_agg(u.handle,', ' ORDER BY u.handle) FROM run_entry_members x JOIN users u ON u.id=x.user_id WHERE x.entry_id=m.entry_id) AS members FROM run_entry_members m JOIN contest_runs r ON r.id=m.run_id JOIN competitions c ON c.id=r.competition_id JOIN competition_versions v ON v.id=r.competition_version_id JOIN run_entries e ON e.id=m.entry_id WHERE m.user_id=? ORDER BY r.starts_at DESC LIMIT 100",actor.id());
     }
     /** A run, its configuration and, once it has started (or for the jury), its problems. */
     public Map<String,Object> run(Actor actor,UUID run) {

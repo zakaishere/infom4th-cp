@@ -68,7 +68,7 @@ export function ContestList() {
   );
 }
 
-type Run = { id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean; final_standings_released_at: string | null };
+type Run = { id: string; kind: string; status: string; starts_at: string; ends_at: string; manual_start?: boolean; submissions_paused: boolean; final_standings_released_at: string | null };
 type Detail = Competition & {
   rated: boolean;
   version: { id: string; sealed_at: string | null; duration_seconds: number; mode: string; description_md: string; rules_md: string; freeze_before_end_seconds: number; wrong_attempt_penalty_seconds: number;
@@ -87,7 +87,7 @@ export function ContestDetail({ id }: { id: string }) {
   const [startsAt, setStartsAt] = useState(() => toZoneInput(serverNow() + 3600_000).slice(0, 14) + "00");
   const [visibility, setVisibility] = useState("PUBLIC");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
-  const [launchNow, setLaunchNow] = useState(true);
+  const [launchMode, setLaunchMode] = useState<"manual" | "now" | "scheduled">("manual");
   const [controlRun, setControlRun] = useState<{ id: string; action: string } | null>(null);
   const { busy, run } = useAction();
   if (d.loading) return <Loading />;
@@ -155,30 +155,44 @@ export function ContestDetail({ id }: { id: string }) {
                   await post("/api/manage/runs/" + reh.runId + "/control", { action: "end-rehearsal", reason: "Automatic pre-launch check" });
                 }
                 const startMs = fromZoneInput(startsAt);
-                await post("/api/manage/competitions/" + id + "/schedule", launchNow ? { startNow: true, visibility, reason: "Started from the contest page" } : { startsAt: new Date(startMs).toISOString(), visibility });
+                const payload = launchMode === "now"
+                  ? { startNow: true, visibility, reason: "Started from the contest page" }
+                  : launchMode === "manual"
+                    ? { manualStart: true, visibility }
+                    : { startsAt: new Date(startMs).toISOString(), visibility };
+                await post("/api/manage/competitions/" + id + "/schedule", payload);
                 refresh();
-              }, launchNow ? "The contest is live!" : "Contest scheduled and published");
+              }, launchMode === "now" ? "The contest is live!" : launchMode === "manual" ? "Published! Registration is open — hit Start whenever you're ready." : "Contest scheduled and published");
             }}>
               <div className="launch">
-                <button type="button" className={"option" + (launchNow ? " active" : "")} onClick={() => setLaunchNow(true)}>
-                  <strong>▶ Start now</strong><span className="small muted">Opens immediately and ends after {length}. People can still join while it runs.</span>
+                <button type="button" className={"option" + (launchMode === "manual" ? " active" : "")} onClick={() => setLaunchMode("manual")}>
+                  <strong>📢 Publish &amp; open registration</strong><span className="small muted">Students see it and register now; you click Start whenever the room is ready ({length}).</span>
                 </button>
-                <button type="button" className={"option" + (!launchNow ? " active" : "")} onClick={() => setLaunchNow(false)}>
-                  <strong>🗓 Schedule for later</strong><span className="small muted">Publish now with a countdown; contestants register before the start.</span>
+                <button type="button" className={"option" + (launchMode === "now" ? " active" : "")} onClick={() => setLaunchMode("now")}>
+                  <strong>▶ Start now immediately</strong><span className="small muted">Opens live right away and ends after {length}.</span>
+                </button>
+                <button type="button" className={"option" + (launchMode === "scheduled" ? " active" : "")} onClick={() => setLaunchMode("scheduled")}>
+                  <strong>🗓 Schedule date &amp; time</strong><span className="small muted">Auto-starts at a fixed date &amp; time with a countdown.</span>
                 </button>
               </div>
               <div className="grid grid-2">
-                {!launchNow && <Field label={`Start (${localTimeZone()})`}><input type="datetime-local" required value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></Field>}
+                {launchMode === "scheduled" && <Field label={`Start (${localTimeZone()})`}><input type="datetime-local" required value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></Field>}
                 <Field label="Who can see it"><select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
                   <option value="PUBLIC">Public: listed for everyone</option><option value="UNLISTED">Unlisted: link only</option><option value="PRIVATE">Private: invited users only</option></select></Field>
               </div>
-              <div><button className="primary" disabled={busy || !readiness.data?.ready || c.problems.length === 0 || (!launchNow && !(fromZoneInput(startsAt) > serverNow()))}>{launchNow ? "▶ Start the contest now" : "Publish & schedule"}</button></div>
+              <div><button className="primary" disabled={busy || !readiness.data?.ready || c.problems.length === 0 || (launchMode === "scheduled" && !(fromZoneInput(startsAt) > serverNow()))}>
+                {launchMode === "now" ? "▶ Start the contest now" : launchMode === "manual" ? "📢 Publish & open registration" : "Publish & schedule"}
+              </button></div>
               <span className="small muted">The configuration is locked once published. A private test run happens automatically first.</span>
             </form>
           ) : official.status === "PENDING" ? (
             <div className="stack">
-              <div className="notice">Scheduled for <strong>{when(official.starts_at)}</strong> (starts in {clock(new Date(official.starts_at).getTime() - serverNow())}).</div>
-              <div><button className="primary" disabled={busy} onClick={() => setControlRun({ id: official.id, action: "start-now" })}>▶ Start now instead</button></div>
+              {official.manual_start ? (
+                <div className="notice ok"><strong>Registration is open.</strong> Participants can register and wait in the lobby — the contest will stay paused until you click Start below ({length}).</div>
+              ) : (
+                <div className="notice">Scheduled for <strong>{when(official.starts_at)}</strong> (starts in {clock(new Date(official.starts_at).getTime() - serverNow())}).</div>
+              )}
+              <div><button className="primary" disabled={busy} onClick={() => setControlRun({ id: official.id, action: "start-now" })}>▶ Start contest now ({length})</button></div>
             </div>
           ) : <div className="notice small">The official contest {official.status === "RUNNING" ? "is running" : "has finished"}.</div>}
           <details>
@@ -340,8 +354,8 @@ function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; p
     <section className="card stack" style={{ padding: 0 }}>
       <div className="control-bar">
         <div className="stack" style={{ gap: 0 }}>
-          <span className="eyebrow">{r.kind === "OFFICIAL" ? "Official contest" : "Rehearsal"} · {phase.phase === "live" ? "live" : phase.phase === "upcoming" ? "starts in" : "finished"}</span>
-          <span className="row">{phase.phase === "live" && <LiveDot />}<span className="clock">{phase.phase === "ended" ? "Ended" : clock(phase.ms)}</span></span>
+          <span className="eyebrow">{r.kind === "OFFICIAL" ? "Official contest" : "Rehearsal"} · {phase.phase === "live" ? "live" : phase.phase === "upcoming" ? (r.manual_start ? "registration open" : "starts in") : "finished"}</span>
+          <span className="row">{phase.phase === "live" && <LiveDot />}<span className="clock">{phase.phase === "ended" ? "Ended" : r.manual_start && phase.phase === "upcoming" ? "Waiting for Start" : clock(phase.ms)}</span></span>
         </div>
         {r.submissions_paused && <Badge tone="warn">Submissions paused</Badge>}
         {r.final_standings_released_at && <Badge tone="ok">Final standings released</Badge>}

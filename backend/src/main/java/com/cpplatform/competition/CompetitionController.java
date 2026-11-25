@@ -51,10 +51,13 @@ public class CompetitionController {
     Object rehearsal(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body){return Map.of("runId",contests.rehearsal(Actor.of(auth),id,body));}
     @PostMapping("/api/manage/competitions/{id}/schedule")
     Object schedule(Authentication auth,@PathVariable UUID id,@RequestBody Map<String,Object> body) {
-        // startNow: open the contest immediately; it ends after its configured duration.
+        // startNow: open the contest immediately; manualStart: publish & open registration until the organizer clicks Start now.
         boolean now=Boolean.TRUE.equals(body.get("startNow"));
-        // The placeholder start is far enough ahead that the scheduler cannot open the run before start-now does.
-        UUID run=contests.schedule(Actor.of(auth),id,now?java.time.Instant.now().plusSeconds(60):Api.instant(body.get("startsAt")),Api.optional(body,"visibility","PUBLIC",16));
+        boolean manual=!now && Boolean.TRUE.equals(body.get("manualStart"));
+        String visibility=Api.optional(body,"visibility","PUBLIC",16);
+        UUID run=manual
+                ?contests.scheduleManual(Actor.of(auth),id,visibility)
+                :contests.schedule(Actor.of(auth),id,now?java.time.Instant.now().plusSeconds(60):Api.instant(body.get("startsAt")),visibility);
         if(now)contests.control(Actor.of(auth),run,Map.of("action","start-now","reason",Api.optional(body,"reason","Started immediately",2000)));
         return Map.of("runId",run);
     }

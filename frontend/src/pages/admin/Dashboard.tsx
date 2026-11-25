@@ -5,7 +5,7 @@ import { Badge, Empty, LiveDot, Loading, Meter, ReasonDialog, Stat, clock, forma
 import { runPhase } from "../Home";
 
 type Competition = { id: string; title: string; status: string };
-type Run = { id: string; kind: string; status: string; starts_at: string; ends_at: string; submissions_paused: boolean };
+type Run = { id: string; kind: string; status: string; starts_at: string; ends_at: string; manual_start?: boolean; submissions_paused: boolean };
 type LiveRun = Run & { competition: Competition; submissions: number; waiting: number; openQuestions: number };
 
 /** Gathers the contests that matter now: running, scheduled, or in rehearsal. */
@@ -29,7 +29,7 @@ function useLiveRuns(competitions?: Competition[]) {
           }
         } catch { /* a contest the user cannot manage is skipped */ }
       }
-      if (!cancelled) setRuns(result.sort((a, b) => a.starts_at.localeCompare(b.starts_at)));
+      if (!cancelled) setRuns(result.sort((a, b) => (a.status === "RUNNING" ? 0 : 1) - (b.status === "RUNNING" ? 0 : 1) || (a.manual_start ? 0 : 1) - (b.manual_start ? 0 : 1) || a.starts_at.localeCompare(b.starts_at)));
     };
     load();
     const timer = setInterval(() => { if (document.visibilityState === "visible") load(); }, 8000);
@@ -87,8 +87,8 @@ export default function Dashboard() {
                       <div className="row">{r.kind === "REHEARSAL" && <Badge tone="warn">Rehearsal</Badge>}{r.submissions_paused && <Badge tone="bad">Paused</Badge>}</div>
                     </div>
                     <div className="row">
-                      {p.phase === "live" ? <><LiveDot /><Badge tone="ok">LIVE · left</Badge></> : p.phase === "upcoming" ? <Badge tone="info">Starts in</Badge> : <Badge>Ended</Badge>}
-                      <span className="clock" style={{ fontSize: "1.1rem" }}>{p.phase === "ended" ? "" : clock(p.ms)}</span>
+                      {p.phase === "live" ? <><LiveDot /><Badge tone="ok">LIVE · left</Badge></> : p.phase === "upcoming" ? <Badge tone="info">{r.manual_start ? "Registration open" : "Starts in"}</Badge> : <Badge>Ended</Badge>}
+                      <span className="clock" style={{ fontSize: "1.1rem" }}>{p.phase === "ended" ? "" : r.manual_start && p.phase === "upcoming" ? "Waiting for Start" : clock(p.ms)}</span>
                     </div>
                     <div className="capacity-numbers">
                       <Stat label="Submissions" value={r.submissions >= 100 ? "100+" : r.submissions} />

@@ -220,9 +220,19 @@ export default function Arena({ runId }: { runId: string }) {
       {phase === "upcoming" ? (
         <div className="lock-screen" style={{ position: "static", minHeight: "calc(100vh - 56px)" }}>
           <div className="stack" style={{ alignItems: "center" }}>
-            <div className="eyebrow" style={{ color: "#35c7e8" }}>The contest starts in</div>
-            <div className="countdown">{clock(start - now)}</div>
-            <p style={{ maxWidth: 560 }}>Problems appear automatically at {when(r.starts_at)}. Scoring: <strong>{SCORING_INFO[scoring]?.name}</strong> — {SCORING_INFO[scoring]?.summary}</p>
+            {r.manual_start ? (
+              <>
+                <div className="eyebrow" style={{ color: "#35c7e8" }}>Registration open</div>
+                <div className="countdown" style={{ fontSize: "clamp(1.6rem, 4vw, 2.5rem)" }}>Waiting for organizer to start</div>
+                <p style={{ maxWidth: 560 }}>Keep this page open — problems appear automatically the moment the organizer starts the contest. Scoring: <strong>{SCORING_INFO[scoring]?.name}</strong> — {SCORING_INFO[scoring]?.summary}</p>
+              </>
+            ) : (
+              <>
+                <div className="eyebrow" style={{ color: "#35c7e8" }}>The contest starts in</div>
+                <div className="countdown">{clock(start - now)}</div>
+                <p style={{ maxWidth: 560 }}>Problems appear automatically at {when(r.starts_at)}. Scoring: <strong>{SCORING_INFO[scoring]?.name}</strong> — {SCORING_INFO[scoring]?.summary}</p>
+              </>
+            )}
             {entry ? <p>{isTeam ? <>You compete as team <strong>{entry.entry_name}</strong> ({entry.members}). Everyone in the team can submit; results are shared.</> : "You are registered."}</p> : <p>You are not registered for this contest.</p>}
             {!fullscreenRequired && <p>Full screen is not required for this contest — solve comfortably at your own pace.</p>}
             {showFullscreen && entry && <button className="primary" onClick={fullscreen.enter}>Enter full screen now</button>}

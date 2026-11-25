@@ -223,7 +223,7 @@ export default function ContestWizard() {
     }
   }
 
-  async function finish(schedule: boolean, startNow = false) {
+  async function finish(launch: "draft" | "manual" | "startNow" | "scheduled") {
     setBusy(true);
     setLog([]);
     try {
@@ -265,7 +265,7 @@ export default function ContestWizard() {
         const missing = (result as { user: string; status: string }[]).filter((r) => r.status === "NOT_FOUND" || r.status === "INACTIVE");
         if (missing.length) setLog((l) => [...l, { text: "Not found or inactive: " + missing.map((m) => m.user).join(", "), state: "error" }]);
       }
-      if (!schedule) { finishDraft(id!); return; }
+      if (launch === "draft") { finishDraft(id!); return; }
       let teamIds: string[] | undefined;
       if (d.mode === "TEAM") {
         const team = await runStep("Creating jury check team for pre-launch verification", () => post<{ teamId: string }>("/api/teams", { name: "Jury check " + d.slug.slice(0, 80) }));
@@ -278,7 +278,8 @@ export default function ContestWizard() {
         setLog((l) => [...l, ...(ready as { errors: string[] }).errors.map((e) => ({ text: e, state: "error" as const }))]);
         throw new Error("not ready");
       }
-      if (startNow) await runStep("Starting the contest now", () => post("/api/manage/competitions/" + id + "/schedule", { startNow: true, visibility: d.visibility, reason: "Started from contest builder" }));
+      if (launch === "startNow") await runStep("Starting the contest now", () => post("/api/manage/competitions/" + id + "/schedule", { startNow: true, visibility: d.visibility, reason: "Started from contest builder" }));
+      else if (launch === "manual") await runStep("Publishing & opening registration (waiting for your Start)", () => post("/api/manage/competitions/" + id + "/schedule", { manualStart: true, visibility: d.visibility }));
       else await runStep(`Scheduling for ${when(startIso(d.startsAt))}`, () => post("/api/manage/competitions/" + id + "/schedule", { startsAt: startIso(d.startsAt), visibility: d.visibility }));
       finishDraft(id!);
     } catch {
@@ -698,22 +699,25 @@ export default function ContestWizard() {
         <div className="row">
           {d.launchMode !== "scheduled" ? (
             <>
-              <button type="button" className="primary" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>
-                ▶ Create &amp; start now ({formatDuration(d.durationSeconds)})
+              <button type="button" className="primary" disabled={busy || issues.length > 0} onClick={() => finish("manual")}>
+                📢 Publish &amp; open registration (start whenever ready)
               </button>
-              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(false)}>
-                Save ready (hit Start whenever you want)
+              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish("startNow")}>
+                ▶ Create &amp; start immediately ({formatDuration(d.durationSeconds)})
+              </button>
+              <button type="button" className="ghost" disabled={busy || issues.length > 0} onClick={() => finish("draft")}>
+                Save as private draft
               </button>
             </>
           ) : (
             <>
-              <button type="button" className="primary" disabled={busy || issues.length > 0 || !canScheduleFuture} onClick={() => finish(true, false)}>
+              <button type="button" className="primary" disabled={busy || issues.length > 0 || !canScheduleFuture} onClick={() => finish("scheduled")}>
                 🗓 Create &amp; schedule ({!Number.isNaN(startMs) ? when(startIso(d.startsAt)) : "pick start"})
               </button>
-              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(true, true)}>
-                ▶ Start now instead
+              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish("manual")}>
+                📢 Open registration (manual start)
               </button>
-              <button type="button" disabled={busy || issues.length > 0} onClick={() => finish(false)}>
+              <button type="button" className="ghost" disabled={busy || issues.length > 0} onClick={() => finish("draft")}>
                 Save as draft
               </button>
             </>
