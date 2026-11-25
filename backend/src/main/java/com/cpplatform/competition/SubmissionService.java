@@ -80,11 +80,18 @@ public class SubmissionService {
         result.put("submission",s);
         var judging=db.jdbc.queryForList("SELECT j.id AS job_id,j.generation,j.status,j.last_error_code,r.verdict,r.execution_time_ms,r.peak_memory_kb,r.passed_tests,r.total_tests,r.public_feedback FROM judging_jobs j LEFT JOIN judging_results r ON r.job_id=j.id WHERE j.submission_id=? ORDER BY j.generation DESC LIMIT 1",id);
         result.put("judging",judging);
-        // Per-test verdicts in test order. Hidden test content is never returned; tests after an
-        // early stop are reported as not run. Sample tests are marked so contestants can retry them locally.
-        if(!judging.isEmpty() && judging.get(0).get("verdict")!=null)
-            result.put("cases",db.jdbc.queryForList("SELECT row_number() OVER (ORDER BY g.position,t.position) AS number,t.is_sample AS sample,c.verdict,c.execution_time_ms,c.peak_memory_kb FROM test_cases t JOIN test_case_groups g ON g.id=t.group_id LEFT JOIN test_case_results c ON c.test_case_id=t.id AND c.job_id=? WHERE t.problem_version_id=? AND (t.is_sample OR NOT ?) ORDER BY g.position,t.position",
-                    judging.get(0).get("job_id"),s.get("problem_version_id"),Boolean.TRUE.equals(s.get("samples_only"))));
+        // Per-test verdicts in test order. Sample tests always show input, expected and actual output.
+        // In Problem Set (PRACTICE) and Basic training contests, failed hidden tests also show a bounded preview
+        // of input/expected alongside the contestant's output or runtime error. Normal/Warmup contests keep hidden I/O private.
+        if(!judging.isEmpty() && judging.get(0).get("verdict")!=null) {
+            boolean showHiddenDetails="PRACTICE".equals(s.get("context"))
+                    || (s.get("competition_version_id")!=null && db.exists("SELECT EXISTS(SELECT 1 FROM competition_versions WHERE id=? AND contest_format='BASIC')",s.get("competition_version_id")));
+            result.put("cases",db.jdbc.queryForList("SELECT row_number() OVER (ORDER BY g.position,t.position) AS number,t.is_sample AS sample,c.verdict,c.execution_time_ms,c.peak_memory_kb,c.actual_output AS actual,"
+                    +"CASE WHEN t.is_sample OR (? AND c.verdict IS NOT NULL AND c.verdict<>'ACCEPTED') THEN CASE WHEN length(t.input_data)>1500 THEN left(t.input_data,1500)||'…' ELSE t.input_data END END AS input,"
+                    +"CASE WHEN t.is_sample OR (? AND c.verdict IS NOT NULL AND c.verdict<>'ACCEPTED') THEN CASE WHEN length(t.expected_output)>1500 THEN left(t.expected_output,1500)||'…' ELSE t.expected_output END END AS expected "
+                    +"FROM test_cases t JOIN test_case_groups g ON g.id=t.group_id LEFT JOIN test_case_results c ON c.test_case_id=t.id AND c.job_id=? WHERE t.problem_version_id=? AND (t.is_sample OR NOT ?) ORDER BY g.position,t.position",
+                    showHiddenDetails,showHiddenDetails,judging.get(0).get("job_id"),s.get("problem_version_id"),Boolean.TRUE.equals(s.get("samples_only"))));
+        }
         return result;
     }
     /** The actor's own submissions, newest first; team entries see every member's submissions for the runs they share. */

@@ -215,22 +215,37 @@ export function SubmissionTable({ rows, labels, onOpen, showAuthor }: { rows: Su
 export type SubmissionDetail = {
   submission: { id: string; language_code: string; source_code: string; submitted_at: string };
   judging: { status: string; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null; passed_tests: number | null; total_tests: number | null; public_feedback: string | null; generation: number }[];
-  cases?: { number: number; sample: boolean; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null }[];
+  cases?: { number: number; sample: boolean; verdict: string | null; execution_time_ms: number | null; peak_memory_kb: number | null; input?: string | null; expected?: string | null; actual?: string | null }[];
 };
 
-/** Per-test results: which test failed, and how long each took. Hidden test data is never shown. */
+/** Per-test results: which test failed, how long each took, and what happened on the failed test. */
 export function TestCases({ cases, compileError }: { cases: NonNullable<SubmissionDetail["cases"]>; compileError: boolean }) {
-  if (compileError) return null;
   const firstFailure = cases.find((c) => c.verdict && c.verdict !== "ACCEPTED");
+  const [selectedNum, setSelectedNum] = useState<number | null>(null);
+  if (compileError) return null;
+  const active = (selectedNum != null ? cases.find((c) => c.number === selectedNum) : null) ?? firstFailure ?? null;
+  const activeVerdict = active?.verdict ? VERDICTS[active.verdict] : null;
+  const hasDetails = Boolean(active && (active.input != null || active.expected != null || active.actual != null));
+
   return (
-    <div className="stack" style={{ gap: "0.4rem" }}>
+    <div className="stack" style={{ gap: "0.55rem" }}>
       <strong>Tests</strong>
-      {firstFailure && <div className="notice bad small">Failed on test {firstFailure.number}{firstFailure.sample ? " (an example from the statement — try it locally)" : ""}: {VERDICTS[firstFailure.verdict!]?.label ?? firstFailure.verdict}</div>}
+      {firstFailure && (
+        <div className="notice bad small">
+          Failed on test #{firstFailure.number}{firstFailure.sample ? " (example)" : ""}: <strong>{VERDICTS[firstFailure.verdict!]?.label ?? firstFailure.verdict}</strong>
+        </div>
+      )}
       <div className="test-grid">
         {cases.map((c) => {
           const v = c.verdict ? VERDICTS[c.verdict] : null;
+          const clickable = Boolean(c.verdict && (c.verdict !== "ACCEPTED" || c.sample));
+          const isSelected = active?.number === c.number;
           return (
-            <div key={c.number} className={"test-cell " + (v ? v.tone : "skipped")} title={c.verdict ? `${v?.label} · ${c.execution_time_ms ?? 0} ms · ${c.peak_memory_kb ? Math.round(c.peak_memory_kb / 1024) + " MB" : "memory n/a"}` : "Not run: judging stops at the first failed test"}>
+            <div key={c.number}
+              className={"test-cell " + (v ? v.tone : "skipped")}
+              style={{ cursor: clickable ? "pointer" : "default", outline: isSelected ? "2px solid var(--primary)" : undefined, outlineOffset: 1 }}
+              onClick={() => clickable && setSelectedNum(c.number)}
+              title={c.verdict ? `${v?.label} · ${c.execution_time_ms ?? 0} ms · ${c.peak_memory_kb ? Math.round(c.peak_memory_kb / 1024) + " MB" : "memory n/a"}${clickable ? " (click to inspect)" : ""}` : "Not run: judging stops at the first failed test"}>
               <span className="test-number">{c.number}{c.sample ? "*" : ""}</span>
               <span className="test-verdict">{v ? v.short : "—"}</span>
               <span className="test-time">{c.verdict ? (c.execution_time_ms ?? 0) + "ms" : ""}</span>
@@ -238,7 +253,47 @@ export function TestCases({ cases, compileError }: { cases: NonNullable<Submissi
           );
         })}
       </div>
-      <span className="small muted">* example test from the statement · “—” not run (judging stops at the first failed test, except in IOI contests)</span>
+
+      {active && active.verdict && active.verdict !== "ACCEPTED" && hasDetails && (
+        <div className="card-flat stack" style={{ gap: "0.5rem" }}>
+          <div className="row-between small">
+            <strong>Test #{active.number}{active.sample ? " (Example)" : ""} — {activeVerdict?.label ?? active.verdict}</strong>
+            <span className="muted mono">{active.execution_time_ms ?? 0} ms{active.peak_memory_kb ? ` · ${Math.round(active.peak_memory_kb / 1024)} MB` : ""}</span>
+          </div>
+          {active.input != null && (
+            <div>
+              <div className="small muted" style={{ marginBottom: 2 }}>Input</div>
+              <pre className="mono" style={{ margin: 0, padding: "0.5rem 0.65rem", background: "var(--code-bg)", color: "var(--code-fg)", maxHeight: 160, overflow: "auto", fontSize: "0.82rem" }}>{active.input || "(empty)"}</pre>
+            </div>
+          )}
+          {active.verdict === "WRONG_ANSWER" ? (
+            <div className="grid grid-2" style={{ gap: "0.6rem" }}>
+              {active.expected != null && (
+                <div>
+                  <div className="small muted" style={{ marginBottom: 2 }}>Expected output</div>
+                  <pre className="mono" style={{ margin: 0, padding: "0.5rem 0.65rem", background: "var(--code-bg)", color: "var(--ok)", maxHeight: 160, overflow: "auto", fontSize: "0.82rem" }}>{active.expected || "(empty)"}</pre>
+                </div>
+              )}
+              {active.actual != null && (
+                <div>
+                  <div className="small muted" style={{ marginBottom: 2 }}>Your output</div>
+                  <pre className="mono" style={{ margin: 0, padding: "0.5rem 0.65rem", background: "var(--code-bg)", color: "var(--danger)", maxHeight: 160, overflow: "auto", fontSize: "0.82rem" }}>{active.actual}</pre>
+                </div>
+              )}
+            </div>
+          ) : active.actual != null ? (
+            <div>
+              <div className="small muted" style={{ marginBottom: 2 }}>{active.verdict === "RUNTIME_ERROR" ? "Runtime error / stderr" : "Details"}</div>
+              <pre className="mono" style={{ margin: 0, padding: "0.5rem 0.65rem", background: "var(--code-bg)", color: "#ffb4a9", maxHeight: 180, overflow: "auto", fontSize: "0.82rem" }}>{active.actual}</pre>
+            </div>
+          ) : null}
+          {active.input == null && !active.sample && (
+            <span className="small muted">Hidden test input &amp; expected output are kept private in official/warmup contests.</span>
+          )}
+        </div>
+      )}
+
+      <span className="small muted">* example test from the statement · Click any failed test above to inspect what happened · “—” not run</span>
     </div>
   );
 }

@@ -431,6 +431,34 @@ class DockerRunner:
             return False
 
     @staticmethod
+    def _failure_detail(status: str, result: Execution, job: dict) -> str:
+        """Bounded, student-safe summary of what the contestant's code produced on a failed test (never includes expected_output)."""
+        limit = 2000
+        def clip(raw: bytes) -> str:
+            text = raw[:limit * 2].decode("utf-8", errors="replace").strip()
+            return (text[:limit] + "…") if len(text) > limit else text
+        if status == "WRONG_ANSWER":
+            out = result.output
+            marker = job.get("function_marker")
+            if job.get("function_signature") and marker:
+                mbytes = marker.encode("utf-8")
+                idx = out.rfind(mbytes)
+                if idx != -1:
+                    out = out[idx + len(mbytes):]
+            text = clip(out)
+            return text if text else "(empty output)"
+        if status == "RUNTIME_ERROR":
+            err = clip(result.errors)
+            return err if err else f"Process exited with non-zero code {result.exit_code}"
+        if status == "TIME_LIMIT_EXCEEDED":
+            return f"Exceeded time limit ({result.cpu_ms} ms used)"
+        if status == "MEMORY_LIMIT_EXCEEDED":
+            return f"Exceeded memory limit ({round(result.memory_kb / 1024)} MB used)"
+        if status == "OUTPUT_LIMIT_EXCEEDED":
+            return "Printed too much output (output limit exceeded)"
+        return ""
+
+    @staticmethod
     def _record(cases: list, test: dict, result: Execution, job: dict) -> bool:
         """Appends one test result; returns True when the test failed."""
         status = verdict(result, effective_limit_ms(job["language_code"], int(job["time_limit_ms"])))
@@ -441,8 +469,13 @@ class DockerRunner:
                 correct = matches(result.output, test["expected_output"], job["checker"])
             if not correct:
                 status = "WRONG_ANSWER"
-        cases.append({"id": test["id"], "verdict": status,
-                      "executionTimeMs": result.cpu_ms, "peakMemoryKb": result.memory_kb})
+        entry = {"id": test["id"], "verdict": status,
+                 "executionTimeMs": result.cpu_ms, "peakMemoryKb": result.memory_kb}
+        if status != "ACCEPTED":
+            detail = DockerRunner._failure_detail(status, result, job)
+            if detail:
+                entry["actualOutput"] = detail
+        cases.append(entry)
         return status != "ACCEPTED"
 
     def image_exists(self, image: str) -> bool:

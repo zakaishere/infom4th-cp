@@ -150,8 +150,9 @@ public class JudgeService {
                 job,j.get("problem_version_id"),verdict,time,memory,passed,total,feedback,timing(timings,"compileMs"),timing(timings,"testsMs"),timing(timings,"totalMs"));
         for(Object item:cases) {
             Map<?,?> c=(Map<?,?>)item;
-            db.jdbc.update("INSERT INTO test_case_results(job_id,problem_version_id,test_case_id,verdict,execution_time_ms,peak_memory_kb) VALUES (?,?,?,?,?,?)",
-                    job,j.get("problem_version_id"),Api.uuid(c.get("id")),c.get("verdict"),metric(c,"executionTimeMs"),metric(c,"peakMemoryKb"));
+            String actual=c.get("actualOutput")==null?null:bounded(c.get("actualOutput"),2000);
+            db.jdbc.update("INSERT INTO test_case_results(job_id,problem_version_id,test_case_id,verdict,execution_time_ms,peak_memory_kb,actual_output) VALUES (?,?,?,?,?,?,?)",
+                    job,j.get("problem_version_id"),Api.uuid(c.get("id")),c.get("verdict"),metric(c,"executionTimeMs"),metric(c,"peakMemoryKb"),actual);
         }
         db.jdbc.update("UPDATE judging_jobs SET status='COMPLETED',completed_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=?",job);
         db.jdbc.update("INSERT INTO run_events(run_id,kind) SELECT run_id,'SUBMISSION_JUDGED' FROM submissions WHERE id=? AND run_id IS NOT NULL",j.get("submission_id"));
