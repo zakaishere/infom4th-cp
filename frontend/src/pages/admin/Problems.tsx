@@ -3,6 +3,7 @@ import { patch, post, put } from "../../api";
 import { navigate, useAction, useAuth, useData, useRoute } from "../../app";
 import { AdminIcon } from "../../components/AdminIcons";
 import { LanguagePicker } from "../../components/LanguagePicker";
+import { SearchSelect } from "../../components/SearchSelect";
 import { templateFor } from "../../components/Problem";
 import { SignatureEditor } from "../../components/SignatureEditor";
 import { EMPTY_SIGNATURE, FUNCTION_LANGUAGES, describe, parseSignature, type Signature } from "../../lib/functionMode";
@@ -322,19 +323,23 @@ export function ProblemList() {
 
         {!showDeleted && (
           <>
-            <select
+            <SearchSelect
+              compact
               value={collectionFilter}
-              onChange={(e) => setCollectionFilter(e.target.value)}
-              aria-label="Filter by collection"
-            >
-              <option value="">All collections</option>
-              <option value="__UNCOLLECTED__">Uncollected ({counts.uncollected})</option>
-              {collections.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name} ({c.problem_count})
-                </option>
-              ))}
-            </select>
+              onChange={setCollectionFilter}
+              ariaLabel="Filter by collection"
+              placeholder="All collections"
+              searchPlaceholder="Search collections…"
+              options={[
+                { value: "", label: "All collections", meta: counts.all },
+                { value: "__UNCOLLECTED__", label: "Uncollected", meta: counts.uncollected },
+                ...collections.map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                  meta: c.problem_count,
+                })),
+              ]}
+            />
             {organizer && (
               <button type="button" onClick={() => setCollectionsOpen(true)} title="Create, rename, or delete collections">
                 <AdminIcon name="folder" /> Collections

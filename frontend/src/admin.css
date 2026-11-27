@@ -558,3 +558,192 @@ button.collection-pill:hover:not(:disabled) {
 .collection-row:last-child {
   border-bottom: 0;
 }
+
+/* ======================================================================
+   Theme-matched Searchable Dropdown (SearchSelect)
+   ====================================================================== */
+.sselect {
+  position: relative;
+  width: 100%;
+}
+.sselect.compact {
+  width: auto;
+  min-width: 155px;
+  max-width: 230px;
+}
+button.sselect-trigger {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font-weight: 500;
+  font-size: 0.9rem;
+  text-align: left;
+  transform: none !important;
+}
+.sselect.compact button.sselect-trigger {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 0.6rem;
+  font-size: 0.82rem;
+}
+button.sselect-trigger:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--bg);
+}
+button.sselect-trigger.open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.sselect-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sselect-value.is-placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.sselect-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.sselect-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  color: var(--muted);
+}
+.sselect-clear:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+}
+.sselect-chevron {
+  display: inline-flex;
+  align-items: center;
+}
+
+.sselect-menu {
+  z-index: 200;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sselect-search-wrap {
+  padding: 0.45rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--card-2);
+}
+.sselect-search-wrap input.sselect-search {
+  width: 100%;
+  height: 32px;
+  padding: 0 0.55rem;
+  font-size: 0.82rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--fg);
+}
+.sselect-search-wrap input.sselect-search:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.sselect-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 230px;
+  overflow-y: auto;
+}
+.sselect-empty {
+  padding: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-align: center;
+}
+button.sselect-item {
+  width: 100%;
+  padding: 0.46rem 0.7rem;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  background: transparent;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  font-weight: 500;
+  text-align: left;
+  transform: none !important;
+}
+button.sselect-item:last-child {
+  border-bottom: 0;
+}
+button.sselect-item:hover:not(:disabled),
+button.sselect-item.active {
+  background: color-mix(in srgb, var(--primary) 15%, var(--card));
+}
+button.sselect-item.selected {
+  font-weight: 600;
+}
+button.sselect-item.create {
+  color: var(--primary);
+  font-weight: 600;
+  border-top: 1px solid var(--line);
+}
+.sselect-item-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+}
+.sselect-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.sselect-item-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.sselect-item-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.sselect-meta {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  padding: 0.04rem 0.36rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--muted);
+}
+.sselect-check {
+  display: inline-flex;
+  color: var(--primary);
+}

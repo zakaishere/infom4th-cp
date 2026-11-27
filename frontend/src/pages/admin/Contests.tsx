@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { del, patch, post, serverNow } from "../../api";
 import { navigate, useAction, useData, useRoute, useServerClock, useToast } from "../../app";
 import { FullscreenPanel, type FullscreenData } from "../../components/FullscreenLog";
+import { SearchSelect } from "../../components/SearchSelect";
 import { SubmissionModal } from "../../components/Problem";
 import Standings from "../../components/Standings";
 import { DifficultyPill } from "../Practice";
@@ -431,14 +432,19 @@ export function ContestDetail({ id }: { id: string }) {
             }}>
               <div style={{ flex: "1 1 320px", minWidth: 220 }}>
                 <Field label="Add approved problem">
-                  <select required value={attach.versionId} onChange={(e) => setAttach({ ...attach, versionId: e.target.value })}>
-                    <option value="">Choose a problem…</option>
-                    {approved.map((p) => (
-                      <option key={p.version_id} value={p.version_id}>
-                        {p.folder ? `[${p.folder}] ` : ""}[{p.difficulty ?? "MEDIUM"}] {p.title} ({p.slug})
-                      </option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={attach.versionId}
+                    onChange={(v) => setAttach({ ...attach, versionId: v })}
+                    placeholder="Choose a problem…"
+                    searchPlaceholder="Search by title, slug, or collection…"
+                    options={approved.map((p) => ({
+                      value: p.version_id,
+                      label: p.title,
+                      sub: `${p.slug}${p.folder ? ` · ${p.folder}` : ""}`,
+                      meta: p.difficulty ?? "MEDIUM",
+                      keywords: `${p.folder ?? ""} ${p.difficulty ?? ""}`,
+                    }))}
+                  />
                 </Field>
               </div>
               <Field label="Label">
@@ -451,7 +457,7 @@ export function ContestDetail({ id }: { id: string }) {
                   </select>
                 </Field>
               )}
-              <button className="primary" disabled={busy}>+ Attach problem</button>
+              <button className="primary" disabled={busy || !attach.versionId}>+ Attach problem</button>
             </form>
           )}
         </section>

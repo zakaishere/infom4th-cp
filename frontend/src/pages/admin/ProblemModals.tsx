@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { patch, post } from "../../api";
 import { navigate, useAction, useData, useToast } from "../../app";
 import { AdminIcon, type AdminIconName } from "../../components/AdminIcons";
+import { SearchSelect } from "../../components/SearchSelect";
 import { DifficultyPill } from "../Practice";
 import { describe, parseSignature } from "../../lib/functionMode";
 import { STANDARD_TOPICS, topicLabel } from "../../lib/topics";
@@ -321,14 +322,16 @@ export function AssignModal({
           {surface === "TD" && (
             <div className="grid grid-2" style={{ gap: "0.75rem", alignItems: "end" }}>
               <Field label="TD session number" hint="Grouped in course order on the Academic TD page; kept out of general Practice.">
-                <select value={tdNumber} onChange={(e) => setTdNumber(Number(e.target.value))}>
-                  {Array.from({ length: 16 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      TD {n}
-                      {TD_THEMES[n] ? ` — ${TD_THEMES[n]}` : ""}
-                    </option>
-                  ))}
-                </select>
+                <SearchSelect
+                  value={String(tdNumber)}
+                  onChange={(v) => setTdNumber(Math.max(1, Math.min(99, Number(v) || 1)))}
+                  searchPlaceholder="Search TD session…"
+                  options={Array.from({ length: 16 }, (_, i) => i + 1).map((n) => ({
+                    value: String(n),
+                    label: `TD ${n}`,
+                    sub: TD_THEMES[n],
+                  }))}
+                />
               </Field>
               <Field label="Or custom TD (1–99)">
                 <input
@@ -366,13 +369,18 @@ export function AssignModal({
               {missionMode === "existing" && missions.length > 0 ? (
                 <div className="grid grid-2" style={{ gap: "0.75rem" }}>
                   <Field label="Mission">
-                    <select value={missionSlug} onChange={(e) => setMissionSlug(e.target.value)}>
-                      {missions.map((m) => (
-                        <option key={m.slug} value={m.slug}>
-                          {m.title} ({m.problems} ex. · {m.open ? "Open" : "Closed"})
-                        </option>
-                      ))}
-                    </select>
+                    <SearchSelect
+                      value={missionSlug}
+                      onChange={setMissionSlug}
+                      placeholder="Choose a mission…"
+                      searchPlaceholder="Search missions…"
+                      options={missions.map((m) => ({
+                        value: m.slug,
+                        label: m.title,
+                        sub: m.open ? "Open" : "Closed",
+                        meta: `${m.problems} ex.`,
+                      }))}
+                    />
                   </Field>
                   <Field label="Points per problem">
                     <input
@@ -459,52 +467,44 @@ export function AssignModal({
                 </Field>
               ) : (
                 <Field label="Target contest" hint="Only contests that have not started yet can receive new problems.">
-                  <select value={competitionId} onChange={(e) => setCompetitionId(e.target.value)}>
-                    {editableContests.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title} ({c.status.toLowerCase().replace(/_/g, " ")})
-                      </option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={competitionId}
+                    onChange={setCompetitionId}
+                    placeholder="Choose a contest…"
+                    searchPlaceholder="Search contests…"
+                    options={editableContests.map((c) => ({
+                      value: c.id,
+                      label: c.title,
+                      sub: c.slug,
+                      meta: c.status.toLowerCase().replace(/_/g, " "),
+                    }))}
+                  />
                 </Field>
               )}
             </div>
           )}
 
           {surface === "COLLECTION" && (
-            <div className="stack" style={{ gap: "0.6rem" }}>
-              <Field
-                label="Collection name"
-                hint="Private organizer group inside Problem Bank (use / for nested collections, e.g. C Course/Week 1)."
-              >
-                <input
-                  list="assign-modal-collections"
-                  placeholder="e.g. Spring Cup, Warmup Week 1, C Course…"
-                  maxLength={120}
-                  value={collectionName}
-                  onChange={(e) => setCollectionName(e.target.value)}
-                />
-                <datalist id="assign-modal-collections">
-                  {collections.map((c) => (
-                    <option key={c.name} value={c.name} />
-                  ))}
-                </datalist>
-              </Field>
-              {collections.length > 0 && (
-                <div className="chips">
-                  {collections.slice(0, 10).map((c) => (
-                    <button
-                      key={c.name}
-                      type="button"
-                      className={"tag-chip small" + (collectionName === c.name ? " active" : "")}
-                      onClick={() => setCollectionName(c.name)}
-                    >
-                      {c.name} ({c.problem_count})
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <Field
+              label="Collection"
+              hint="Search existing collections or type a new name (use / for nested collections, e.g. C Course/Week 1)."
+            >
+              <SearchSelect
+                value={collectionName}
+                onChange={setCollectionName}
+                placeholder="Choose or create a collection…"
+                searchPlaceholder="Filter or type new collection…"
+                emptyLabel="Type a name to create a collection"
+                clearable
+                allowCreate
+                createLabel={(name) => `Create collection "${name}"`}
+                options={collections.map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                  meta: c.problem_count,
+                }))}
+              />
+            </Field>
           )}
         </div>
 

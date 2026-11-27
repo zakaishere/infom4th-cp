@@ -6,6 +6,7 @@ import { LanguagePicker } from "../../components/LanguagePicker";
 import { SCORING_INFO } from "../../components/Standings";
 import { DifficultyPill } from "../Practice";
 import { AdminIcon } from "../../components/AdminIcons";
+import { SearchSelect } from "../../components/SearchSelect";
 import { Badge, CONTEST_FORMAT_LABEL, Empty, Field, Loading, consumeQueuedContestProblems, formatDuration, fromZoneInput, localTimeZone, toZoneInput, when } from "../../ui";
 
 type ContestFormat = "STANDARD" | "BASIC" | "WARMUP";
@@ -509,14 +510,23 @@ export default function ContestWizard() {
                 ))}
               </div>
               {allFolders.length > 0 && (
-                <select value={folderFilter} onChange={(e) => setFolderFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by collection">
-                  <option value="">All collections</option>
-                  {allFolders.map((fl) => {
-                    const n = approved.filter((p) => p.folder === fl || p.folder?.startsWith(fl + "/")).length;
-                    return <option key={fl} value={fl}>{fl} ({n})</option>;
-                  })}
-                  <option value="__NONE__">Uncollected ({approved.filter((p) => !p.folder).length})</option>
-                </select>
+                <SearchSelect
+                  compact
+                  value={folderFilter}
+                  onChange={setFolderFilter}
+                  ariaLabel="Filter by collection"
+                  placeholder="All collections"
+                  searchPlaceholder="Search collections…"
+                  options={[
+                    { value: "", label: "All collections", meta: approved.length },
+                    ...allFolders.map((fl) => ({
+                      value: fl,
+                      label: fl,
+                      meta: approved.filter((p) => p.folder === fl || p.folder?.startsWith(fl + "/")).length,
+                    })),
+                    { value: "__NONE__", label: "Uncollected", meta: approved.filter((p) => !p.folder).length },
+                  ]}
+                />
               )}
               <label className="check small">
                 <input type="checkbox" checked={privateOnly} onChange={(e) => setPrivateOnly(e.target.checked)} />

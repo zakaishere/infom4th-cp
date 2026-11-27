@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { get, post } from "../../api";
 import { navigate, useAuth, useData } from "../../app";
 import { AdminIcon } from "../../components/AdminIcons";
+import { SearchSelect } from "../../components/SearchSelect";
 import { Badge, ErrorBox, Field, LANGUAGE_NAMES } from "../../ui";
 import { DifficultyPill } from "../Practice";
 import { FUNCTION_LANGUAGES } from "../../lib/functionMode";
@@ -242,20 +243,26 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
                 </select>
               </Field>
               {organizer && (
-                <Field label="Collection (optional)" hint="Private bank group to organize this batch.">
-                  <input
-                    list="bank-import-collections"
+                <Field label="Collection (optional)" hint="Search existing collections or type a new name.">
+                  <SearchSelect
                     disabled={busy || reading}
-                    maxLength={120}
                     value={collection}
-                    onChange={(e) => setCollection(e.target.value)}
-                    placeholder="e.g. C Course, Finals Pool…"
+                    onChange={setCollection}
+                    placeholder="None (keep uncollected)"
+                    searchPlaceholder="Filter or type new collection…"
+                    emptyLabel="Type a name to create a collection"
+                    clearable
+                    allowCreate
+                    createLabel={(name) => `Create collection "${name}"`}
+                    options={[
+                      { value: "", label: "None (keep uncollected)" },
+                      ...collections.map((c) => ({
+                        value: c.name,
+                        label: c.name,
+                        meta: c.problem_count,
+                      })),
+                    ]}
                   />
-                  <datalist id="bank-import-collections">
-                    {collections.map((c) => (
-                      <option key={c.name} value={c.name} />
-                    ))}
-                  </datalist>
                 </Field>
               )}
             </div>
