@@ -117,21 +117,32 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
     }
   };
 
-  async function read(file: File) {
-    if (active.current) return;
+  async function read(files: File[]) {
+    if (active.current || files.length === 0) return;
     setReading(true);
     setError(null);
     setRows([]);
-    setFileName(file.name);
+    setFileName(files.length === 1 ? files[0].name : `${files.length} bank files`);
     try {
-      const problems = await readProblemBankFile(file);
+      const merged: BankProblem[] = [];
+      const seen = new Set<string>();
+      const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
+      for (const file of sorted) {
+        const part = await readProblemBankFile(file);
+        for (const p of part) {
+          if (!seen.has(p.slug)) {
+            seen.add(p.slug);
+            merged.push(p);
+          }
+        }
+      }
       if (mounted.current) {
         setRows(
-          problems.map((problem) => ({
+          merged.map((problem) => ({
             problem,
             selected: true,
             state: "ready",
-            message: existingSlugs.has(problem.slug) ? "Already in bank (will update metadata only)" : "Ready to import",
+            message: existingSlugs.has(problem.slug) ? "Already in bank (will update collection/tags)" : "Ready to import",
           })),
         );
       }
@@ -206,16 +217,17 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
         <div className="import-setup-grid">
           <div className="file-drop-box">
             <Field
-              label="1. Select bank file (.json or .json.gz)"
-              hint="Format: infom4th.problem-bank v1 (1 to 100 problems, statements, samples, hidden tests, and reference solutions)."
+              label="1. Select bank file(s) (.json or .json.gz)"
+              hint="You can select multiple .json.gz files at once (Ctrl+A) to import an entire multi-day batch in one go."
             >
               <input
                 type="file"
+                multiple
                 accept=".json,.json.gz,.gz,application/json,application/gzip,application/x-gzip"
                 disabled={busy || reading}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void read(file);
+                  const files = e.target.files ? Array.from(e.target.files) : [];
+                  if (files.length > 0) void read(files);
                   e.target.value = "";
                 }}
               />

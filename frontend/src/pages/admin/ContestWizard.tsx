@@ -80,6 +80,10 @@ const EMPTY: Draft = {
 const defaultPoints = (scoring: Draft["scoring"], i: number) =>
   scoring === "IOI" ? 100 : scoring === "CODEFORCES" ? 500 * (i + 1) : scoring === "ATCODER" ? 100 * (i + 1) : 1;
 const label = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1));
+const inferredDay = (folder?: string | null) => {
+  const m = folder ? /\bday\s*(\d+)\b/i.exec(folder) : null;
+  return m ? Number(m[1]) : 1;
+};
 
 function splitDuration(totalSeconds: number) {
   const mins = Math.max(1, Math.round(totalSeconds / 60));
@@ -258,7 +262,7 @@ export default function ContestWizard() {
             versionId: version,
             slot: i + 1,
             label: label(i),
-            releaseDay: d.kind === "WARMUP" ? Math.min(maxDays, Math.max(1, d.releaseDays?.[version] ?? 1)) : 1,
+            releaseDay: d.kind === "WARMUP" ? Math.min(maxDays, Math.max(1, d.releaseDays?.[version] ?? inferredDay(byId[version]?.folder))) : 1,
             ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }),
           }));
         }
@@ -585,7 +589,7 @@ export default function ContestWizard() {
             ) : (
               d.problems.map((v, i) => {
                 const info = byId[v];
-                const relDay = Math.min(maxDays, Math.max(1, d.releaseDays?.[v] ?? 1));
+                const relDay = Math.min(maxDays, Math.max(1, d.releaseDays?.[v] ?? inferredDay(info?.folder)));
                 return (
                   <div key={v} className="row-between card-flat">
                     <span className="row" style={{ gap: "0.5rem" }}>

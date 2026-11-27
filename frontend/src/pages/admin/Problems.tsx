@@ -150,7 +150,23 @@ export function ProblemList() {
   }, [query]);
 
   const all = list.data ?? [];
-  const collections = collectionsData.data?.collections ?? [];
+  const collections = useMemo(() => {
+    const raw = collectionsData.data?.collections ?? [];
+    const byName = new Map<string, number>();
+    for (const c of raw) {
+      byName.set(c.name, c.problem_count);
+      const parts = c.name.split("/").filter(Boolean);
+      for (let i = 1; i < parts.length; i++) {
+        const parent = parts.slice(0, i).join("/");
+        if (!byName.has(parent)) {
+          byName.set(parent, all.filter((p) => matchesCollection(p.folder, parent)).length);
+        }
+      }
+    }
+    return [...byName.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, problem_count]) => ({ name, problem_count }));
+  }, [collectionsData.data, all]);
 
   const counts = useMemo(() => {
     if (showDeleted) {
