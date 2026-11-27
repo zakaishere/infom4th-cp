@@ -144,7 +144,7 @@ class DockerRunner:
                       "--network", "none", "--cgroupns", "private", "--read-only", "--cap-drop", "ALL",
                       "--security-opt", "no-new-privileges:true", "--pids-limit", "128",
                       "--memory", f"{memory_mb}m", "--memory-swap", f"{memory_mb}m",
-                      "--cpus", "1", "--ulimit", "core=0",
+                      "--cpus", "1", "--ulimit", "core=0", "--ulimit", "stack=-1:-1",
                       # Compilers (no contestant code runs) open many files; programs get 64.
                       "--ulimit", "nofile=1024:1024" if writable else "nofile=64:64",
                       "--ipc", "none", "--shm-size", "16m",
