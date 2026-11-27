@@ -32,6 +32,11 @@ export function MissionList() {
           <h1 style={{ margin: 0 }}>Missions</h1>
           <p className="muted" style={{ margin: 0, maxWidth: 620 }}>The TP of each training session, as a mission. Every exercise is worth points: your score is the points of your best submission, so retrying never hurts. Finish with a score card to share.</p>
         </div>
+        {organizer && (
+          <button className="primary" onClick={() => navigate("/admin/missions")}>
+            Manage in Control Room
+          </button>
+        )}
       </section>
       {organizer && (
         <section className="card stack" style={{ marginBottom: "1rem" }}>

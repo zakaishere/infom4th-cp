@@ -110,6 +110,12 @@ export function parseProblemBank(value: unknown): BankProblem[] {
         reference: { label: r.label === undefined ? "Main solution" : text(r.label, "reference label", 100, true), language, sourceCode: text(r.sourceCode, "reference source", 262144, true) },
       };
       if (p.functionSignature != null) result.functionSignature = object(p.functionSignature);
+      if (Array.isArray(p.tags)) {
+        result.tags = p.tags.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map(t => t.trim().toLowerCase()).slice(0, 8);
+      }
+      if (typeof p.folder === "string" && p.folder.trim()) {
+        result.folder = p.folder.trim().slice(0, 120);
+      }
       if (bytes(JSON.stringify(result)) > 20 * 1024 * 1024) throw new Error("Problem request exceeds 20 MiB");
       return result;
     } catch (error) { throw new Error(`Problem ${index + 1}: ${error instanceof Error ? error.message : "Invalid data"}`); }

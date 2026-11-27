@@ -97,7 +97,7 @@ export default function Dashboard() {
                     </div>
                     <div className="row">
                       <a className="btn primary small" href={"#/admin/contests/" + r.competition.id}>Open monitor</a>
-                      {p.phase === "upcoming" && r.kind === "OFFICIAL" && <button className="small primary" onClick={() => setStartNow(r)}>▶ Start now</button>}
+                      {p.phase === "upcoming" && r.kind === "OFFICIAL" && <button className="small primary" onClick={() => setStartNow(r)}>Start now</button>}
                       {p.phase === "live" && !r.submissions_paused && <button className="small danger" onClick={() => setPause(r)}>Pause submissions</button>}
                       <a className="btn small" href={"#/arena/" + r.id}>View arena</a>
                     </div>

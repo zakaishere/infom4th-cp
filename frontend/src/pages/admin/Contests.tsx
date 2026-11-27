@@ -182,7 +182,7 @@ export function ContestDetail({ id }: { id: string }) {
   const toast = useToast();
   const d = useData<Detail>("/api/manage/competitions/" + id, 15000);
   const readiness = useData<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness", 15000);
-  const lab = useData<{ version_id: string; title: string; slug: string; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; contest_flag?: string | null }[]>("/api/lab/problems");
+  const lab = useData<{ version_id: string; title: string; slug: string; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; folder?: string | null }[]>("/api/lab/problems");
   const participantsData = useData<{ id: string; handle: string | null; display_name: string | null; email: string | null; team: string | null; status: string; created_at?: string }[]>("/api/manage/competitions/" + id + "/participants", 20000);
 
   const [attach, setAttach] = useState({ versionId: "", label: "", releaseDay: 1 });
@@ -264,7 +264,7 @@ export function ContestDetail({ id }: { id: string }) {
         </div>
         {waitingToStart && official && (
           <button className="primary" disabled={busy || c.problems.length === 0} onClick={() => setControlRun({ id: official.id, action: "start-now" })}>
-            ▶ Start contest now ({length})
+            Start contest now ({length})
           </button>
         )}
       </div>
@@ -284,7 +284,7 @@ export function ContestDetail({ id }: { id: string }) {
           <div className="row" style={{ gap: "0.5rem" }}>
             <button type="button" className="small" onClick={copyLobbyLink}>Copy lobby link</button>
             <button type="button" className="primary small" disabled={busy || c.problems.length === 0} onClick={() => setControlRun({ id: official.id, action: "start-now" })}>
-              ▶ Start contest now
+              Start contest now
             </button>
           </div>
         </div>
@@ -435,7 +435,7 @@ export function ContestDetail({ id }: { id: string }) {
                     <option value="">Choose a problem…</option>
                     {approved.map((p) => (
                       <option key={p.version_id} value={p.version_id}>
-                        {p.contest_flag ? `[${p.contest_flag}] ` : ""}[{p.difficulty ?? "MEDIUM"}] {p.title} ({p.slug})
+                        {p.folder ? `[${p.folder}] ` : ""}[{p.difficulty ?? "MEDIUM"}] {p.title} ({p.slug})
                       </option>
                     ))}
                   </select>
@@ -503,13 +503,13 @@ export function ContestDetail({ id }: { id: string }) {
               }}>
                 <div className="launch">
                   <button type="button" className={"option" + (launchMode === "manual" ? " active" : "")} onClick={() => setLaunchMode("manual")}>
-                    <strong>📢 Publish &amp; open registration</strong><span className="small muted">Students see it and register now; you click Start whenever the room is ready ({length}).</span>
+                    <strong>Publish &amp; open registration</strong><span className="small muted">Students see it and register now; you click Start whenever the room is ready ({length}).</span>
                   </button>
                   <button type="button" className={"option" + (launchMode === "now" ? " active" : "")} onClick={() => setLaunchMode("now")}>
-                    <strong>▶ Start now immediately</strong><span className="small muted">Opens live right away and ends after {length}.</span>
+                    <strong>Start now immediately</strong><span className="small muted">Opens live right away and ends after {length}.</span>
                   </button>
                   <button type="button" className={"option" + (launchMode === "scheduled" ? " active" : "")} onClick={() => setLaunchMode("scheduled")}>
-                    <strong>🗓 Schedule date &amp; time</strong><span className="small muted">Auto-starts at a fixed date &amp; time with a countdown.</span>
+                    <strong>Schedule date &amp; time</strong><span className="small muted">Auto-starts at a fixed date &amp; time with a countdown.</span>
                   </button>
                 </div>
                 <div className="grid grid-2">
@@ -519,14 +519,14 @@ export function ContestDetail({ id }: { id: string }) {
                 </div>
                 <div>
                   <button className="primary" disabled={busy || !readiness.data?.ready || c.problems.length === 0 || (launchMode === "scheduled" && !(fromZoneInput(startsAt) > serverNow()))}>
-                    {launchMode === "now" ? "▶ Start the contest now" : launchMode === "manual" ? "📢 Publish & open registration" : "Publish & schedule"}
+                    {launchMode === "now" ? "Start the contest now" : launchMode === "manual" ? "Publish & open registration" : "Publish & schedule"}
                   </button>
                 </div>
               </form>
             ) : official.status === "PENDING" ? (
               <div className="row" style={{ gap: "0.75rem" }}>
                 <button className="primary" disabled={busy || c.problems.length === 0} onClick={() => setControlRun({ id: official.id, action: "start-now" })}>
-                  ▶ Start contest now ({length})
+                  Start contest now ({length})
                 </button>
                 <button type="button" onClick={copyLobbyLink}>Copy lobby link</button>
               </div>
@@ -726,7 +726,7 @@ function RunMonitor({ run: r, problems, onChanged, holdsResults }: { run: Run; p
         {r.submissions_paused && <Badge tone="warn">Submissions paused</Badge>}
         {r.final_standings_released_at && <Badge tone="ok">Final standings released</Badge>}
         <span className="spacer" />
-        {phase.phase === "upcoming" && r.kind === "OFFICIAL" && <button className="primary" onClick={() => setControl("start-now")}>▶ Start now</button>}
+        {phase.phase === "upcoming" && r.kind === "OFFICIAL" && <button className="primary" onClick={() => setControl("start-now")}>Start now</button>}
         {phase.phase !== "ended" && (r.submissions_paused ? <button onClick={() => setControl("resume")}>Resume submissions</button> : phase.phase === "live" && <button className="danger" onClick={() => setControl("pause")}>Pause submissions</button>)}
         {phase.phase !== "ended" && <button onClick={() => setControl("extend")}>+10 min</button>}
         {phase.phase === "live" && r.kind === "OFFICIAL" && <button className="danger" onClick={() => setControl("end-now")}>End now</button>}

@@ -1,20 +1,22 @@
 import { navigate, useAuth, useData } from "../../app";
-import JudgingSettings from "./JudgingSettings";
-import Dashboard from "./Dashboard";
-import ProblemWizard from "./ProblemWizard";
-import ProblemImport from "./ProblemImport";
-import ContestWizard from "./ContestWizard";
-import { ContestDetail, ContestList } from "./Contests";
-import { ProblemEditor, ProblemList } from "./Problems";
-import { Audit, Languages, UserDetail, Users } from "./Platform";
-import { TeamDetail, Teams } from "./Teams";
-import PracticeSet from "./PracticeSet";
-import DuelProblems from "./DuelProblems";
+import { AdminIcon, type AdminIconName } from "../../components/AdminIcons";
+import { FullscreenAlertBanner, useFullscreenAlerts } from "../../components/FullscreenLog";
+import { AdminMissionDetail, AdminMissionList } from "./AdminMissions";
 import Analytics from "./Analytics";
 import Benchmark from "./Benchmark";
-import { FullscreenAlertBanner, useFullscreenAlerts } from "../../components/FullscreenLog";
+import { ContestDetail, ContestList } from "./Contests";
+import ContestWizard from "./ContestWizard";
+import Dashboard from "./Dashboard";
+import DuelProblems from "./DuelProblems";
+import JudgingSettings from "./JudgingSettings";
+import { Audit, Languages, UserDetail, Users } from "./Platform";
+import PracticeSet from "./PracticeSet";
+import ProblemImport from "./ProblemImport";
+import { ProblemEditor, ProblemList } from "./Problems";
+import ProblemWizard from "./ProblemWizard";
+import { TeamDetail, Teams } from "./Teams";
 
-type Item = { key: string; label: string; icon: string; count?: number; alert?: boolean };
+type Item = { key: string; label: string; icon: AdminIconName; count?: number; alert?: boolean };
 
 export default function Admin({ parts }: { parts: string[] }) {
   const { superAdmin, organizer, setter } = useAuth();
@@ -24,26 +26,44 @@ export default function Admin({ parts }: { parts: string[] }) {
   const review = (problems.data ?? []).filter((p) => p.status === "READY_FOR_REVIEW").length;
   const alerts = useFullscreenAlerts(organizer);
   const warning = (alerts.data?.count ?? 0) > 0;
+
   const groups: { title: string; items: (Item | false)[] }[] = [
-    { title: "Run", items: [
-      { key: "overview", label: "Overview", icon: "◉" },
-      organizer && { key: "contests", label: "Contests", icon: "⚑", count: warning ? alerts.data?.count : live || undefined, alert: warning },
-      organizer && { key: "analytics", label: "Analytics", icon: "▤" },
-    ] },
-    { title: "Build", items: [
-      setter && { key: "problems", label: "Problem library", icon: "✎", count: review || undefined },
-      organizer && { key: "practice", label: "Public Problem Set", icon: "★" },
-      organizer && { key: "duel-problems", label: "Duel problems", icon: "⚔" },
-    ] },
-    { title: "System", items: [
-      superAdmin && { key: "judging", label: "Judges & capacity", icon: "⚙" },
-      superAdmin && { key: "benchmark", label: "Benchmark", icon: "⏱" },
-      superAdmin && { key: "languages", label: "Languages", icon: "{}" },
-      superAdmin && { key: "users", label: "Users", icon: "☺" },
-      superAdmin && { key: "teams", label: "Teams", icon: "⚐" },
-      superAdmin && { key: "audit", label: "Audit log", icon: "≡" },
-    ] },
+    {
+      title: "Run",
+      items: [
+        { key: "overview", label: "Overview", icon: "overview" },
+        organizer && {
+          key: "contests",
+          label: "Contests",
+          icon: "contests",
+          count: warning ? alerts.data?.count : live || undefined,
+          alert: warning,
+        },
+        organizer && { key: "analytics", label: "Analytics", icon: "analytics" },
+      ],
+    },
+    {
+      title: "Build",
+      items: [
+        setter && { key: "problems", label: "Problem Bank", icon: "bank", count: review || undefined },
+        organizer && { key: "practice", label: "Practice & TDs", icon: "practice" },
+        organizer && { key: "missions", label: "Missions", icon: "missions" },
+        organizer && { key: "duel-problems", label: "Duel Pool", icon: "duels" },
+      ],
+    },
+    {
+      title: "System",
+      items: [
+        superAdmin && { key: "judging", label: "Judges & capacity", icon: "judging" },
+        superAdmin && { key: "benchmark", label: "Benchmark", icon: "benchmark" },
+        superAdmin && { key: "languages", label: "Languages", icon: "languages" },
+        superAdmin && { key: "users", label: "Users", icon: "users" },
+        superAdmin && { key: "teams", label: "Teams", icon: "teams" },
+        superAdmin && { key: "audit", label: "Audit log", icon: "audit" },
+      ],
+    },
   ];
+
   const current = parts[0] ?? "overview";
   let page;
   if (current === "overview") page = <Dashboard />;
@@ -56,6 +76,8 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "problems") page = <ProblemList />;
   else if (current === "analytics" && organizer) page = <Analytics />;
   else if (current === "practice" && organizer) page = <PracticeSet />;
+  else if (current === "missions" && organizer && parts[1]) page = <AdminMissionDetail key={parts[1]} slug={parts[1]} />;
+  else if (current === "missions" && organizer) page = <AdminMissionList />;
   else if (current === "duel-problems" && organizer && parts[1] === "import") page = <ProblemImport duel />;
   else if (current === "duel-problems" && organizer) page = <DuelProblems />;
   else if (current === "judging" && superAdmin) page = <JudgingSettings />;
@@ -67,6 +89,7 @@ export default function Admin({ parts }: { parts: string[] }) {
   else if (current === "teams" && superAdmin) page = <Teams />;
   else if (current === "audit" && superAdmin) page = <Audit />;
   else page = <div className="empty">Choose a section.</div>;
+
   return (
     <div className="admin-shell">
       <nav className="admin-nav" aria-label="Control room">
@@ -77,8 +100,16 @@ export default function Admin({ parts }: { parts: string[] }) {
             <div key={g.title} style={{ display: "contents" }}>
               <div className="group">{g.title}</div>
               {items.map((s) => (
-                <a key={s.key} href={"#/admin/" + s.key} className={(current === s.key ? "active " : "") + (s.alert ? "nav-alert" : "")}>
-                  <span className="ico">{s.icon}</span>{s.label}{s.count ? <span className="count">{s.count}</span> : null}
+                <a
+                  key={s.key}
+                  href={"#/admin/" + s.key}
+                  className={(current === s.key ? "active " : "") + (s.alert ? "nav-alert" : "")}
+                >
+                  <span className="ico">
+                    <AdminIcon name={s.icon} />
+                  </span>
+                  <span>{s.label}</span>
+                  {s.count ? <span className="count">{s.count}</span> : null}
                 </a>
               ))}
             </div>
@@ -86,9 +117,26 @@ export default function Admin({ parts }: { parts: string[] }) {
         })}
         <div className="group">Create</div>
         <div className="quick">
-          {organizer && <button className="primary small" onClick={() => navigate("/admin/contests/new")}>+ New contest</button>}
-          {setter && <button className="small" onClick={() => navigate("/admin/problems/new")}>+ New problem</button>}
-          {superAdmin && <button className="small" onClick={() => navigate("/admin/users/import")}>+ Import users</button>}
+          {organizer && (
+            <button className="primary small" onClick={() => navigate("/admin/contests/new")}>
+              <AdminIcon name="plus" size={13} /> New contest
+            </button>
+          )}
+          {setter && (
+            <button className="small" onClick={() => navigate("/admin/problems/import")}>
+              <AdminIcon name="upload" size={13} /> Bulk import
+            </button>
+          )}
+          {setter && (
+            <button className="small" onClick={() => navigate("/admin/problems/new")}>
+              <AdminIcon name="plus" size={13} /> New problem
+            </button>
+          )}
+          {superAdmin && (
+            <button className="small" onClick={() => navigate("/admin/users/import")}>
+              <AdminIcon name="users" size={13} /> Import users
+            </button>
+          )}
         </div>
       </nav>
       <main className="admin-main">

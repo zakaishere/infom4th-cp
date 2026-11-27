@@ -5,6 +5,7 @@ import "./refresh.css";
 import "./practice.css";
 import "./profile.css";
 import "./duel.css";
+import "./admin.css";
 import { AuthProvider, ToastProvider, keepServerClockSynced, navigate, useAuth, useRoute, useTheme } from "./app";
 import { logout, syncServerClock } from "./api";
 import { Loading } from "./ui";

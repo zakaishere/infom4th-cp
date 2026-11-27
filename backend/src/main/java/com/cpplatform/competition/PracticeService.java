@@ -56,11 +56,11 @@ public class PracticeService {
         return rows.get(0);
     }
 
-    /** Organizer view: every publication (hidden ones too) and approved problems not yet published. */
+    /** Organizer view: every practice/TD publication (excluding mission-only exercises) and approved problems not yet published. */
     public Map<String,Object> manage(Actor actor) {
         access.organizer(actor);
         var published=plain(db.jdbc.queryForList(RESULTS+"SELECT "+COLUMNS+"FROM practice_publications pp JOIN problem_versions v ON v.id=pp.problem_version_id "
-                +"JOIN problems p ON p.id=pp.problem_id ORDER BY pp.published_at DESC",actor.id()));
+                +"JOIN problems p ON p.id=pp.problem_id WHERE p.archived_at IS NULL AND NOT EXISTS(SELECT 1 FROM mission_problems mp WHERE mp.problem_id=pp.problem_id) ORDER BY pp.published_at DESC",actor.id()));
         var candidates=db.jdbc.queryForList("SELECT p.id AS problem_id,p.contest_flag,v.id AS version_id,v.title,p.slug,v.difficulty,v.status,v.version_number FROM problem_versions v JOIN problems p ON p.id=v.problem_id "
                 +"WHERE v.status IN ('APPROVED','PUBLISHED') AND p.archived_at IS NULL AND NOT EXISTS(SELECT 1 FROM practice_publications pp WHERE pp.problem_version_id=v.id) ORDER BY v.created_at DESC LIMIT 500");
         return Map.of("published",published,"candidates",candidates,"tags",allTags());

@@ -1,0 +1,472 @@
+/* ======================================================================
+   Admin Control Room: desktop-first tables, toolbars, modals & surfaces.
+   Strict row heights, zero emoji icons, zero overlapping controls.
+   ====================================================================== */
+
+.admin-nav a .ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.admin-nav a.active .ico {
+  color: var(--primary);
+}
+.admin-nav .quick button {
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  height: 32px;
+  padding: 0 0.65rem;
+}
+
+/* Scope & surface filter tabs */
+.scope-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.scope-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  height: 38px;
+  padding: 0 0.75rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.scope-tab:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: var(--fg);
+}
+.scope-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--primary);
+  font-weight: 700;
+}
+.scope-tab .tab-count {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  font-weight: 600;
+  padding: 0.05rem 0.38rem;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  line-height: 1.3;
+}
+.scope-tab.active .tab-count {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--line));
+  color: var(--fg);
+}
+
+/* Uniform 34px desktop toolbar */
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 0.85rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.admin-toolbar input.toolbar-search {
+  flex: 1 1 210px;
+  min-width: 180px;
+  max-width: 300px;
+  height: 34px;
+  padding: 0 0.65rem;
+  font-size: 0.85rem;
+}
+.admin-toolbar select {
+  width: auto;
+  min-width: 130px;
+  max-width: 210px;
+  height: 34px;
+  padding: 0 0.55rem;
+  font-size: 0.84rem;
+}
+.admin-toolbar button,
+.admin-toolbar .btn {
+  height: 34px;
+  padding: 0 0.7rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.seg-group {
+  display: inline-flex;
+  align-items: stretch;
+  height: 34px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+.seg-group button {
+  height: 100%;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 0 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.seg-group button:last-child {
+  border-right: 0;
+}
+.seg-group button:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--card-2);
+}
+.seg-group button.active {
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+
+/* Active collection banner when filtering by a collection */
+.collection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.85rem;
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--line));
+  font-size: 0.85rem;
+}
+
+/* Table card & integrated bulk action bar (never overlaps rows) */
+.table-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 0;
+}
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.85rem;
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  border-bottom: 2px solid var(--primary);
+}
+.bulk-bar .bulk-left,
+.bulk-bar .bulk-right {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.bulk-bar button,
+.bulk-bar .btn {
+  height: 30px;
+  padding: 0 0.65rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* Crisp, uniform-height desktop admin table */
+table.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 820px;
+}
+@media (min-width: 1120px) {
+  table.admin-table {
+    table-layout: fixed;
+    min-width: 0;
+  }
+}
+table.admin-table th {
+  height: 38px;
+  padding: 0 0.75rem;
+  vertical-align: middle;
+  white-space: nowrap;
+  background: var(--card-2);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+table.admin-table td {
+  height: 52px;
+  padding: 0.42rem 0.75rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+table.admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+table.admin-table tbody tr.row-selected td {
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+}
+table.admin-table tbody tr.row-clickable {
+  cursor: pointer;
+}
+
+/* Single-line problem cell with clean secondary line (fixed row height) */
+.cell-primary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cell-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+a.cell-title:hover {
+  color: var(--primary);
+  text-decoration: none;
+}
+.cell-secondary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  margin-top: 0.14rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.cell-slug {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 185px;
+  flex-shrink: 1;
+}
+.collection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 19px;
+  padding: 0 0.42rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 145px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topic-mini {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 0.4rem;
+  font-size: 0.69rem;
+  font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  color: var(--fg);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Placement / surface pills */
+.surface-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.surface-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--fg);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.surface-pill.private {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+.surface-pill.practice {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--line));
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  color: var(--accent);
+}
+:root[data-theme="dark"] .surface-pill.practice {
+  color: var(--primary);
+}
+.surface-pill.td {
+  border-color: color-mix(in srgb, var(--secondary) 55%, var(--line));
+  background: color-mix(in srgb, var(--secondary) 13%, var(--card));
+}
+.surface-pill.mission {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  background: color-mix(in srgb, var(--warn) 13%, var(--card));
+  color: var(--warn);
+}
+.surface-pill.duel {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--line));
+  background: color-mix(in srgb, var(--ok) 13%, var(--card));
+  color: var(--ok);
+}
+.surface-pill.contest {
+  border-color: var(--border);
+  background: var(--card-2);
+}
+
+/* Compact row actions */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.32rem;
+  flex-wrap: nowrap;
+}
+.row-actions button,
+.row-actions .btn {
+  height: 28px;
+  padding: 0 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Modals: Assign, Collections, Student Preview */
+.modal-backdrop .modal.modal-lg {
+  width: min(720px, 100%);
+}
+.modal-backdrop .modal.modal-xl {
+  width: min(860px, 100%);
+}
+.dest-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+@media (max-width: 640px) {
+  .dest-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.dest-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  text-align: left;
+  font-weight: 500;
+  cursor: pointer;
+}
+.dest-tile:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--card-2);
+}
+.dest-tile.active {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--card));
+}
+.dest-tile .dest-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+.dest-tile .dest-sub {
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+/* Two-column desktop layout for Bulk Import setup */
+.import-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.15fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .import-setup-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.file-drop-box {
+  border: 1px dashed var(--border);
+  background: var(--bg);
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* Student preview layout inside modal */
+.preview-meta-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+.collection-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  max-height: 280px;
+  overflow: auto;
+}
+.collection-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.48rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+.collection-row:last-child {
+  border-bottom: 0;
+}

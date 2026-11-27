@@ -60,4 +60,26 @@ public class LaboratoryController {
         var ids=((List<?>)body.get("ids")).stream().map(Api::uuid).toList();
         return Map.of("updated",lab.moveToFolder(Actor.of(auth),ids,body.get("folder")));
     }
+    @GetMapping("/collections")
+    Object collections(Authentication auth){return Map.of("collections",lab.collections(Actor.of(auth)));}
+    @PostMapping("/collections")
+    Object createCollection(Authentication auth,@RequestBody Map<String,Object> body){return Map.of("name",lab.createCollection(Actor.of(auth),body.get("name")));}
+    @PatchMapping("/collections")
+    Object renameCollection(Authentication auth,@RequestBody Map<String,Object> body){return Map.of("name",lab.renameCollection(Actor.of(auth),body.get("from"),body.get("to")));}
+    @PostMapping("/collections/delete")
+    Object deleteCollection(Authentication auth,@RequestBody Map<String,Object> body){return Map.of("cleared",lab.deleteCollection(Actor.of(auth),body.get("name")));}
+    @PostMapping("/assign")
+    Object assign(Authentication auth,@RequestBody Map<String,Object> body){return lab.assign(Actor.of(auth),body);}
+    @PostMapping("/bulk-approve")
+    Object bulkApprove(Authentication auth,@RequestBody Map<String,Object> body) {
+        Api.require(body.get("versionIds") instanceof List<?> l && !l.isEmpty() && l.size()<=500,HttpStatus.BAD_REQUEST,"Send 1-500 problem version IDs");
+        var ids=((List<?>)body.get("versionIds")).stream().map(Api::uuid).toList();
+        return Map.of("approved",lab.bulkApprove(Actor.of(auth),ids,Api.optional(body,"reason",null,2000)));
+    }
+    @PostMapping("/bulk-tags")
+    Object bulkTags(Authentication auth,@RequestBody Map<String,Object> body) {
+        Api.require(body.get("ids") instanceof List<?> l && !l.isEmpty() && l.size()<=500,HttpStatus.BAD_REQUEST,"Send 1-500 problem IDs");
+        var ids=((List<?>)body.get("ids")).stream().map(Api::uuid).toList();
+        return Map.of("updated",lab.bulkTags(Actor.of(auth),ids,body.get("tags"),Boolean.TRUE.equals(body.get("append"))));
+    }
 }

@@ -1,401 +1,727 @@
 import { useEffect, useMemo, useState } from "react";
-import { post, put, patch } from "../../api";
-import { navigate, useAction, useAuth, useData } from "../../app";
-import { Badge, CodeEditor, Empty, ErrorBox, Field, FlagBadge, LANGUAGE_NAMES, Loading, Markdown, ReasonDialog, VERDICTS, formatProblemFlag, queueProblemsForContest, when } from "../../ui";
-import { DifficultyPill } from "../Practice";
-import { topicLabel } from "../../lib/topics";
+import { patch, post, put } from "../../api";
+import { navigate, useAction, useAuth, useData, useRoute } from "../../app";
+import { AdminIcon } from "../../components/AdminIcons";
 import { LanguagePicker } from "../../components/LanguagePicker";
-import { SignatureEditor } from "../../components/SignatureEditor";
 import { templateFor } from "../../components/Problem";
+import { SignatureEditor } from "../../components/SignatureEditor";
 import { EMPTY_SIGNATURE, FUNCTION_LANGUAGES, describe, parseSignature, type Signature } from "../../lib/functionMode";
+import { topicLabel } from "../../lib/topics";
+import {
+  Badge,
+  CodeEditor,
+  Empty,
+  ErrorBox,
+  Field,
+  LANGUAGE_NAMES,
+  Loading,
+  Markdown,
+  ReasonDialog,
+  VERDICTS,
+  when,
+} from "../../ui";
+import { DifficultyPill } from "../Practice";
+import {
+  AssignModal,
+  BulkTagsModal,
+  CollectionsModal,
+  ProblemPreviewModal,
+  isUnassigned,
+  type AssignSurface,
+  type BankRow,
+} from "./ProblemModals";
 
-const STATUS_TONE: Record<string, string> = { DRAFT: "neutral", IN_TESTING: "info", READY_FOR_REVIEW: "warn", APPROVED: "ok", PUBLISHED: "ok", ARCHIVED: "neutral" };
+const STATUS_TONE: Record<string, string> = {
+  DRAFT: "neutral",
+  IN_TESTING: "info",
+  READY_FOR_REVIEW: "warn",
+  APPROVED: "ok",
+  PUBLISHED: "ok",
+  ARCHIVED: "neutral",
+};
+
 const DIFF_RANK: Record<string, number> = { EASY: 1, MEDIUM: 2, HARD: 3 };
 
-type LabRow = { id: string; slug: string; version_id: string; title: string; version_number: number; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; tags?: string[]; contest_flag?: string | null; folder?: string | null; in_problem_set?: boolean; deleted_at: string | null };
+type ScopeView =
+  | "ALL"
+  | "PRIVATE"
+  | "PRACTICE"
+  | "TD"
+  | "MISSION"
+  | "DUEL"
+  | "CONTEST"
+  | "REVIEW"
+  | "DELETED";
 
-function matchesFolder(problemFolder: string | null | undefined, selected: string) {
+function matchesCollection(problemFolder: string | null | undefined, selected: string) {
   if (!selected) return true;
-  if (selected === "__UNFILED__") return !problemFolder;
+  if (selected === "__UNCOLLECTED__") return !problemFolder;
   if (!problemFolder) return false;
   return problemFolder === selected || problemFolder.startsWith(selected + "/");
 }
 
-function buildFolderTree(paths: string[]) {
-  const set = new Set<string>();
-  for (const p of paths) {
-    const segs = p.split("/").filter(Boolean);
-    for (let i = 1; i <= segs.length; i++) set.add(segs.slice(0, i).join("/"));
+function statusBadge(row: BankRow) {
+  if (row.deleted_at) return <Badge>Deleted</Badge>;
+  if (row.validation_status === "FAILED" || row.validation_status === "JUDGE_ERROR") {
+    return <Badge tone="bad">Check failed</Badge>;
   }
-  return [...set].sort((a, b) => a.localeCompare(b)).map((full) => {
-    const segs = full.split("/");
-    return { full, name: segs[segs.length - 1], depth: segs.length - 1 };
-  });
+  if (row.status === "APPROVED" || row.status === "PUBLISHED") return <Badge tone="ok">Ready</Badge>;
+  if (row.status === "READY_FOR_REVIEW") return <Badge tone="warn">Review</Badge>;
+  if (row.status === "IN_TESTING") return <Badge tone="info">Testing</Badge>;
+  return <Badge tone="neutral">Draft</Badge>;
+}
+
+function PlacementPills({ row }: { row: BankRow }) {
+  const pills: { key: string; cls: string; text: string; tip?: string }[] = [];
+  if (row.in_problem_set) pills.push({ key: "prac", cls: "practice", text: "Practice", tip: "Public Practice Set" });
+  if (row.td_number != null) pills.push({ key: "td", cls: "td", text: `TD ${row.td_number}`, tip: `Academic TD ${row.td_number}` });
+  if (row.mission_slug) {
+    pills.push({
+      key: "mis",
+      cls: "mission",
+      text: `TP: ${row.mission_title || row.mission_slug}`,
+      tip: `Mission: ${row.mission_title || row.mission_slug}`,
+    });
+  }
+  if (row.in_duel_pool) pills.push({ key: "duel", cls: "duel", text: "Duels", tip: "Private Duel Pool" });
+  if ((row.contest_count ?? 0) > 0) {
+    pills.push({
+      key: "con",
+      cls: "contest",
+      text: row.contest_count === 1 ? "1 Contest" : `${row.contest_count} Contests`,
+      tip: row.contest_titles ? `Contests: ${row.contest_titles}` : undefined,
+    });
+  }
+
+  if (pills.length === 0) {
+    return (
+      <div className="surface-pills">
+        <span className="surface-pill private" title="Private in Problem Bank — not visible to students">
+          Private
+        </span>
+      </div>
+    );
+  }
+
+  const fullTip = pills.map((p) => p.tip || p.text).join(" · ");
+  const shown = pills.slice(0, 2);
+  const overflow = pills.length - shown.length;
+
+  return (
+    <div className="surface-pills" title={fullTip}>
+      {shown.map((p) => (
+        <span key={p.key} className={"surface-pill " + p.cls}>
+          {p.text}
+        </span>
+      ))}
+      {overflow > 0 && <span className="surface-pill">+{overflow}</span>}
+    </div>
+  );
 }
 
 export function ProblemList() {
   const { organizer } = useAuth();
-  const [showDeleted, setShowDeleted] = useState(false);
-  const list = useData<LabRow[]>("/api/lab/problems" + (showDeleted ? "?deleted=true" : ""));
-  const [filter, setFilter] = useState("");
+  const { query } = useRoute();
+  const initialCollection = query.get("collection") ?? "";
+
+  const [scope, setScope] = useState<ScopeView>("ALL");
+  const showDeleted = scope === "DELETED";
+
+  const list = useData<BankRow[]>("/api/lab/problems" + (showDeleted ? "?deleted=true" : ""));
+  const collectionsData = useData<{ collections: { name: string; problem_count: number }[] }>("/api/lab/problems/collections");
+
+  const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState<"" | "EASY" | "MEDIUM" | "HARD">("");
-  const [flagFilter, setFlagFilter] = useState("");
-  const [folderFilter, setFolderFilter] = useState("");
-  const [extraFolders, setExtraFolders] = useState<string[]>(["Warmup/Week 1", "Warmup/Week 2", "Basic", "Contests"]);
-  const [newFolderInput, setNewFolderInput] = useState("");
-  const [moveTarget, setMoveTarget] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<"" | "PRIVATE" | "PUBLIC_SET">("");
-  const [statusFilter, setStatusFilter] = useState<"" | "READY_CONTEST" | "REVIEW" | "DRAFT">("");
+  const [collectionFilter, setCollectionFilter] = useState(initialCollection);
+  const [statusFilter, setStatusFilter] = useState<"" | "READY" | "REVIEW" | "DRAFT">("");
   const [sort, setSort] = useState<"newest" | "easiest" | "hardest" | "title">("newest");
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [customFlag, setCustomFlag] = useState("");
-  const [target, setTarget] = useState<{ row: LabRow; action: "delete" | "restore" } | null>(null);
+  const [assignState, setAssignState] = useState<{ rows: BankRow[]; surface?: AssignSurface } | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [collectionsOpen, setCollectionsOpen] = useState(false);
+  const [tagsTarget, setTagsTarget] = useState<BankRow[] | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ row: BankRow; action: "delete" | "restore" } | null>(null);
+
   const { busy, run } = useAction();
 
+  useEffect(() => {
+    const param = query.get("collection");
+    if (param !== null) setCollectionFilter(param);
+  }, [query]);
+
   const all = list.data ?? [];
-  const allFlags = useMemo(() => {
-    const custom = new Set<string>();
-    for (const p of all) if (p.contest_flag && !["BASIC", "WARMUP", "STANDARD"].includes(p.contest_flag)) custom.add(p.contest_flag);
-    return ["BASIC", "WARMUP", "STANDARD", ...[...custom].sort()];
-  }, [all]);
+  const collections = collectionsData.data?.collections ?? [];
 
-  const folderTree = useMemo(() => {
-    const paths = [...extraFolders, ...all.map((p) => p.folder).filter((x): x is string => Boolean(x))];
-    return buildFolderTree(paths);
-  }, [all, extraFolders]);
-
-  // Direct child folders of the currently open folder (desktop-style drill-down).
-  const currentChildren = useMemo(() => {
-    if (folderFilter === "__UNFILED__") return [];
-    const targetDepth = folderFilter ? folderFilter.split("/").length : 0;
-    const prefix = folderFilter ? folderFilter + "/" : "";
-    return folderTree.filter((node) => node.depth === targetDepth && (!prefix || node.full.startsWith(prefix)));
-  }, [folderTree, folderFilter]);
-
-  const crumbs = folderFilter && folderFilter !== "__UNFILED__" ? folderFilter.split("/") : [];
-  const goUp = () => {
-    if (!folderFilter || folderFilter === "__UNFILED__") { setFolderFilter(""); return; }
-    const parts = folderFilter.split("/");
-    parts.pop();
-    setFolderFilter(parts.join("/"));
-  };
+  const counts = useMemo(() => {
+    if (showDeleted) {
+      return { all: 0, priv: 0, practice: 0, td: 0, mission: 0, duel: 0, contest: 0, review: 0, uncollected: 0 };
+    }
+    return {
+      all: all.length,
+      priv: all.filter(isUnassigned).length,
+      practice: all.filter((p) => p.in_problem_set).length,
+      td: all.filter((p) => p.td_number != null).length,
+      mission: all.filter((p) => Boolean(p.mission_slug)).length,
+      duel: all.filter((p) => p.in_duel_pool).length,
+      contest: all.filter((p) => (p.contest_count ?? 0) > 0).length,
+      review: all.filter((p) => p.status === "READY_FOR_REVIEW").length,
+      uncollected: all.filter((p) => !p.folder).length,
+    };
+  }, [all, showDeleted]);
 
   const rows = useMemo(() => {
-    const q = filter.trim().toLowerCase();
+    const q = search.trim().toLowerCase();
     const filtered = all.filter((p) => {
-      if (q && !(p.title + " " + p.slug + " " + (p.tags ?? []).join(" ") + " " + (p.contest_flag ?? "") + " " + (p.folder ?? "")).toLowerCase().includes(q)) return false;
+      if (!showDeleted) {
+        if (scope === "PRIVATE" && !isUnassigned(p)) return false;
+        if (scope === "PRACTICE" && !p.in_problem_set) return false;
+        if (scope === "TD" && p.td_number == null) return false;
+        if (scope === "MISSION" && !p.mission_slug) return false;
+        if (scope === "DUEL" && !p.in_duel_pool) return false;
+        if (scope === "CONTEST" && !(p.contest_count && p.contest_count > 0)) return false;
+        if (scope === "REVIEW" && p.status !== "READY_FOR_REVIEW") return false;
+        if (!matchesCollection(p.folder, collectionFilter)) return false;
+        if (statusFilter === "READY" && !["APPROVED", "PUBLISHED"].includes(p.status)) return false;
+        if (statusFilter === "REVIEW" && p.status !== "READY_FOR_REVIEW") return false;
+        if (statusFilter === "DRAFT" && !["DRAFT", "IN_TESTING"].includes(p.status)) return false;
+      }
       if (difficulty && (p.difficulty ?? "MEDIUM") !== difficulty) return false;
-      if (flagFilter === "__NONE__" && p.contest_flag) return false;
-      if (flagFilter && flagFilter !== "__NONE__" && p.contest_flag !== flagFilter) return false;
-      if (!matchesFolder(p.folder, folderFilter)) return false;
-      if (scopeFilter === "PRIVATE" && p.in_problem_set) return false;
-      if (scopeFilter === "PUBLIC_SET" && !p.in_problem_set) return false;
-      if (statusFilter === "READY_CONTEST" && !["APPROVED", "PUBLISHED"].includes(p.status)) return false;
-      if (statusFilter === "REVIEW" && p.status !== "READY_FOR_REVIEW") return false;
-      if (statusFilter === "DRAFT" && !["DRAFT", "IN_TESTING"].includes(p.status)) return false;
+      if (q) {
+        const hay = [
+          p.title,
+          p.slug,
+          p.folder ?? "",
+          p.mission_title ?? "",
+          p.contest_titles ?? "",
+          ...(p.tags ?? []),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-    if (sort === "easiest") return [...filtered].sort((a, b) => (DIFF_RANK[a.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_RANK[b.difficulty ?? "MEDIUM"] ?? 2) || a.title.localeCompare(b.title));
-    if (sort === "hardest") return [...filtered].sort((a, b) => (DIFF_RANK[b.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_RANK[a.difficulty ?? "MEDIUM"] ?? 2) || a.title.localeCompare(b.title));
+
+    if (sort === "easiest") {
+      return [...filtered].sort(
+        (a, b) =>
+          (DIFF_RANK[a.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_RANK[b.difficulty ?? "MEDIUM"] ?? 2) ||
+          a.title.localeCompare(b.title),
+      );
+    }
+    if (sort === "hardest") {
+      return [...filtered].sort(
+        (a, b) =>
+          (DIFF_RANK[b.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_RANK[a.difficulty ?? "MEDIUM"] ?? 2) ||
+          a.title.localeCompare(b.title),
+      );
+    }
     if (sort === "title") return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
     return filtered;
-  }, [all, filter, difficulty, flagFilter, folderFilter, scopeFilter, statusFilter, sort]);
+  }, [all, showDeleted, scope, collectionFilter, statusFilter, difficulty, search, sort]);
 
-  const flagProblems = (ids: string[], flag: string | null) =>
-    run(async () => {
-      await post("/api/lab/problems/flag", { ids, flag });
-      list.reload();
-    }, flag ? `Flagged as ${formatProblemFlag(flag)}` : "Flag cleared");
+  const toggleOne = (versionId: string) =>
+    setSelected((old) => {
+      const next = new Set(old);
+      if (next.has(versionId)) next.delete(versionId);
+      else next.add(versionId);
+      return next;
+    });
 
-  const moveProblems = (ids: string[], folder: string | null) =>
-    run(async () => {
-      await post("/api/lab/problems/move", { ids, folder });
-      if (folder) setExtraFolders((old) => (old.includes(folder) ? old : [...old, folder]));
-      list.reload();
-    }, folder ? `Moved to ${folder}` : "Removed from folder");
-
-  const publishSelectedToProblemSet = () =>
-    run(async () => {
-      for (const p of selectedApproved.filter((x) => !x.in_problem_set)) {
-        await post("/api/lab/problems/" + p.version_id + "/publish-practice");
-      }
-      setSelected(new Set());
-      list.reload();
-    }, "Published selected problems to Public Problem Set");
-
-  const toggleOne = (versionId: string) => setSelected((old) => {
-    const next = new Set(old);
-    if (next.has(versionId)) next.delete(versionId);
-    else next.add(versionId);
-    return next;
-  });
   const allShownSelected = rows.length > 0 && rows.every((p) => selected.has(p.version_id));
-  const toggleAllShown = () => setSelected((old) => {
-    const next = new Set(old);
-    if (allShownSelected) rows.forEach((p) => next.delete(p.version_id));
-    else rows.forEach((p) => next.add(p.version_id));
-    return next;
-  });
+  const toggleAllShown = () =>
+    setSelected((old) => {
+      const next = new Set(old);
+      if (allShownSelected) rows.forEach((p) => next.delete(p.version_id));
+      else rows.forEach((p) => next.add(p.version_id));
+      return next;
+    });
 
-  const selectedRows = all.filter((p) => selected.has(p.version_id));
-  const selectedApproved = selectedRows.filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
-  const selectedPrivateApproved = selectedApproved.filter((p) => !p.in_problem_set);
-  const shownApproved = rows.filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
-  const hasFilters = Boolean(filter || difficulty || flagFilter || folderFilter || scopeFilter || statusFilter);
+  const selectedRows = useMemo(() => all.filter((p) => selected.has(p.version_id)), [all, selected]);
+  const selectedReviewReady = useMemo(
+    () => selectedRows.filter((p) => p.status === "READY_FOR_REVIEW" && p.validation_status === "PASSED"),
+    [selectedRows],
+  );
 
-  const launchContestFrom = (items: LabRow[]) => {
-    if (!items.length) return;
-    const uniqueFlags = [...new Set(items.map((p) => p.contest_flag).filter(Boolean))];
-    const kind = uniqueFlags.length === 1 && (uniqueFlags[0] === "BASIC" || uniqueFlags[0] === "WARMUP" || uniqueFlags[0] === "STANDARD")
-      ? uniqueFlags[0]
-      : folderFilter.toLowerCase().startsWith("warmup") ? "WARMUP"
-      : folderFilter.toLowerCase().startsWith("basic") ? "BASIC"
-      : undefined;
-    queueProblemsForContest(items.map((p) => p.version_id), kind);
-    navigate("/admin/contests/new");
+  const reloadAll = () => {
+    void list.reload();
+    void collectionsData.reload();
   };
 
-  const privateCount = all.filter((p) => !p.in_problem_set).length;
-  const publicCount = all.filter((p) => p.in_problem_set).length;
-  const unfiledCount = all.filter((p) => !p.folder).length;
+  const approveSelected = () =>
+    run(async () => {
+      await post("/api/lab/problems/bulk-approve", {
+        versionIds: selectedReviewReady.map((p) => p.version_id),
+        reason: "Approved from Problem Bank",
+      });
+      setSelected(new Set());
+      reloadAll();
+    }, `Approved ${selectedReviewReady.length} problem${selectedReviewReady.length === 1 ? "" : "s"}`);
+
+  const hasFilters = Boolean(search || difficulty || collectionFilter || statusFilter || (scope !== "ALL" && scope !== "DELETED"));
+
+  const switchScope = (next: ScopeView) => {
+    setScope(next);
+    setSelected(new Set());
+  };
+
+  const tabs: { key: ScopeView; label: string; count?: number }[] = [
+    { key: "ALL", label: "All", count: showDeleted ? undefined : counts.all },
+    { key: "PRIVATE", label: "Private", count: showDeleted ? undefined : counts.priv },
+    { key: "PRACTICE", label: "Practice", count: showDeleted ? undefined : counts.practice },
+    { key: "TD", label: "TDs", count: showDeleted ? undefined : counts.td },
+    { key: "MISSION", label: "Missions", count: showDeleted ? undefined : counts.mission },
+    { key: "DUEL", label: "Duel Pool", count: showDeleted ? undefined : counts.duel },
+    { key: "CONTEST", label: "In Contests", count: showDeleted ? undefined : counts.contest },
+    { key: "REVIEW", label: "Needs Review", count: showDeleted ? undefined : counts.review },
+    { key: "DELETED", label: "Deleted" },
+  ];
 
   return (
-    <div className="stack" style={{ gap: "1.25rem" }}>
+    <div className="stack" style={{ gap: "1rem" }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><div className="eyebrow">Master vault</div><h1>{showDeleted ? "Deleted problems" : "Problem library"}</h1>
-          <p>{showDeleted ? "Restore a problem to use it again. Contest history and submissions were never removed."
-            : "Organize all your problems in nested folders (Warmup/Week 1, Basic, Contests…), move problems in bulk, and launch contests from any folder."}</p></div>
-        <div className="row">
-          <button className="ghost" onClick={() => { setShowDeleted(!showDeleted); setSelected(new Set()); }}>{showDeleted ? "← Back to library" : "🗑 Show deleted"}</button>
-          {!showDeleted && <><button onClick={() => navigate("/admin/problems/import")}>Bulk import</button><button className="primary" onClick={() => navigate("/admin/problems/new")}>+ New problem</button></>}
+        <div>
+          <div className="eyebrow">Build</div>
+          <h1>Problem Bank</h1>
+          <p>
+            One central vault for every problem. Import privately, organize into collections, and assign to Practice, TDs, Missions, Duels, or Contests.
+          </p>
+        </div>
+        <div className="row" style={{ gap: "0.5rem" }}>
+          <button onClick={() => navigate("/admin/problems/import")}>
+            <AdminIcon name="upload" /> Bulk import
+          </button>
+          <button className="primary" onClick={() => navigate("/admin/problems/new")}>
+            <AdminIcon name="plus" /> New problem
+          </button>
         </div>
       </div>
 
-      {!showDeleted && (
-        <section className="card folder-browser" aria-label="Library folders">
-          {/* Top row: Breadcrumb / Back + Scope tabs + New folder in current location */}
-          <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
-            <div className="folder-crumbs">
-              {folderFilter && (
-                <button type="button" className="small ghost" onClick={goUp} title="Go up one folder">← Back</button>
-              )}
-              <button type="button" className={"crumb" + (!folderFilter && !scopeFilter ? " current" : "")}
-                onClick={() => { setFolderFilter(""); setScopeFilter(""); }}>
-                📚 Library
-              </button>
-              {folderFilter === "__UNFILED__" && (
-                <><span className="muted">/</span><span className="crumb current">Unfiled</span></>
-              )}
-              {crumbs.map((seg, i) => {
-                const pathTo = crumbs.slice(0, i + 1).join("/");
-                const isLast = i === crumbs.length - 1;
-                return (
-                  <span key={pathTo} className="row" style={{ gap: "0.25rem" }}>
-                    <span className="muted">/</span>
-                    <button type="button" className={"crumb" + (isLast ? " current" : "")}
-                      onClick={() => { setFolderFilter(pathTo); setScopeFilter(""); }}>
-                      {seg}
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
+      <div className="scope-tabs" role="tablist" aria-label="Problem views">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={scope === t.key}
+            className={"scope-tab" + (scope === t.key ? " active" : "")}
+            onClick={() => switchScope(t.key)}
+          >
+            {t.label}
+            {t.count !== undefined && <span className="tab-count">{t.count}</span>}
+          </button>
+        ))}
+      </div>
 
-            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-              <div className="filters">
-                <button type="button" className={!scopeFilter && folderFilter !== "__UNFILED__" ? "active" : ""}
-                  onClick={() => { setScopeFilter(""); if (folderFilter === "__UNFILED__") setFolderFilter(""); }}>All ({all.length})</button>
-                <button type="button" className={scopeFilter === "PUBLIC_SET" ? "active" : ""}
-                  onClick={() => { setScopeFilter("PUBLIC_SET"); setFolderFilter(""); }}>Public Set ({publicCount})</button>
-                <button type="button" className={scopeFilter === "PRIVATE" ? "active" : ""}
-                  onClick={() => { setScopeFilter("PRIVATE"); setFolderFilter(""); }}>Private ({privateCount})</button>
-                <button type="button" className={folderFilter === "__UNFILED__" ? "active" : ""}
-                  onClick={() => { setFolderFilter("__UNFILED__"); setScopeFilter(""); }}>Unfiled ({unfiledCount})</button>
-              </div>
-              {organizer && folderFilter !== "__UNFILED__" && (
-                <form className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }} onSubmit={(e) => {
-                  e.preventDefault();
-                  const clean = newFolderInput.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-                  if (!clean) return;
-                  const full = folderFilter ? `${folderFilter}/${clean}` : clean;
-                  setExtraFolders((old) => (old.includes(full) ? old : [...old, full]));
-                  setFolderFilter(full);
-                  setScopeFilter("");
-                  setNewFolderInput("");
-                }}>
-                  <input placeholder={folderFilter ? `+ Subfolder in ${crumbs[crumbs.length - 1]}` : "+ New folder"}
-                    value={newFolderInput} onChange={(e) => setNewFolderInput(e.target.value)}
-                    style={{ width: 185, padding: "0.3rem 0.55rem", fontSize: "0.84rem" }} />
-                  <button className="small" type="submit" disabled={!newFolderInput.trim()}>Create</button>
-                </form>
-              )}
-            </div>
-          </div>
+      <div className="admin-toolbar">
+        <input
+          className="toolbar-search"
+          placeholder="Search title, slug, topic, or collection…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
 
-          {/* Direct child folders only (click to open like desktop folders) */}
-          {!scopeFilter && currentChildren.length > 0 && (
-            <div className="folder-grid">
-              {currentChildren.map((node) => {
-                const count = all.filter((p) => matchesFolder(p.folder, node.full)).length;
-                const subCount = folderTree.filter((n) => n.depth === node.depth + 1 && n.full.startsWith(node.full + "/")).length;
-                return (
-                  <button key={node.full} type="button" className="folder-tile"
-                    onClick={() => { setFolderFilter(node.full); setScopeFilter(""); }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="fname">📁 {node.name}</div>
-                      <div className="fmeta">{subCount > 0 ? `${subCount} subfolder${subCount === 1 ? "" : "s"}` : "Folder"}</div>
-                    </div>
-                    <span className="fcount">{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {organizer && folderFilter && folderFilter !== "__UNFILED__" && shownApproved.length > 0 && (
-            <div className="row-between" style={{ paddingTop: "0.25rem", borderTop: "1px solid var(--line)" }}>
-              <span className="small muted">Showing problems inside <strong>{folderFilter}</strong></span>
-              <button type="button" className="primary small" onClick={() => launchContestFrom(shownApproved)}>
-                → Create contest from “{crumbs[crumbs.length - 1]}” ({shownApproved.length})
-              </button>
-            </div>
-          )}
-        </section>
-      )}
-
-      <div className="practice-filters" style={{ marginBottom: 0 }}>
-        <input className="search" placeholder="Search title, slug, topic, flag, or folder…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <div className="filters">
-          {([["", "All"], ["EASY", "Easy"], ["MEDIUM", "Medium"], ["HARD", "Hard"]] as const).map(([v, label]) => (
-            <button key={v || "all"} className={difficulty === v ? "active" : ""} onClick={() => setDifficulty(v)}>{label}</button>
-          ))}
-        </div>
         {!showDeleted && (
           <>
-            <select value={flagFilter} onChange={(e) => setFlagFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by contest flag">
-              <option value="">All flags</option>
-              {allFlags.map((fl) => <option key={fl} value={fl}>Flag: {formatProblemFlag(fl)}</option>)}
-              <option value="__NONE__">Unflagged</option>
+            <select
+              value={collectionFilter}
+              onChange={(e) => setCollectionFilter(e.target.value)}
+              aria-label="Filter by collection"
+            >
+              <option value="">All collections</option>
+              <option value="__UNCOLLECTED__">Uncollected ({counts.uncollected})</option>
+              {collections.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name} ({c.problem_count})
+                </option>
+              ))}
             </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} style={{ width: "auto" }} aria-label="Filter by status">
-              <option value="">All statuses</option>
-              <option value="READY_CONTEST">Contest-ready</option>
-              <option value="REVIEW">Ready for review</option>
-              <option value="DRAFT">Draft / Testing</option>
-            </select>
+            {organizer && (
+              <button type="button" onClick={() => setCollectionsOpen(true)} title="Create, rename, or delete collections">
+                <AdminIcon name="folder" /> Collections
+              </button>
+            )}
           </>
         )}
-        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={{ width: "auto" }} aria-label="Sort problems">
+
+        <div className="seg-group" role="group" aria-label="Difficulty filter">
+          {([
+            ["", "All"],
+            ["EASY", "Easy"],
+            ["MEDIUM", "Med"],
+            ["HARD", "Hard"],
+          ] as const).map(([val, lbl]) => (
+            <button
+              key={val || "all"}
+              type="button"
+              className={difficulty === val ? "active" : ""}
+              onClick={() => setDifficulty(val)}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+
+        {!showDeleted && (
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            aria-label="Filter by readiness"
+          >
+            <option value="">All states</option>
+            <option value="READY">Ready to assign</option>
+            <option value="REVIEW">Needs review</option>
+            <option value="DRAFT">Draft / Testing</option>
+          </select>
+        )}
+
+        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort order">
           <option value="newest">Newest first</option>
           <option value="easiest">Easiest first</option>
           <option value="hardest">Hardest first</option>
           <option value="title">Title A–Z</option>
         </select>
-        {hasFilters && <button className="ghost small" onClick={() => { setFilter(""); setDifficulty(""); setFlagFilter(""); setFolderFilter(""); setScopeFilter(""); setStatusFilter(""); }}>Clear</button>}
+
+        {hasFilters && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setSearch("");
+              setDifficulty("");
+              setCollectionFilter("");
+              setStatusFilter("");
+              if (scope !== "DELETED") setScope("ALL");
+            }}
+          >
+            Reset
+          </button>
+        )}
       </div>
 
-      {!showDeleted && organizer && selectedRows.length > 0 && (
-        <div className="notice stack" style={{ gap: "0.6rem" }}>
-          <div className="row-between" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
-            <div className="row" style={{ gap: "0.45rem" }}>
-              <strong>{selectedRows.length} selected</strong>
-              <span className="small muted">📁 Move to:</span>
-              <input list="library-move-folders" placeholder="e.g. Warmup/Week 1" value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)} style={{ width: 180 }} />
-              <datalist id="library-move-folders">{folderTree.map((n) => <option key={n.full} value={n.full} />)}</datalist>
-              <button className="small primary" disabled={busy || !moveTarget.trim()} onClick={() => { void moveProblems(selectedRows.map((p) => p.id), moveTarget.trim()); setMoveTarget(""); }}>Move</button>
-              <button className="small ghost" disabled={busy} onClick={() => moveProblems(selectedRows.map((p) => p.id), null)}>Unfile</button>
-            </div>
-            <div className="row" style={{ gap: "0.5rem" }}>
-              {selectedPrivateApproved.length > 0 && (
-                <button className="small" disabled={busy} onClick={publishSelectedToProblemSet}>
-                  + Publish {selectedPrivateApproved.length} to Problem Set
-                </button>
-              )}
-              <button className="primary small" disabled={selectedApproved.length === 0} onClick={() => launchContestFrom(selectedApproved)}>
-                → Create contest ({selectedApproved.length})
-              </button>
-              <button className="ghost small" onClick={() => setSelected(new Set())}>Deselect</button>
-            </div>
+      {!showDeleted && collectionFilter && collectionFilter !== "__UNCOLLECTED__" && (
+        <div className="collection-bar">
+          <div className="row" style={{ gap: "0.5rem" }}>
+            <AdminIcon name="folder" />
+            <span>
+              Collection: <strong>{collectionFilter}</strong> ({rows.length} shown)
+            </span>
           </div>
           <div className="row" style={{ gap: "0.45rem" }}>
-            <span className="small muted">Flag as:</span>
-            <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "BASIC")}>Basic</button>
-            <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "WARMUP")}>Warmup</button>
-            <button className="small" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), "STANDARD")}>Contest</button>
-            <input placeholder="Custom flag…" maxLength={32} value={customFlag} onChange={(e) => setCustomFlag(e.target.value)} style={{ width: 120 }}
-              onKeyDown={(e) => { if (e.key === "Enter" && customFlag.trim()) { e.preventDefault(); void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); } }} />
-            {customFlag.trim() && <button className="small" disabled={busy} onClick={() => { void flagProblems(selectedRows.map((p) => p.id), customFlag.trim()); setCustomFlag(""); }}>Apply</button>}
-            <button className="small ghost" disabled={busy} onClick={() => flagProblems(selectedRows.map((p) => p.id), null)}>Clear flag</button>
+            {organizer && rows.length > 0 && (
+              <button
+                type="button"
+                className="primary small"
+                onClick={() => setAssignState({ rows, surface: "CONTEST" })}
+              >
+                Assign collection ({rows.length})…
+              </button>
+            )}
+            <button type="button" className="small" onClick={() => setCollectionFilter("")}>
+              Clear collection filter
+            </button>
           </div>
         </div>
       )}
 
       <ErrorBox error={list.error} />
-      {list.loading ? <Loading /> : !rows.length ? <Empty>{showDeleted ? "No deleted problems." : hasFilters ? "No problem in this folder / filter yet." : "No problems yet."}</Empty> : (
-        <div className="card table-wrap" style={{ padding: 0 }}>
-          <table className="library-table">
-            <thead><tr>
-              {!showDeleted && organizer && <th style={{ width: 38 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" /></th>}
-              <th>Problem</th>
-              <th style={{ width: 110 }}>Difficulty</th>
-              {!showDeleted && <th style={{ width: 130 }}>Visibility</th>}
-              <th style={{ width: 120 }}>Status</th>
-              <th style={{ width: 140 }} className="right">Actions</th>
-            </tr></thead>
-            <tbody>{rows.map((p) => (
-              <tr key={p.version_id} onClick={() => !showDeleted && organizer && toggleOne(p.version_id)} style={{ cursor: !showDeleted && organizer ? "pointer" : "default" }}>
-                {!showDeleted && organizer && (
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selected.has(p.version_id)} onChange={() => toggleOne(p.version_id)} aria-label={"Select " + p.title} />
-                  </td>
+
+      {list.loading ? (
+        <Loading />
+      ) : rows.length === 0 ? (
+        <Empty>
+          {showDeleted
+            ? "No deleted problems."
+            : hasFilters
+            ? "No problems match the current filters."
+            : "Your Problem Bank is empty. Bulk import a bank file or create a new problem to get started."}
+        </Empty>
+      ) : (
+        <section className="table-card">
+          {!showDeleted && organizer && selectedRows.length > 0 && (
+            <div className="bulk-bar">
+              <div className="bulk-left">
+                <strong>{selectedRows.length} selected</strong>
+                <button type="button" className="ghost" onClick={() => setSelected(new Set())}>
+                  Clear selection
+                </button>
+              </div>
+              <div className="bulk-right">
+                {selectedReviewReady.length > 0 && (
+                  <button type="button" disabled={busy} onClick={() => void approveSelected()}>
+                    <AdminIcon name="check" /> Approve ({selectedReviewReady.length})
+                  </button>
                 )}
-                <td>
-                  <div className="lib-title-row">
-                    <strong>{p.title}</strong>
-                    {p.folder && <span className="tag" style={{ fontSize: "0.75rem" }}>📁 {p.folder}</span>}
-                    {p.contest_flag && <FlagBadge flag={p.contest_flag} />}
-                  </div>
-                  <div className="lib-sub-row">
-                    <span className="small muted mono">{p.slug} · v{p.version_number}</span>
-                    {(p.tags?.length ?? 0) > 0 && p.tags!.map((t) => <span key={t} className="tag-chip small">{topicLabel(t)}</span>)}
-                  </div>
-                </td>
-                <td><DifficultyPill value={p.difficulty ?? "MEDIUM"} /></td>
-                {!showDeleted && (
-                  <td>{p.in_problem_set ? <Badge tone="ok">Public Set</Badge> : <Badge tone="neutral">Private</Badge>}</td>
-                )}
-                <td>{showDeleted ? <Badge>Deleted {p.deleted_at ? when(p.deleted_at) : ""}</Badge> : <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>}</td>
-                <td className="right" onClick={(e) => e.stopPropagation()}>
-                  <div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap", gap: "0.4rem" }}>
-                    {showDeleted ? <button className="small primary" onClick={() => setTarget({ row: p, action: "restore" })}>Restore</button> : <>
-                      <a className="btn small" href={"#/admin/problems/" + p.version_id}>Open</a>
-                      <button className="small danger" onClick={() => setTarget({ row: p, action: "delete" })} title="Delete this problem">Delete</button>
-                    </>}
-                  </div>
-                </td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+                <button type="button" disabled={busy} onClick={() => setTagsTarget(selectedRows)}>
+                  Topics…
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setAssignState({ rows: selectedRows, surface: "COLLECTION" })}
+                >
+                  <AdminIcon name="folder" /> Collection…
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => setAssignState({ rows: selectedRows, surface: "PRACTICE" })}
+                >
+                  Assign to… ({selectedRows.length})
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  {!showDeleted && organizer && (
+                    <th style={{ width: 40 }}>
+                      <input
+                        type="checkbox"
+                        checked={allShownSelected}
+                        onChange={toggleAllShown}
+                        aria-label="Select all visible problems"
+                      />
+                    </th>
+                  )}
+                  <th>Problem</th>
+                  <th style={{ width: 98 }}>Level</th>
+                  <th style={{ width: 112 }}>State</th>
+                  {!showDeleted && <th style={{ width: 225 }}>Assigned to</th>}
+                  <th style={{ width: showDeleted ? 120 : 210 }} className="right">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((p) => {
+                  const isSel = selected.has(p.version_id);
+                  const topics = p.tags ?? [];
+                  return (
+                    <tr
+                      key={p.version_id}
+                      className={
+                        (isSel ? "row-selected " : "") + (!showDeleted && organizer ? "row-clickable" : "")
+                      }
+                      onClick={() => !showDeleted && organizer && toggleOne(p.version_id)}
+                    >
+                      {!showDeleted && organizer && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSel}
+                            onChange={() => toggleOne(p.version_id)}
+                            aria-label={"Select " + p.title}
+                          />
+                        </td>
+                      )}
+                      <td>
+                        <div className="cell-primary">
+                          <a
+                            href={"#/admin/problems/" + p.version_id}
+                            className="cell-title"
+                            title={p.title}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {p.title}
+                          </a>
+                          {p.folder && (
+                            <button
+                              type="button"
+                              className="collection-pill"
+                              title={"Filter by collection: " + p.folder}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCollectionFilter(p.folder ?? "");
+                              }}
+                            >
+                              {p.folder}
+                            </button>
+                          )}
+                        </div>
+                        <div className="cell-secondary">
+                          <span className="cell-slug">
+                            {p.slug} · v{p.version_number}
+                          </span>
+                          {topics.slice(0, 2).map((t) => (
+                            <span key={t} className="topic-mini">
+                              {topicLabel(t)}
+                            </span>
+                          ))}
+                          {topics.length > 2 && (
+                            <span className="topic-mini" title={topics.map(topicLabel).join(", ")}>
+                              +{topics.length - 2}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <DifficultyPill value={p.difficulty ?? "MEDIUM"} />
+                      </td>
+                      <td>{statusBadge(p)}</td>
+                      {!showDeleted && (
+                        <td>
+                          <PlacementPills row={p} />
+                        </td>
+                      )}
+                      <td className="right" onClick={(e) => e.stopPropagation()}>
+                        <div className="row-actions">
+                          {showDeleted ? (
+                            <button
+                              type="button"
+                              className="primary"
+                              onClick={() => setDeleteTarget({ row: p, action: "restore" })}
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <>
+                              {organizer && (
+                                <button
+                                  type="button"
+                                  className="primary"
+                                  onClick={() => setAssignState({ rows: [p], surface: "PRACTICE" })}
+                                >
+                                  Assign
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setPreviewId(p.version_id)}
+                                title="Preview as student"
+                              >
+                                Preview
+                              </button>
+                              <a className="btn" href={"#/admin/problems/" + p.version_id}>
+                                Edit
+                              </a>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => setDeleteTarget({ row: p, action: "delete" })}
+                                title="Delete problem"
+                              >
+                                <AdminIcon name="trash" size={13} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
-      <span className="small muted">Showing {rows.length} of {all.length} problems. Click any row (or checkbox) to select problems for moving to a folder, flagging, publishing, or creating a contest.</span>
-      {target && (
-        <ReasonDialog title={(target.action === "delete" ? "Delete “" : "Restore “") + target.row.title + "”"} confirm={target.action === "delete" ? "Delete problem" : "Restore"}
-          danger={target.action === "delete"} onClose={() => setTarget(null)}
-          description={target.action === "delete"
-            ? "The problem (all its versions) leaves the Problem lab, the contest wizard and Problem Set. Finished contests, scoreboards and submissions keep it, so nothing breaks. You can restore it later from “Show deleted”. A problem used by a contest that has not finished cannot be deleted."
-            : "The problem comes back to the Problem lab. If it was in Problem Set, show it again from the Problem Set page."}
-          onSubmit={(reason) => run(async () => { await post("/api/lab/problems/" + target.row.version_id + "/" + target.action, { reason }); setTarget(null); list.reload(); },
-            target.action === "delete" ? "Problem deleted" : "Problem restored")} />
+
+      <div className="row-between small muted">
+        <span>
+          Showing {rows.length} of {all.length} problem{all.length === 1 ? "" : "s"}.
+        </span>
+        {!showDeleted && organizer && (
+          <span>Select one or more rows to bulk-assign to Practice, TDs, Missions, Duel Pool, Contests, or Collections.</span>
+        )}
+      </div>
+
+      {assignState && (
+        <AssignModal
+          problems={assignState.rows}
+          initialSurface={assignState.surface}
+          onClose={() => setAssignState(null)}
+          onDone={() => {
+            setSelected(new Set());
+            reloadAll();
+          }}
+        />
+      )}
+
+      {previewId && (
+        <ProblemPreviewModal
+          versionId={previewId}
+          onClose={() => setPreviewId(null)}
+          onAssign={
+            organizer
+              ? () => {
+                  const found = all.find((x) => x.version_id === previewId);
+                  if (found) setAssignState({ rows: [found], surface: "PRACTICE" });
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {collectionsOpen && (
+        <CollectionsModal
+          onChanged={reloadAll}
+          onSelectCollection={(name) => setCollectionFilter(name)}
+          onClose={() => setCollectionsOpen(false)}
+        />
+      )}
+
+      {tagsTarget && (
+        <BulkTagsModal
+          problems={tagsTarget}
+          onDone={() => {
+            setSelected(new Set());
+            reloadAll();
+          }}
+          onClose={() => setTagsTarget(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <ReasonDialog
+          title={(deleteTarget.action === "delete" ? "Delete “" : "Restore “") + deleteTarget.row.title + "”"}
+          confirm={deleteTarget.action === "delete" ? "Delete problem" : "Restore"}
+          danger={deleteTarget.action === "delete"}
+          onClose={() => setDeleteTarget(null)}
+          description={
+            deleteTarget.action === "delete"
+              ? "Hides the problem from Practice, TDs, Missions, and Duels and moves it to Deleted. Finished contest standings and past submissions stay intact."
+              : "Restores the problem back into your Private Problem Bank. You can re-assign it to any surface afterwards."
+          }
+          onSubmit={(reason) =>
+            run(
+              async () => {
+                await post("/api/lab/problems/" + deleteTarget.row.version_id + "/" + deleteTarget.action, { reason });
+                setDeleteTarget(null);
+                reloadAll();
+              },
+              deleteTarget.action === "delete" ? "Problem deleted" : "Problem restored",
+            )
+          }
+        />
       )}
     </div>
   );
 }
 
 type Version = {
-  id: string; problem_id: string; title: string; status: string; version_number: number; sealed_at: string | null; difficulty: string; checker: string;
-  statement_md: string; input_format_md: string; output_format_md: string; constraints_md: string; explanation_md: string; setter_notes: string;
-  time_limit_ms: number; memory_limit_mb: number; output_limit_kb: number; function_signature: string | null;
+  id: string;
+  problem_id: string;
+  title: string;
+  status: string;
+  version_number: number;
+  sealed_at: string | null;
+  difficulty: string;
+  checker: string;
+  statement_md: string;
+  input_format_md: string;
+  output_format_md: string;
+  constraints_md: string;
+  explanation_md: string;
+  setter_notes: string;
+  time_limit_ms: number;
+  memory_limit_mb: number;
+  output_limit_kb: number;
+  function_signature: string | null;
   tests: { id: string; input_data: string; expected_output: string; is_sample: boolean }[];
   references: { id: string; label: string; language_code: string; expected_verdict: string; source_code: string }[];
   validations: { id: string; status: string; report: string; created_at: string; completed_at: string | null }[];
@@ -403,78 +729,240 @@ type Version = {
 };
 
 export function ProblemEditor({ versionId }: { versionId: string }) {
+  const { organizer } = useAuth();
   const v = useData<Version>("/api/lab/problems/" + versionId, 0);
+  const bankList = useData<BankRow[]>(organizer ? "/api/lab/problems" : null);
   const [tab, setTab] = useState<"statement" | "tests" | "references" | "validation">("statement");
   const { busy, run } = useAction();
   const [approving, setApproving] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   const validating = v.data?.validations[0]?.status === "PENDING" || v.data?.validations[0]?.status === "RUNNING";
   const reload = v.reload;
+
   useEffect(() => {
     if (!validating) return;
     const timer = setInterval(reload, 3000);
     return () => clearInterval(timer);
   }, [validating, reload]);
+
   if (v.loading) return <Loading />;
   if (!v.data) return <ErrorBox error={v.error} />;
-  const p = v.data, sealed = Boolean(p.sealed_at);
+
+  const p = v.data;
+  const sealed = Boolean(p.sealed_at);
+  const bankRow = (bankList.data ?? []).find((x) => x.version_id === p.id);
+
   return (
     <div className="stack" style={{ gap: "1.25rem" }}>
-      <a href="#/admin/problems" className="small">← Problems</a>
+      <div>
+        <a href="#/admin/problems" className="btn small ghost" style={{ paddingLeft: 0 }}>
+          <AdminIcon name="arrowLeft" /> Back to Problem Bank
+        </a>
+      </div>
+
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <div><h1>{p.title} <span className="muted">v{p.version_number}</span></h1>
-          <div className="row"><Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>{sealed && <Badge>Sealed (immutable)</Badge>}<span className="small muted mono">{p.id}</span></div></div>
-        <div className="row">
-          {sealed && <button disabled={busy} onClick={() => run(async () => { const r = await post("/api/lab/problems/" + p.id + "/clone"); navigate("/admin/problems/" + r.versionId); }, "New editable version created")}>Clone to edit</button>}
-          {!sealed && <button className="primary" disabled={busy} onClick={() => run(async () => { await post("/api/lab/problems/" + p.id + "/validate"); setTab("validation"); await v.reload(); }, "Validation queued on the internal judge lane")}>Seal & validate</button>}
-          {p.status === "READY_FOR_REVIEW" && <button className="primary" onClick={() => setApproving(true)}>Approve…</button>}
-          {p.status === "APPROVED" && <button disabled={busy} onClick={() => run(async () => { await post("/api/lab/problems/" + p.id + "/publish-practice"); await v.reload(); }, "Published to Problem Set")}>Publish to Problem Set</button>}
+        <div>
+          <h1>
+            {p.title} <span className="muted">v{p.version_number}</span>
+          </h1>
+          <div className="row" style={{ gap: "0.5rem" }}>
+            <Badge tone={STATUS_TONE[p.status]}>{p.status.replace(/_/g, " ")}</Badge>
+            {sealed && <Badge>Sealed (immutable)</Badge>}
+            {bankRow && <PlacementPills row={bankRow} />}
+          </div>
+        </div>
+        <div className="row" style={{ gap: "0.5rem" }}>
+          <button type="button" onClick={() => setPreviewOpen(true)}>
+            <AdminIcon name="eye" /> Preview
+          </button>
+          {sealed && (
+            <button
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  const r = await post<{ versionId: string }>("/api/lab/problems/" + p.id + "/clone");
+                  navigate("/admin/problems/" + r.versionId);
+                }, "New editable version created")
+              }
+            >
+              Clone to edit
+            </button>
+          )}
+          {!sealed && (
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  await post("/api/lab/problems/" + p.id + "/validate");
+                  setTab("validation");
+                  await v.reload();
+                }, "Validation queued on the internal judge lane")
+              }
+            >
+              Seal & validate
+            </button>
+          )}
+          {p.status === "READY_FOR_REVIEW" && (
+            <button className="primary" onClick={() => setApproving(true)}>
+              Approve…
+            </button>
+          )}
+          {organizer && bankRow && (
+            <button className="primary" onClick={() => setAssignOpen(true)}>
+              Assign…
+            </button>
+          )}
         </div>
       </div>
+
       <div className="tabs">
-        {(["statement", "tests", "references", "validation"] as const).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}
+        {(["statement", "tests", "references", "validation"] as const).map((t) => (
+          <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+            {t[0].toUpperCase() + t.slice(1)}
+          </button>
+        ))}
       </div>
+
       {tab === "statement" && <StatementForm p={p} sealed={sealed} onSaved={v.reload} />}
       {tab === "tests" && <TestsForm p={p} sealed={sealed} onSaved={v.reload} />}
       {tab === "references" && <References p={p} sealed={sealed} onSaved={v.reload} />}
       {tab === "validation" && (
         <div className="stack">
-          {p.validations.length === 0 ? <Empty>Not validated yet. Validation runs every reference solution against every test in the real sandbox.</Empty> : p.validations.map((r) => (
-            <div key={r.id} className="card">
-              <div className="row-between"><Badge tone={r.status === "PASSED" ? "ok" : r.status === "FAILED" || r.status === "JUDGE_ERROR" ? "bad" : "info"}>{r.status}</Badge><span className="small muted">{when(r.created_at)}</span></div>
-              {r.report && r.report !== "{}" && <pre className="card-flat small" style={{ marginTop: "0.75rem" }}>{JSON.stringify(JSON.parse(r.report), null, 2)}</pre>}
-            </div>
-          ))}
+          {p.validations.length === 0 ? (
+            <Empty>Not validated yet. Validation runs every reference solution against every test in the real sandbox.</Empty>
+          ) : (
+            p.validations.map((r) => (
+              <div key={r.id} className="card">
+                <div className="row-between">
+                  <Badge
+                    tone={
+                      r.status === "PASSED"
+                        ? "ok"
+                        : r.status === "FAILED" || r.status === "JUDGE_ERROR"
+                        ? "bad"
+                        : "info"
+                    }
+                  >
+                    {r.status}
+                  </Badge>
+                  <span className="small muted">{when(r.created_at)}</span>
+                </div>
+                {r.report && r.report !== "{}" && (
+                  <pre className="card-flat small" style={{ marginTop: "0.75rem" }}>
+                    {JSON.stringify(JSON.parse(r.report), null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))
+          )}
         </div>
       )}
-      {approving && <ReasonDialog title="Approve problem version" confirm="Approve" onClose={() => setApproving(false)}
-        onSubmit={(reason) => run(async () => { await post("/api/lab/problems/" + p.id + "/approve", { reason }); setApproving(false); await v.reload(); }, "Approved")} />}
+
+      {approving && (
+        <ReasonDialog
+          title="Approve problem version"
+          confirm="Approve"
+          onClose={() => setApproving(false)}
+          onSubmit={(reason) =>
+            run(async () => {
+              await post("/api/lab/problems/" + p.id + "/approve", { reason });
+              setApproving(false);
+              await Promise.all([v.reload(), bankList.reload()]);
+            }, "Approved")
+          }
+        />
+      )}
+
+      {previewOpen && (
+        <ProblemPreviewModal
+          versionId={p.id}
+          onClose={() => setPreviewOpen(false)}
+          onAssign={organizer && bankRow ? () => setAssignOpen(true) : undefined}
+        />
+      )}
+
+      {assignOpen && bankRow && (
+        <AssignModal
+          problems={[bankRow]}
+          onClose={() => setAssignOpen(false)}
+          onDone={() => {
+            void v.reload();
+            void bankList.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function StatementForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSaved: () => void }) {
   const [f, setF] = useState({
-    title: p.title, statement: p.statement_md, inputFormat: p.input_format_md, outputFormat: p.output_format_md, constraints: p.constraints_md,
-    explanation: p.explanation_md, setterNotes: p.setter_notes, difficulty: p.difficulty, checker: p.checker,
-    timeLimitMs: p.time_limit_ms, memoryLimitMb: p.memory_limit_mb, outputLimitKb: p.output_limit_kb, languages: p.languages,
+    title: p.title,
+    statement: p.statement_md,
+    inputFormat: p.input_format_md,
+    outputFormat: p.output_format_md,
+    constraints: p.constraints_md,
+    explanation: p.explanation_md,
+    setterNotes: p.setter_notes,
+    difficulty: p.difficulty,
+    checker: p.checker,
+    timeLimitMs: p.time_limit_ms,
+    memoryLimitMb: p.memory_limit_mb,
+    outputLimitKb: p.output_limit_kb,
+    languages: p.languages,
     functionSignature: parseSignature(p.function_signature),
   });
   const signature = f.functionSignature;
   const setSignature = (next: Signature | null) =>
-    setF({ ...f, functionSignature: next, languages: next ? f.languages.filter((l) => FUNCTION_LANGUAGES.includes(l)) : f.languages });
-  const [preview, setPreview] = useState(false);
+    setF({
+      ...f,
+      functionSignature: next,
+      languages: next ? f.languages.filter((l) => FUNCTION_LANGUAGES.includes(l)) : f.languages,
+    });
+  const [preview, setPreview] = useState(true);
   const { busy, run } = useAction();
   const text = (key: keyof typeof f, label: string, rows = 4) => (
-    <Field label={label}><textarea rows={rows} disabled={sealed} value={f[key] as string} onChange={(e) => setF({ ...f, [key]: e.target.value })} /></Field>
+    <Field label={label}>
+      <textarea
+        rows={rows}
+        disabled={sealed}
+        value={f[key] as string}
+        onChange={(e) => setF({ ...f, [key]: e.target.value })}
+      />
+    </Field>
   );
   return (
     <div className="grid grid-2" style={{ alignItems: "start" }}>
-      <form className="card stack" onSubmit={(e) => { e.preventDefault(); run(async () => { await patch("/api/lab/problems/" + p.id, f); onSaved(); }, "Saved"); }}>
-        <Field label="Title"><input disabled={sealed} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
+      <form
+        className="card stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run(async () => {
+            await patch("/api/lab/problems/" + p.id, f);
+            onSaved();
+          }, "Saved");
+        }}
+      >
+        <Field label="Title">
+          <input disabled={sealed} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
+        </Field>
         {text("statement", "Statement (Markdown)", 10)}
-        <Field label="How contestants answer" hint="A function works like LeetCode: contestants complete one function and never read input.">
-          <select disabled={sealed} value={signature ? "FUNCTION" : "STDIO"} onChange={(e) => setSignature(e.target.value === "FUNCTION" ? EMPTY_SIGNATURE : null)}>
-            <option value="STDIO">Full program (standard input and output)</option><option value="FUNCTION">Complete a function (LeetCode style)</option></select></Field>
+        <Field
+          label="How contestants answer"
+          hint="A function works like LeetCode: contestants complete one function and never read input."
+        >
+          <select
+            disabled={sealed}
+            value={signature ? "FUNCTION" : "STDIO"}
+            onChange={(e) => setSignature(e.target.value === "FUNCTION" ? EMPTY_SIGNATURE : null)}
+          >
+            <option value="STDIO">Full program (standard input and output)</option>
+            <option value="FUNCTION">Complete a function (LeetCode style)</option>
+          </select>
+        </Field>
         {signature && <SignatureEditor value={signature} onChange={setSignature} disabled={sealed} />}
         {!signature && text("inputFormat", "Input format")}
         {!signature && text("outputFormat", "Output format")}
@@ -482,51 +970,183 @@ function StatementForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; on
         {text("explanation", "Notes / explanation", 3)}
         {text("setterNotes", "Private setter notes (never shown to contestants)", 3)}
         <div className="grid grid-3">
-          <Field label="Time limit (ms)"><input type="number" min={1} max={60000} disabled={sealed} value={f.timeLimitMs} onChange={(e) => setF({ ...f, timeLimitMs: Number(e.target.value) })} /></Field>
-          <Field label="Memory (MB)" hint="Must fit the worker slot memory."><input type="number" min={16} max={4096} disabled={sealed} value={f.memoryLimitMb} onChange={(e) => setF({ ...f, memoryLimitMb: Number(e.target.value) })} /></Field>
-          <Field label="Output (KB)"><input type="number" min={1} max={65536} disabled={sealed} value={f.outputLimitKb} onChange={(e) => setF({ ...f, outputLimitKb: Number(e.target.value) })} /></Field>
-          <Field label="Checker" hint={signature ? "Not used: function results are compared as values." : undefined}><select disabled={sealed || Boolean(signature)} value={f.checker} onChange={(e) => setF({ ...f, checker: e.target.value })}>
-            <option value="TRIMMED_LINES">Trimmed lines</option><option value="TOKENS">Tokens</option><option value="EXACT">Exact</option></select></Field>
-          <Field label="Difficulty"><select disabled={sealed} value={f.difficulty} onChange={(e) => setF({ ...f, difficulty: e.target.value })}>
-            <option>EASY</option><option>MEDIUM</option><option>HARD</option></select></Field>
+          <Field label="Time limit (ms)">
+            <input
+              type="number"
+              min={1}
+              max={60000}
+              disabled={sealed}
+              value={f.timeLimitMs}
+              onChange={(e) => setF({ ...f, timeLimitMs: Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Memory (MB)" hint="Must fit the worker slot memory.">
+            <input
+              type="number"
+              min={16}
+              max={4096}
+              disabled={sealed}
+              value={f.memoryLimitMb}
+              onChange={(e) => setF({ ...f, memoryLimitMb: Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Output (KB)">
+            <input
+              type="number"
+              min={1}
+              max={65536}
+              disabled={sealed}
+              value={f.outputLimitKb}
+              onChange={(e) => setF({ ...f, outputLimitKb: Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Checker" hint={signature ? "Not used: function results are compared as values." : undefined}>
+            <select
+              disabled={sealed || Boolean(signature)}
+              value={f.checker}
+              onChange={(e) => setF({ ...f, checker: e.target.value })}
+            >
+              <option value="TRIMMED_LINES">Trimmed lines</option>
+              <option value="TOKENS">Tokens</option>
+              <option value="EXACT">Exact</option>
+            </select>
+          </Field>
+          <Field label="Difficulty">
+            <select disabled={sealed} value={f.difficulty} onChange={(e) => setF({ ...f, difficulty: e.target.value })}>
+              <option>EASY</option>
+              <option>MEDIUM</option>
+              <option>HARD</option>
+            </select>
+          </Field>
         </div>
         <Field label="Languages">
-          <LanguagePicker disabled={sealed} value={f.languages} onChange={(languages) => setF({ ...f, languages })} allowed={signature ? FUNCTION_LANGUAGES : undefined} />
+          <LanguagePicker
+            disabled={sealed}
+            value={f.languages}
+            onChange={(languages) => setF({ ...f, languages })}
+            allowed={signature ? FUNCTION_LANGUAGES : undefined}
+          />
         </Field>
-        {!sealed && <div><button className="primary" disabled={busy}>Save draft</button></div>}
+        {!sealed && (
+          <div>
+            <button className="primary" disabled={busy}>
+              Save draft
+            </button>
+          </div>
+        )}
       </form>
       <div className="card">
-        <div className="row-between"><h3>Contestant preview</h3><button className="small" onClick={() => setPreview(!preview)}>{preview ? "Hide" : "Show"}</button></div>
-        {preview && signature && <><h1>{f.title}</h1><Markdown text={f.statement} /><h2>Function</h2><pre>{describe(signature)}</pre></>}
-        {preview && !signature && <><h1>{f.title}</h1><Markdown text={f.statement} /><h2>Input</h2><Markdown text={f.inputFormat} /><h2>Output</h2><Markdown text={f.outputFormat} /></>}
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>Live Markdown preview</h3>
+          <button className="small" onClick={() => setPreview(!preview)}>
+            {preview ? "Hide" : "Show"}
+          </button>
+        </div>
+        {preview && signature && (
+          <div className="statement" style={{ marginTop: "0.75rem" }}>
+            <h2>{f.title}</h2>
+            <Markdown text={f.statement} />
+            <h3>Function</h3>
+            <pre className="card-flat small mono">{describe(signature)}</pre>
+          </div>
+        )}
+        {preview && !signature && (
+          <div className="statement" style={{ marginTop: "0.75rem" }}>
+            <h2>{f.title}</h2>
+            <Markdown text={f.statement} />
+            {f.inputFormat && (
+              <>
+                <h3>Input</h3>
+                <Markdown text={f.inputFormat} />
+              </>
+            )}
+            {f.outputFormat && (
+              <>
+                <h3>Output</h3>
+                <Markdown text={f.outputFormat} />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function TestsForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSaved: () => void }) {
-  const [tests, setTests] = useState(p.tests.map((t) => ({ input: t.input_data, expected: t.expected_output, sample: t.is_sample })));
+  const [tests, setTests] = useState(
+    p.tests.map((t) => ({ input: t.input_data, expected: t.expected_output, sample: t.is_sample })),
+  );
   const { busy, run } = useAction();
-  const update = (i: number, change: Partial<(typeof tests)[number]>) => setTests(tests.map((t, j) => (i === j ? { ...t, ...change } : t)));
+  const update = (i: number, change: Partial<(typeof tests)[number]>) =>
+    setTests(tests.map((t, j) => (i === j ? { ...t, ...change } : t)));
   return (
     <div className="stack">
-      <div className="notice small">Tests replace the whole suite (1-200 tests, 16 MiB total). Mark at least one sample (shown in the statement) and keep at least one hidden test.
-        {p.function_signature && " Function problem: each input has one JSON value per parameter line, and the expected output is the return value as JSON."}</div>
+      <div className="notice small">
+        Tests replace the whole suite (1–200 tests, 16 MiB total). Mark at least one sample (shown in the statement) and keep at least one hidden test.
+        {p.function_signature &&
+          " Function problem: each input has one JSON value per parameter line, and the expected output is the return value as JSON."}
+      </div>
       {tests.map((t, i) => (
         <div key={i} className="card stack">
-          <div className="row-between"><strong>Test {i + 1}</strong>
-            <div className="row"><label className="check small"><input type="checkbox" disabled={sealed} checked={t.sample} onChange={(e) => update(i, { sample: e.target.checked })} />Sample</label>
-              {!sealed && <button className="small danger" onClick={() => setTests(tests.filter((_, j) => j !== i))}>Remove</button>}</div></div>
+          <div className="row-between">
+            <strong>Test {i + 1}</strong>
+            <div className="row">
+              <label className="check small">
+                <input
+                  type="checkbox"
+                  disabled={sealed}
+                  checked={t.sample}
+                  onChange={(e) => update(i, { sample: e.target.checked })}
+                />
+                Sample
+              </label>
+              {!sealed && (
+                <button className="small danger" onClick={() => setTests(tests.filter((_, j) => j !== i))}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
           <div className="grid grid-2">
-            <Field label="Input"><textarea className="mono" rows={4} disabled={sealed} value={t.input} onChange={(e) => update(i, { input: e.target.value })} /></Field>
-            <Field label="Expected output"><textarea className="mono" rows={4} disabled={sealed} value={t.expected} onChange={(e) => update(i, { expected: e.target.value })} /></Field>
+            <Field label="Input">
+              <textarea
+                className="mono"
+                rows={4}
+                disabled={sealed}
+                value={t.input}
+                onChange={(e) => update(i, { input: e.target.value })}
+              />
+            </Field>
+            <Field label="Expected output">
+              <textarea
+                className="mono"
+                rows={4}
+                disabled={sealed}
+                value={t.expected}
+                onChange={(e) => update(i, { expected: e.target.value })}
+              />
+            </Field>
           </div>
         </div>
       ))}
       {!sealed && (
         <div className="row">
-          <button onClick={() => setTests([...tests, { input: "", expected: "", sample: tests.length === 0 }])}>Add test</button>
-          <button className="primary" disabled={busy || tests.length === 0} onClick={() => run(async () => { await put("/api/lab/problems/" + p.id + "/tests", tests); onSaved(); }, "Test suite saved")}>Save suite</button>
+          <button onClick={() => setTests([...tests, { input: "", expected: "", sample: tests.length === 0 }])}>
+            Add test
+          </button>
+          <button
+            className="primary"
+            disabled={busy || tests.length === 0}
+            onClick={() =>
+              run(async () => {
+                await put("/api/lab/problems/" + p.id + "/tests", tests);
+                onSaved();
+              }, "Test suite saved")
+            }
+          >
+            Save suite
+          </button>
         </div>
       )}
     </div>
@@ -535,29 +1155,98 @@ function TestsForm({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSave
 
 function References({ p, sealed, onSaved }: { p: Version; sealed: boolean; onSaved: () => void }) {
   const signature = parseSignature(p.function_signature);
-  const [form, setForm] = useState(() => ({ label: "Main solution", language: p.languages[0] ?? "CPP", expectedVerdict: "ACCEPTED", sourceCode: signature ? templateFor(p.languages[0] ?? "CPP", signature) : "" }));
+  const [form, setForm] = useState(() => ({
+    label: "Main solution",
+    language: p.languages[0] ?? "CPP",
+    expectedVerdict: "ACCEPTED",
+    sourceCode: signature ? templateFor(p.languages[0] ?? "CPP", signature) : "",
+  }));
   const { busy, run } = useAction();
   return (
     <div className="grid grid-2" style={{ alignItems: "start" }}>
       <div className="stack">
-        {p.references.length === 0 ? <Empty>Add at least one reference expected to be accepted.</Empty> : p.references.map((r) => (
-          <div key={r.id} className="card stack">
-            <div className="row-between"><strong>{r.label}</strong><div className="row"><Badge>{LANGUAGE_NAMES[r.language_code]}</Badge><Badge tone={VERDICTS[r.expected_verdict]?.tone}>expects {VERDICTS[r.expected_verdict]?.short}</Badge></div></div>
-            <pre className="card-flat small mono" style={{ maxHeight: 200, overflow: "auto" }}>{r.source_code}</pre>
-          </div>
-        ))}
+        {p.references.length === 0 ? (
+          <Empty>Add at least one reference expected to be accepted.</Empty>
+        ) : (
+          p.references.map((r) => (
+            <div key={r.id} className="card stack">
+              <div className="row-between">
+                <strong>{r.label}</strong>
+                <div className="row">
+                  <Badge>{LANGUAGE_NAMES[r.language_code]}</Badge>
+                  <Badge tone={VERDICTS[r.expected_verdict]?.tone}>
+                    expects {VERDICTS[r.expected_verdict]?.short}
+                  </Badge>
+                </div>
+              </div>
+              <pre className="card-flat small mono" style={{ maxHeight: 200, overflow: "auto" }}>
+                {r.source_code}
+              </pre>
+            </div>
+          ))
+        )}
       </div>
       {!sealed && (
-        <form className="card stack" onSubmit={(e) => { e.preventDefault(); run(async () => { await post("/api/lab/problems/" + p.id + "/references", form); setForm({ ...form, sourceCode: "" }); onSaved(); }, "Reference added"); }}>
+        <form
+          className="card stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(async () => {
+              await post("/api/lab/problems/" + p.id + "/references", form);
+              setForm({ ...form, sourceCode: "" });
+              onSaved();
+            }, "Reference added");
+          }}
+        >
           <h3>Add reference solution</h3>
           <div className="grid grid-3">
-            <Field label="Label"><input required value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
-            <Field label="Language"><select value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value, sourceCode: signature && (!form.sourceCode.trim() || form.sourceCode === templateFor(form.language, signature)) ? templateFor(e.target.value, signature) : form.sourceCode })}>{p.languages.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l]}</option>)}</select></Field>
-            <Field label="Expected verdict"><select value={form.expectedVerdict} onChange={(e) => setForm({ ...form, expectedVerdict: e.target.value })}>
-              {Object.entries(VERDICTS).filter(([k]) => k !== "JUDGE_ERROR").map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
+            <Field label="Label">
+              <input required value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+            </Field>
+            <Field label="Language">
+              <select
+                value={form.language}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    language: e.target.value,
+                    sourceCode:
+                      signature && (!form.sourceCode.trim() || form.sourceCode === templateFor(form.language, signature))
+                        ? templateFor(e.target.value, signature)
+                        : form.sourceCode,
+                  })
+                }
+              >
+                {p.languages.map((l) => (
+                  <option key={l} value={l}>
+                    {LANGUAGE_NAMES[l]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Expected verdict">
+              <select
+                value={form.expectedVerdict}
+                onChange={(e) => setForm({ ...form, expectedVerdict: e.target.value })}
+              >
+                {Object.entries(VERDICTS)
+                  .filter(([k]) => k !== "JUDGE_ERROR")
+                  .map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+              </select>
+            </Field>
           </div>
-          <div style={{ height: 320, display: "flex" }}><CodeEditor value={form.sourceCode} onChange={(s) => setForm({ ...form, sourceCode: s })} language={form.language} /></div>
-          <div><button className="primary" disabled={busy || !form.sourceCode.trim()}>Add reference</button></div>
+          <div style={{ height: 320, display: "flex" }}>
+            <CodeEditor value={form.sourceCode} onChange={(s) => setForm({ ...form, sourceCode: s })} language={form.language} />
+          </div>
+          <div>
+            <button className="primary" disabled={busy || !form.sourceCode.trim()}>
+              Add reference
+            </button>
+          </div>
         </form>
       )}
     </div>

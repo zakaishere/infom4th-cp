@@ -27,7 +27,10 @@ public class LaboratoryService {
             UUID version=(UUID)existing.get(0).get("id");
             access.problemRead(actor,version);
             if(contestFlag!=null) db.jdbc.update("UPDATE problems SET contest_flag=? WHERE id=?",contestFlag,existing.get(0).get("problem_id"));
-            if(folder!=null) db.jdbc.update("UPDATE problems SET folder=? WHERE id=?",folder,existing.get(0).get("problem_id"));
+            if(folder!=null) {
+                ensureCollection(actor.id(),folder);
+                db.jdbc.update("UPDATE problems SET folder=? WHERE id=?",folder,existing.get(0).get("problem_id"));
+            }
             if(tags!=null && tags.length>0) {
                 db.jdbc.update("UPDATE problems SET tags=?::text[] WHERE id=? AND cardinality(tags)=0",tags,existing.get(0).get("problem_id"));
                 db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=? AND cardinality(tags)=0",tags,existing.get(0).get("problem_id"));
@@ -88,7 +91,9 @@ public class LaboratoryService {
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problems WHERE slug=?)",slug),HttpStatus.CONFLICT,
                 "A problem with the short name \""+slug+"\" already exists. Choose another short name, or delete the old problem in the Problem lab.");
         String[] tags=body.containsKey("tags")?normalizeTags(body.get("tags")):new String[0];
-        UUID problem=db.id("INSERT INTO problems(slug,owner_id,contest_flag,folder,tags) VALUES (?,?,?,?,?::text[]) RETURNING id",slug,actor.id(),normalizeFlag(body.get("contestFlag")),normalizeFolder(body.get("folder")),tags);
+        String folder=normalizeFolder(body.get("folder"));
+        if(folder!=null) ensureCollection(actor.id(),folder);
+        UUID problem=db.id("INSERT INTO problems(slug,owner_id,contest_flag,folder,tags) VALUES (?,?,?,?,?::text[]) RETURNING id",slug,actor.id(),normalizeFlag(body.get("contestFlag")),folder,tags);
         UUID version=db.id("INSERT INTO problem_versions(problem_id,version_number,title,created_by) VALUES (?,1,?,?) RETURNING id",
                 problem,Api.text(body,"title",255),actor.id());
         edit(actor,version,body);db.audit(actor.id(),"PROBLEM_CREATE","problem",problem,null);return version;
@@ -274,7 +279,7 @@ public class LaboratoryService {
         Api.require(List.of("APPROVED","PUBLISHED").contains(row.get("status")),HttpStatus.CONFLICT,"Approve the problem first");
         if("APPROVED".equals(row.get("status"))) db.jdbc.update("UPDATE problem_versions SET status='PUBLISHED' WHERE id=?",version);
         db.jdbc.update("INSERT INTO practice_publications(problem_id,problem_version_id,published_by,tags) SELECT ?,?,?,p.tags FROM problems p WHERE p.id=? "
-                +"ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now(),"
+                +"ON CONFLICT(problem_id) DO UPDATE SET problem_version_id=excluded.problem_version_id,published_by=excluded.published_by,published_at=now(),hidden=false,"
                 +"tags=CASE WHEN cardinality(practice_publications.tags)>0 THEN practice_publications.tags ELSE excluded.tags END",row.get("problem_id"),version,actor.id(),row.get("problem_id"));
         db.audit(actor.id(),"PRACTICE_PUBLISH","problem_version",version,null);
     }
@@ -286,8 +291,12 @@ public class LaboratoryService {
         if(!(placement.get("td") instanceof Map<?,?> td))return;
         int number=td.get("number") instanceof Number n?Math.max(1,Math.min(99,n.intValue())):1;
         int position=td.get("position") instanceof Number n?Math.max(0,Math.min(999,n.intValue())):0;
-        var tags=placement.get("tags") instanceof List<?> l?l.stream().map(String::valueOf).limit(8).toArray(String[]::new):new String[0];
-        db.jdbc.update("UPDATE practice_publications SET td_number=?,td_position=?,tags=?::text[] WHERE problem_version_id=?",number,position,tags,version);
+        if(placement.get("tags") instanceof List<?> l) {
+            var tags=l.stream().map(String::valueOf).limit(8).toArray(String[]::new);
+            db.jdbc.update("UPDATE practice_publications SET td_number=?,td_position=?,tags=?::text[] WHERE problem_version_id=?",number,position,tags,version);
+        } else {
+            db.jdbc.update("UPDATE practice_publications SET td_number=?,td_position=? WHERE problem_version_id=?",number,position,version);
+        }
     }
     /** Puts the problem in a mission, creating the mission on first use; an existing mission keeps its title and window. */
     private void placeInMission(UUID version,Map<?,?> mission,Map<String,Object> placement) {
@@ -301,8 +310,11 @@ public class LaboratoryService {
         int position=mission.get("position") instanceof Number n?Math.max(0,Math.min(999,n.intValue())):0;
         double weight=mission.get("weight") instanceof Number n?Math.max(0.01,Math.min(1000,n.doubleValue())):10;
         db.jdbc.update("INSERT INTO mission_problems(mission_id,problem_id,position,weight) VALUES (?,?,?,?) ON CONFLICT(problem_id) DO UPDATE SET mission_id=excluded.mission_id,position=excluded.position,weight=excluded.weight",id,problem,position,weight);
-        var tags=placement.get("tags") instanceof List<?> l?l.stream().map(String::valueOf).limit(8).toArray(String[]::new):new String[0];
-        db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_version_id=?",tags,version);
+        db.jdbc.update("UPDATE practice_publications SET td_number=NULL,td_position=0,hidden=false WHERE problem_id=?",problem);
+        if(placement.get("tags") instanceof List<?> l) {
+            var tags=l.stream().map(String::valueOf).limit(8).toArray(String[]::new);
+            db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_version_id=?",tags,version);
+        }
     }
     /** Adds an approved version to the duel pool, or replaces the problem's version there. Independent of practice. */
     @Transactional
@@ -383,16 +395,278 @@ public class LaboratoryService {
         return joined;
     }
 
-    /** Bulk-moves problems into a library folder (e.g. "Warmup/Week 1"), or unfiles them when folder is null/blank. */
+    private void ensureCollection(UUID userId,String folder) {
+        if(folder==null || folder.isBlank()) return;
+        db.jdbc.update("INSERT INTO problem_collections(name,created_by) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM problem_collections WHERE lower(name)=lower(?))",
+                folder,userId,folder);
+    }
+
+    /** Persisted collections plus any distinct problem folder paths, sorted alphabetically with problem counts. */
+    public List<Map<String,Object>> collections(Actor actor) {
+        access.setter(actor);
+        return db.jdbc.queryForList(
+                "WITH names AS ("
+                +"SELECT name FROM problem_collections "
+                +"UNION "
+                +"SELECT DISTINCT folder AS name FROM problems WHERE folder IS NOT NULL AND NOT system_benchmark AND archived_at IS NULL"
+                +") "
+                +"SELECT n.name,(SELECT count(*) FROM problems p WHERE NOT p.system_benchmark AND p.archived_at IS NULL AND (p.folder=n.name OR p.folder LIKE n.name||'/%')) AS problem_count "
+                +"FROM names n ORDER BY lower(n.name),n.name");
+    }
+
+    @Transactional
+    public String createCollection(Actor actor,Object rawName) {
+        access.organizer(actor);
+        String name=normalizeFolder(rawName);
+        Api.require(name!=null,HttpStatus.BAD_REQUEST,"Enter a collection name");
+        ensureCollection(actor.id(),name);
+        db.audit(actor.id(),"COLLECTION_CREATE","problem",null,name);
+        return name;
+    }
+
+    @Transactional
+    public String renameCollection(Actor actor,Object oldRaw,Object newRaw) {
+        access.organizer(actor);
+        String from=normalizeFolder(oldRaw),to=normalizeFolder(newRaw);
+        Api.require(from!=null && to!=null,HttpStatus.BAD_REQUEST,"Enter both current and new collection names");
+        if(from.equals(to)) return to;
+        db.jdbc.update("DELETE FROM problem_collections WHERE lower(name)=lower(?)",from);
+        ensureCollection(actor.id(),to);
+        int exact=db.jdbc.update("UPDATE problems SET folder=? WHERE NOT system_benchmark AND folder=?",to,from);
+        int nested=db.jdbc.update("UPDATE problems SET folder=?||substring(folder FROM ?) WHERE NOT system_benchmark AND folder LIKE ?",
+                to,from.length()+1,from+"/%");
+        for(var sub:db.jdbc.queryForList("SELECT id,name FROM problem_collections WHERE name LIKE ?",from+"/%")) {
+            String nextSub=to+((String)sub.get("name")).substring(from.length());
+            db.jdbc.update("DELETE FROM problem_collections WHERE id=?",sub.get("id"));
+            ensureCollection(actor.id(),nextSub);
+        }
+        db.audit(actor.id(),"COLLECTION_RENAME","problem",null,from+" -> "+to+" ("+(exact+nested)+" problems)");
+        return to;
+    }
+
+    @Transactional
+    public int deleteCollection(Actor actor,Object rawName) {
+        access.organizer(actor);
+        String name=normalizeFolder(rawName);
+        Api.require(name!=null,HttpStatus.BAD_REQUEST,"Choose a collection to delete");
+        db.jdbc.update("DELETE FROM problem_collections WHERE lower(name)=lower(?) OR lower(name) LIKE lower(?)",name,name+"/%");
+        int cleared=db.jdbc.update("UPDATE problems SET folder=NULL WHERE NOT system_benchmark AND (folder=? OR folder LIKE ?)",name,name+"/%");
+        db.audit(actor.id(),"COLLECTION_DELETE","problem",null,name+" ("+cleared+" problems removed from collection)");
+        return cleared;
+    }
+
+    /** Bulk-moves problems into a library folder/collection, or unfiles them when folder is null/blank. */
     @Transactional
     public int moveToFolder(Actor actor,List<UUID> ids,Object rawFolder) {
         access.organizer(actor);
         String folder=normalizeFolder(rawFolder);
+        if(folder!=null) ensureCollection(actor.id(),folder);
         UUID[] arr=ids.toArray(UUID[]::new);
         int updated=db.jdbc.update("UPDATE problems SET folder=? WHERE NOT system_benchmark AND (id=ANY(?::uuid[]) OR id IN (SELECT problem_id FROM problem_versions WHERE id=ANY(?::uuid[])))",
                 folder,arr,arr);
-        db.audit(actor.id(),"PROBLEM_MOVE","problem",null,(folder==null?"Removed from folder":("Moved to "+folder))+" ("+updated+" problems)");
+        db.audit(actor.id(),"PROBLEM_MOVE","problem",null,(folder==null?"Removed from collection":("Moved to "+folder))+" ("+updated+" problems)");
         return updated;
+    }
+
+    /** Approves every review-ready problem version in the selection that has a passing validation. */
+    @Transactional
+    public int bulkApprove(Actor actor,List<UUID> versionIds,String reason) {
+        access.organizer(actor);
+        String note=(reason==null || reason.isBlank())?"Approved in bulk from Problem Bank":reason.trim();
+        int count=0;
+        for(UUID version:versionIds) {
+            var rows=db.jdbc.queryForList("SELECT v.id,v.status FROM problem_versions v JOIN problems p ON p.id=v.problem_id WHERE v.id=? AND NOT p.system_benchmark AND p.archived_at IS NULL FOR UPDATE",version);
+            if(rows.isEmpty()) continue;
+            if("READY_FOR_REVIEW".equals(rows.get(0).get("status"))
+                    && db.exists("SELECT EXISTS(SELECT 1 FROM problem_validation_results r WHERE r.problem_version_id=? AND r.status='PASSED')",version)) {
+                approve(actor,version,note);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Bulk-updates topic tags on problems (either replacing or merging with existing tags). */
+    @Transactional
+    public int bulkTags(Actor actor,List<UUID> ids,Object rawTags,boolean append) {
+        access.organizer(actor);
+        String[] incoming=normalizeTags(rawTags);
+        UUID[] arr=ids.toArray(UUID[]::new);
+        var problems=db.jdbc.queryForList("SELECT id,tags FROM problems WHERE NOT system_benchmark AND (id=ANY(?::uuid[]) OR id IN (SELECT problem_id FROM problem_versions WHERE id=ANY(?::uuid[]))) FOR UPDATE",arr,arr);
+        for(var p:problems) {
+            UUID pid=(UUID)p.get("id");
+            LinkedHashSet<String> merged=new LinkedHashSet<>();
+            if(append && p.get("tags") instanceof java.sql.Array sqlArr) {
+                try{Collections.addAll(merged,(String[])sqlArr.getArray());}catch(java.sql.SQLException e){throw new IllegalStateException(e);}
+            }
+            for(String t:incoming) {
+                if(merged.size()>=8) break;
+                merged.add(t);
+            }
+            String[] next=merged.toArray(new String[0]);
+            db.jdbc.update("UPDATE problems SET tags=?::text[] WHERE id=?",next,pid);
+            db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=?",next,pid);
+        }
+        db.audit(actor.id(),"PROBLEM_TAGS","problem",null,"Updated tags ("+problems.size()+" problems)");
+        return problems.size();
+    }
+
+    private static String slugifyMission(String text) {
+        String slug=java.text.Normalizer.normalize(text.toLowerCase(Locale.ROOT),java.text.Normalizer.Form.NFD)
+                .replaceAll("[\\u0300-\\u036f]","").replaceAll("[^a-z0-9]+","-").replaceAll("^-+|-+$","");
+        return slug.length()>60?slug.substring(0,60).replaceAll("-+$",""):slug;
+    }
+
+    /**
+     * Unified bulk assignment from the Problem Bank to any surface:
+     * PRACTICE, TD, MISSION, DUEL, CONTEST (attach to existing editable competition), or COLLECTION.
+     */
+    @Transactional
+    public Map<String,Object> assign(Actor actor,Map<String,Object> body) {
+        access.organizer(actor);
+        Api.require(body.get("versionIds") instanceof List<?> rawList && !rawList.isEmpty() && rawList.size()<=500,HttpStatus.BAD_REQUEST,"Select 1 to 500 problems");
+        List<UUID> versionIds=((List<?>)body.get("versionIds")).stream().map(Api::uuid).distinct().toList();
+        String surface=Api.text(body,"surface",32).toUpperCase(Locale.ROOT);
+        String action=Api.optional(body,"action","add",16).toLowerCase(Locale.ROOT);
+        Api.require(List.of("add","remove").contains(action),HttpStatus.BAD_REQUEST,"action must be add or remove");
+
+        if("COLLECTION".equals(surface)) {
+            int updated=moveToFolder(actor,versionIds,"remove".equals(action)?null:body.get("collection"));
+            return Map.of("updated",updated,"surface",surface,"action",action);
+        }
+        Api.require(List.of("PRACTICE","TD","MISSION","DUEL","CONTEST").contains(surface),HttpStatus.BAD_REQUEST,"Unknown assignment target: "+surface);
+
+        if("remove".equals(action)) {
+            int updated=0;
+            for(UUID versionId:versionIds) {
+                var row=db.one("SELECT problem_id FROM problem_versions WHERE id=?",versionId);
+                UUID problemId=(UUID)row.get("problem_id");
+                switch(surface) {
+                    case "PRACTICE" -> updated+=db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=? AND td_number IS NULL AND NOT EXISTS(SELECT 1 FROM mission_problems mp WHERE mp.problem_id=practice_publications.problem_id)",problemId);
+                    case "TD" -> updated+=db.jdbc.update("UPDATE practice_publications SET hidden=true,td_number=NULL,td_position=0 WHERE problem_id=? AND td_number IS NOT NULL",problemId);
+                    case "MISSION" -> {
+                        int removed=db.jdbc.update("DELETE FROM mission_problems WHERE problem_id=?",problemId);
+                        if(removed>0) db.jdbc.update("UPDATE practice_publications SET hidden=true WHERE problem_id=?",problemId);
+                        updated+=removed;
+                    }
+                    case "DUEL" -> updated+=db.jdbc.update("UPDATE duel_problems SET hidden=true WHERE problem_id=?",problemId);
+                    default -> Api.require(false,HttpStatus.BAD_REQUEST,"Detach contest problems from the Contest page");
+                }
+            }
+            db.audit(actor.id(),"PROBLEM_UNASSIGN","problem",null,surface+" ("+updated+" problems)");
+            return Map.of("updated",updated,"surface",surface,"action",action);
+        }
+
+        // Validate/auto-approve versions before placing them on a live surface.
+        List<Map<String,Object>> ready=new ArrayList<>();
+        for(UUID versionId:versionIds) {
+            var row=db.one("SELECT v.id,v.problem_id,v.title,v.status,p.archived_at FROM problem_versions v JOIN problems p ON p.id=v.problem_id WHERE v.id=? AND NOT p.system_benchmark FOR UPDATE",versionId);
+            Api.require(row.get("archived_at")==null,HttpStatus.CONFLICT,"Restore \""+row.get("title")+"\" before assigning it");
+            String st=(String)row.get("status");
+            if("READY_FOR_REVIEW".equals(st) && db.exists("SELECT EXISTS(SELECT 1 FROM problem_validation_results r WHERE r.problem_version_id=? AND r.status='PASSED')",versionId)) {
+                approve(actor,versionId,"Approved during assignment to "+surface.toLowerCase(Locale.ROOT));
+                st="APPROVED";
+            }
+            Api.require(List.of("APPROVED","PUBLISHED").contains(st),HttpStatus.CONFLICT,
+                    "\""+row.get("title")+"\" is still "+st.toLowerCase(Locale.ROOT).replace('_',' ')+" — validate it before assigning to "+surface.toLowerCase(Locale.ROOT));
+            ready.add(row);
+        }
+
+        int updated=0;
+        String extraSlug=null;
+        switch(surface) {
+            case "PRACTICE" -> {
+                for(var row:ready) {
+                    UUID versionId=(UUID)row.get("id"),problemId=(UUID)row.get("problem_id");
+                    publishPractice(actor,versionId);
+                    db.jdbc.update("DELETE FROM mission_problems WHERE problem_id=?",problemId);
+                    db.jdbc.update("UPDATE practice_publications SET hidden=false,td_number=NULL,td_position=0 WHERE problem_id=?",problemId);
+                    updated++;
+                }
+            }
+            case "TD" -> {
+                int tdNumber=Api.number(body,"tdNumber",1,1,99);
+                int nextPos=((Number)db.one("SELECT coalesce(max(td_position),0) AS n FROM practice_publications WHERE td_number=? AND NOT hidden",tdNumber).get("n")).intValue();
+                for(var row:ready) {
+                    UUID versionId=(UUID)row.get("id"),problemId=(UUID)row.get("problem_id");
+                    var existingTd=db.jdbc.queryForList("SELECT td_number,td_position FROM practice_publications WHERE problem_id=? AND NOT hidden",problemId);
+                    int pos=(!existingTd.isEmpty() && Integer.valueOf(tdNumber).equals(existingTd.get(0).get("td_number")))
+                            ?((Number)existingTd.get(0).get("td_position")).intValue()
+                            :++nextPos;
+                    publishPractice(actor,versionId);
+                    db.jdbc.update("DELETE FROM mission_problems WHERE problem_id=?",problemId);
+                    db.jdbc.update("UPDATE practice_publications SET hidden=false,td_number=?,td_position=? WHERE problem_id=?",tdNumber,Math.min(999,pos),problemId);
+                    updated++;
+                }
+            }
+            case "MISSION" -> {
+                double weight=body.get("weight") instanceof Number n?n.doubleValue():10.0;
+                Api.require(weight>0 && weight<=1000,HttpStatus.BAD_REQUEST,"Points must be between 0 and 1000");
+                String slug=body.get("missionSlug")==null?"":String.valueOf(body.get("missionSlug")).trim();
+                String title;
+                if(!slug.isEmpty()) {
+                    var m=db.jdbc.queryForList("SELECT id,slug,title FROM missions WHERE slug=?",slug);
+                    Api.require(!m.isEmpty(),HttpStatus.NOT_FOUND,"Mission not found");
+                    title=(String)m.get(0).get("title");
+                } else {
+                    title=Api.text(body,"missionTitle",120);
+                    slug=slugifyMission(title);
+                    Api.require(slug.length()>=2,HttpStatus.BAD_REQUEST,"Mission title needs at least two letters or digits");
+                    String description=Api.optional(body,"missionDescription","",4000);
+                    db.jdbc.update("INSERT INTO missions(slug,title,description) VALUES (?,?,?) ON CONFLICT(slug) DO NOTHING",slug,title,description);
+                }
+                extraSlug=slug;
+                UUID missionId=(UUID)db.one("SELECT id FROM missions WHERE slug=?",slug).get("id");
+                int nextPos=((Number)db.one("SELECT coalesce(max(position),0) AS n FROM mission_problems WHERE mission_id=?",missionId).get("n")).intValue();
+                for(var row:ready) {
+                    UUID versionId=(UUID)row.get("id"),problemId=(UUID)row.get("problem_id");
+                    var existingPos=db.jdbc.queryForList("SELECT position FROM mission_problems WHERE mission_id=? AND problem_id=?",missionId,problemId);
+                    int pos=!existingPos.isEmpty()?((Number)existingPos.get(0).get("position")).intValue():++nextPos;
+                    publishPractice(actor,versionId,Map.of("mission",Map.of("slug",slug,"title",title,"position",Math.min(999,pos),"weight",weight)));
+                    updated++;
+                }
+            }
+            case "DUEL" -> {
+                for(var row:ready) {
+                    publishDuel(actor,(UUID)row.get("id"));
+                    updated++;
+                }
+            }
+            case "CONTEST" -> {
+                UUID competitionId=Api.uuid(body.get("competitionId"));
+                access.competition(actor,competitionId,false);
+                db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competitionId);
+                var cv=db.one("SELECT * FROM competition_versions WHERE competition_id=? ORDER BY version_number DESC LIMIT 1",competitionId);
+                UUID cvId=(UUID)cv.get("id");
+                boolean editable=cv.get("sealed_at")==null
+                        || (db.exists("SELECT EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_version_id=? AND r.kind='OFFICIAL' AND r.status='PENDING' AND r.starts_at>now())",cvId)
+                        && !db.exists("SELECT EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_version_id=? AND r.kind='OFFICIAL' AND (r.status<>'PENDING' OR r.starts_at<=now()))",cvId));
+                Api.require(editable,HttpStatus.CONFLICT,"Problems are locked because this contest has already started or finished");
+                String scoring=String.valueOf(cv.get("scoring_system"));
+                int slot=((Number)db.one("SELECT coalesce(max(slot),0) AS n FROM competition_problems WHERE competition_version_id=?",cvId).get("n")).intValue();
+                for(var row:ready) {
+                    UUID versionId=(UUID)row.get("id"),problemId=(UUID)row.get("problem_id");
+                    if(db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=? AND problem_id=?)",cvId,problemId)) continue;
+                    Api.require(slot<100,HttpStatus.BAD_REQUEST,"A contest can hold at most 100 problems");
+                    slot++;
+                    String label=slot<=26?String.valueOf((char)('A'+slot-1)):("P"+slot);
+                    Integer pts=switch(scoring) {
+                        case "IOI" -> 100;
+                        case "CODEFORCES" -> 500*slot;
+                        case "ATCODER" -> 100*slot;
+                        default -> null;
+                    };
+                    db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) VALUES (?,?,?,?,?,?,1)",
+                            cvId,slot,label,problemId,versionId,pts);
+                    updated++;
+                }
+            }
+        }
+        db.audit(actor.id(),"PROBLEM_ASSIGN","problem",null,surface+" ("+updated+" problems)");
+        var out=new LinkedHashMap<String,Object>();
+        out.put("updated",updated);out.put("surface",surface);out.put("action",action);
+        if(extraSlug!=null) out.put("missionSlug",extraSlug);
+        return out;
     }
 
     /** Problems the actor owns or collaborates on (every problem for a super administrator); deleted=true lists the deleted ones instead. */
@@ -401,7 +675,14 @@ public class LaboratoryService {
         var rows=db.jdbc.queryForList("SELECT p.id,p.slug,p.contest_flag,p.folder,v.id AS version_id,v.title,v.version_number,v.status,v.difficulty,"
                 +"CASE WHEN cardinality(p.tags)>0 THEN p.tags ELSE coalesce((SELECT pp.tags FROM practice_publications pp WHERE pp.problem_id=p.id),'{}'::text[]) END AS tags,"
                 +"EXISTS(SELECT 1 FROM practice_publications pp WHERE pp.problem_id=p.id AND NOT pp.hidden AND pp.td_number IS NULL AND NOT EXISTS(SELECT 1 FROM mission_problems mp WHERE mp.problem_id=p.id)) AS in_problem_set,"
-                +"p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE NOT p.system_benchmark AND (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC LIMIT 500",
+                +"(SELECT pp.td_number FROM practice_publications pp WHERE pp.problem_id=p.id AND NOT pp.hidden AND pp.td_number IS NOT NULL) AS td_number,"
+                +"(SELECT m.slug FROM mission_problems mp JOIN missions m ON m.id=mp.mission_id JOIN practice_publications pp ON pp.problem_id=p.id WHERE mp.problem_id=p.id AND NOT pp.hidden) AS mission_slug,"
+                +"(SELECT m.title FROM mission_problems mp JOIN missions m ON m.id=mp.mission_id JOIN practice_publications pp ON pp.problem_id=p.id WHERE mp.problem_id=p.id AND NOT pp.hidden) AS mission_title,"
+                +"EXISTS(SELECT 1 FROM duel_problems dp WHERE dp.problem_id=p.id AND NOT dp.hidden) AS in_duel_pool,"
+                +"(SELECT count(DISTINCT c.id) FROM competition_problems cp JOIN competition_versions cv ON cv.id=cp.competition_version_id JOIN competitions c ON c.id=cv.competition_id WHERE cp.problem_id=p.id AND c.status<>'ARCHIVED') AS contest_count,"
+                +"(SELECT string_agg(DISTINCT c.title, ', ' ORDER BY c.title) FROM competition_problems cp JOIN competition_versions cv ON cv.id=cp.competition_version_id JOIN competitions c ON c.id=cv.competition_id WHERE cp.problem_id=p.id AND c.status<>'ARCHIVED') AS contest_titles,"
+                +"(SELECT r.status FROM problem_validation_results r WHERE r.problem_version_id=v.id ORDER BY r.created_at DESC LIMIT 1) AS validation_status,"
+                +"p.archived_at AS deleted_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE NOT p.system_benchmark AND (? OR p.owner_id=? OR EXISTS(SELECT 1 FROM problem_collaborators c WHERE c.problem_id=p.id AND c.user_id=?)) AND (p.archived_at IS NOT NULL)=? ORDER BY p.created_at DESC,v.version_number DESC LIMIT 500",
                 actor.superAdmin(),actor.id(),actor.id(),deleted);
         for(var row:rows) if(row.get("tags") instanceof java.sql.Array array) {
             try{row.put("tags",List.of((String[])array.getArray()));}catch(java.sql.SQLException e){throw new IllegalStateException(e);}

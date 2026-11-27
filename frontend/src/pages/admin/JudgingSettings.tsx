@@ -269,7 +269,7 @@ function Workers({ workers, reload }: { workers: Worker[]; reload: () => void })
                 <td>
                   <strong>{w.name}</strong> <Badge tone={w.lane === "official" ? "info" : "neutral"}>{w.lane}</Badge>
                   <div className="small muted mono">host {w.hostId}</div>
-                  {w.constraints.map((c) => <div key={c} className={"constraint" + (c.startsWith("OVER_TARGET") ? " over" : "")} style={{ marginTop: 4 }}>{c.replace(/^WARNING: /, "⚠ ")}</div>)}
+                  {w.constraints.map((c) => <div key={c} className={"constraint" + (c.startsWith("OVER_TARGET") ? " over" : "")} style={{ marginTop: 4 }}>{c.replace(/^WARNING: /, "Warning: ")}</div>)}
                 </td>
                 <td>{!w.online ? <Badge tone="bad">Offline</Badge> : w.draining ? <Badge tone="warn">Draining</Badge> : <Badge tone="ok">Online</Badge>}</td>
                 <td className="right mono">{w.running} / {w.effectiveConcurrency}{w.reportedActive != null && <div className="small muted">worker reports {w.reportedActive}/{w.reportedTarget}</div>}</td>

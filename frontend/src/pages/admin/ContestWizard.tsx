@@ -5,10 +5,22 @@ import { ProgressLog, slugify, type LogLine } from "../../components/Wizard";
 import { LanguagePicker } from "../../components/LanguagePicker";
 import { SCORING_INFO } from "../../components/Standings";
 import { DifficultyPill } from "../Practice";
-import { Badge, CONTEST_FORMAT_LABEL, Empty, Field, FlagBadge, Loading, consumeQueuedContestProblems, formatDuration, formatProblemFlag, fromZoneInput, localTimeZone, toZoneInput, when } from "../../ui";
+import { AdminIcon } from "../../components/AdminIcons";
+import { Badge, CONTEST_FORMAT_LABEL, Empty, Field, Loading, consumeQueuedContestProblems, formatDuration, fromZoneInput, localTimeZone, toZoneInput, when } from "../../ui";
 
 type ContestFormat = "STANDARD" | "BASIC" | "WARMUP";
-type Lab = { version_id: string; title: string; slug: string; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; tags?: string[]; contest_flag?: string | null; folder?: string | null };
+type Lab = {
+  version_id: string;
+  title: string;
+  slug: string;
+  status: string;
+  difficulty?: "EASY" | "MEDIUM" | "HARD";
+  tags?: string[];
+  folder?: string | null;
+  in_problem_set?: boolean;
+  td_number?: number | null;
+  mission_slug?: string | null;
+};
 type Draft = {
   title: string; slug: string; kind: ContestFormat;
   mode: "INDIVIDUAL" | "TEAM"; maxTeamSize: number;
@@ -100,7 +112,7 @@ export default function ContestWizard() {
   });
   const [problemSearch, setProblemSearch] = useState("");
   const [diffFilter, setDiffFilter] = useState<"" | "EASY" | "MEDIUM" | "HARD">(() => (d.kind === "BASIC" && d.problems.length === 0 ? "EASY" : ""));
-  const [flagFilter, setFlagFilter] = useState("");
+  const [privateOnly, setPrivateOnly] = useState(false);
   const [folderFilter, setFolderFilter] = useState("");
   const [log, setLog] = useState<LogLine[]>([]);
   const [busy, setBusy] = useState(false);
@@ -134,15 +146,8 @@ export default function ContestWizard() {
         ...(force ? { touchedTiming: false, touchedScoring: false } : {}),
       };
     });
-    const hasMatchingFlag = approved.some((x) => x.contest_flag === kind);
-    if (hasMatchingFlag) {
-      setFlagFilter(kind);
-      setDiffFilter("");
-    } else {
-      setFlagFilter("");
-      if (kind === "BASIC") setDiffFilter("EASY");
-      else if (diffFilter === "EASY" && d.problems.length === 0) setDiffFilter("");
-    }
+    if (kind === "BASIC") setDiffFilter("EASY");
+    else if (diffFilter === "EASY" && d.problems.length === 0) setDiffFilter("");
   };
 
   const setDuration = (seconds: number) => {
@@ -163,17 +168,6 @@ export default function ContestWizard() {
   );
   const byId = useMemo(() => Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p])), [lab.data]);
 
-  const allFlags = useMemo(() => {
-    const custom = new Set<string>();
-    for (const p of approved) if (p.contest_flag && !["BASIC", "WARMUP", "STANDARD"].includes(p.contest_flag)) custom.add(p.contest_flag);
-    return ["BASIC", "WARMUP", "STANDARD", ...[...custom].sort()];
-  }, [approved]);
-
-  const matchingFlagProblems = useMemo(
-    () => approved.filter((p) => p.contest_flag === d.kind),
-    [approved, d.kind],
-  );
-
   const allFolders = useMemo(() => {
     const set = new Set<string>();
     for (const p of approved) {
@@ -184,18 +178,24 @@ export default function ContestWizard() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [approved]);
 
+  const isPublic = (p: Lab) => Boolean(p.in_problem_set || p.td_number != null || p.mission_slug);
+
   const filteredProblems = useMemo(() => {
     const q = problemSearch.trim().toLowerCase();
     return approved.filter((p) => {
       if (diffFilter && (p.difficulty ?? "MEDIUM") !== diffFilter) return false;
-      if (flagFilter === "__NONE__" && p.contest_flag) return false;
-      if (flagFilter && flagFilter !== "__NONE__" && p.contest_flag !== flagFilter) return false;
+      if (privateOnly && isPublic(p)) return false;
       if (folderFilter === "__NONE__" && p.folder) return false;
       if (folderFilter && folderFilter !== "__NONE__" && !(p.folder === folderFilter || p.folder?.startsWith(folderFilter + "/"))) return false;
       if (!q) return true;
-      return (p.title + " " + p.slug + " " + (p.tags ?? []).join(" ") + " " + (p.contest_flag ?? "") + " " + (p.folder ?? "")).toLowerCase().includes(q);
+      return (p.title + " " + p.slug + " " + (p.tags ?? []).join(" ") + " " + (p.folder ?? "")).toLowerCase().includes(q);
     });
-  }, [approved, diffFilter, flagFilter, folderFilter, problemSearch]);
+  }, [approved, diffFilter, privateOnly, folderFilter, problemSearch]);
+
+  const publicSelectedCount = useMemo(
+    () => d.problems.filter((id) => byId[id] && isPublic(byId[id])).length,
+    [d.problems, byId],
+  );
 
   const startMs = fromZoneInput(d.startsAt);
   const endMs = Number.isNaN(startMs) ? NaN : startMs + d.durationSeconds * 1000;
@@ -318,7 +318,7 @@ export default function ContestWizard() {
         </div>
         <div className="row">
           {(d.touchedTiming || d.touchedScoring) && !created && (
-            <button type="button" className="ghost small" onClick={() => applyPreset(d.kind, true)}>↺ Reset to {CONTEST_FORMAT_LABEL[d.kind]} defaults</button>
+            <button type="button" className="ghost small" onClick={() => applyPreset(d.kind, true)}>Reset to {CONTEST_FORMAT_LABEL[d.kind]} defaults</button>
           )}
           <button type="button" className="ghost small" onClick={() => { if (confirm("Discard this draft?")) { setD({ ...EMPTY, startsAt: nextHour() }); setDiffFilter("EASY"); setCreated(null); setLog([]); } }}>Start over</button>
         </div>
@@ -391,10 +391,10 @@ export default function ContestWizard() {
           <h3 style={{ margin: 0 }}>2. Duration &amp; start</h3>
           <div className="filters" role="group" aria-label="Start mode">
             <button type="button" className={d.launchMode !== "scheduled" ? "active" : ""} onClick={() => set({ launchMode: "manual" })}>
-              ▶ Start whenever I hit Start
+              Manual start
             </button>
             <button type="button" className={d.launchMode === "scheduled" ? "active" : ""} onClick={() => set({ launchMode: "scheduled", startsAt: d.startsAt || nextHour() })}>
-              🗓 Schedule date &amp; time
+              Scheduled date &amp; time
             </button>
           </div>
         </div>
@@ -474,22 +474,22 @@ export default function ContestWizard() {
         <div className="row-between">
           <h3 style={{ margin: 0 }}>3. Problems ({d.problems.length} selected)</h3>
           <div className="row" style={{ gap: "0.5rem" }}>
-            {!created && matchingFlagProblems.length > 0 && (
-              <button type="button" className="primary small" onClick={() => {
-                const add = matchingFlagProblems.map((p) => p.version_id).filter((id) => !d.problems.includes(id));
-                if (add.length) set({ problems: [...d.problems, ...add] });
-              }}>
-                ⚡ Load all {formatProblemFlag(d.kind)}-flagged ({matchingFlagProblems.length})
-              </button>
-            )}
-            <a className="small" href="#/admin/problems">Manage flags in Problem lab</a>
-            <a className="small" href="#/admin/problems/new">+ New problem</a>
+            <a className="small" href="#/admin/problems">Open Problem Bank</a>
+            <a className="small" href="#/admin/problems/new">New problem</a>
           </div>
         </div>
+        {publicSelectedCount > 0 && (
+          <div className="notice warn small" style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+            <AdminIcon name="warning" size={16} />
+            <span>
+              <strong>Visibility warning:</strong> {publicSelectedCount} selected problem{publicSelectedCount === 1 ? " is" : "s are"} already visible to students in Practice, a TD, or a Mission.
+            </span>
+          </div>
+        )}
         <div className="grid grid-2" style={{ alignItems: "start" }}>
           <div className="stack" style={{ gap: "0.6rem" }}>
             <div className="row" style={{ gap: "0.5rem" }}>
-              <input placeholder="Search by title, slug, tag, or flag…" value={problemSearch} onChange={(e) => setProblemSearch(e.target.value)} style={{ flex: 1 }} />
+              <input placeholder="Search by title, slug, topic, or collection…" value={problemSearch} onChange={(e) => setProblemSearch(e.target.value)} style={{ flex: 1 }} />
               {!created && filteredProblems.some((p) => !d.problems.includes(p.version_id)) && (
                 <button type="button" className="small ghost" onClick={() => {
                   const add = filteredProblems.map((p) => p.version_id).filter((id) => !d.problems.includes(id));
@@ -508,46 +508,42 @@ export default function ContestWizard() {
                   <button key={val || "all"} type="button" className={diffFilter === val ? "active" : ""} onClick={() => setDiffFilter(val)}>{text}</button>
                 ))}
               </div>
-              <select value={flagFilter} onChange={(e) => setFlagFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by problem flag">
-                <option value="">All flags</option>
-                {allFlags.map((fl) => {
-                  const n = approved.filter((p) => p.contest_flag === fl).length;
-                  return <option key={fl} value={fl}>Flag: {formatProblemFlag(fl)} ({n})</option>;
-                })}
-                <option value="__NONE__">Unflagged ({approved.filter((p) => !p.contest_flag).length})</option>
-              </select>
               {allFolders.length > 0 && (
-                <select value={folderFilter} onChange={(e) => setFolderFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by folder">
-                  <option value="">All folders</option>
+                <select value={folderFilter} onChange={(e) => setFolderFilter(e.target.value)} style={{ width: "auto" }} aria-label="Filter by collection">
+                  <option value="">All collections</option>
                   {allFolders.map((fl) => {
                     const n = approved.filter((p) => p.folder === fl || p.folder?.startsWith(fl + "/")).length;
-                    return <option key={fl} value={fl}>📁 {fl} ({n})</option>;
+                    return <option key={fl} value={fl}>{fl} ({n})</option>;
                   })}
-                  <option value="__NONE__">Unfiled ({approved.filter((p) => !p.folder).length})</option>
+                  <option value="__NONE__">Uncollected ({approved.filter((p) => !p.folder).length})</option>
                 </select>
               )}
+              <label className="check small">
+                <input type="checkbox" checked={privateOnly} onChange={(e) => setPrivateOnly(e.target.checked)} />
+                Private only
+              </label>
             </div>
             {lab.loading ? <Loading /> : approved.length === 0 ? (
-              <Empty>No approved problems yet. Create and approve problems in the Problem lab first.</Empty>
+              <Empty>No approved problems yet. Import and approve problems in the Problem Bank first.</Empty>
             ) : filteredProblems.length === 0 ? (
-              <Empty>No approved problem matches this filter. <button type="button" className="ghost small" onClick={() => { setDiffFilter(""); setFlagFilter(""); setFolderFilter(""); setProblemSearch(""); }}>Show all</button></Empty>
+              <Empty>No approved problem matches this filter. <button type="button" className="ghost small" onClick={() => { setDiffFilter(""); setPrivateOnly(false); setFolderFilter(""); setProblemSearch(""); }}>Show all</button></Empty>
             ) : (
               <div className="stack" style={{ gap: "0.4rem", maxHeight: 380, overflowY: "auto", paddingRight: 4 }}>
                 {filteredProblems.map((p) => {
                   const checked = d.problems.includes(p.version_id);
                   return (
-                    <label key={p.version_id} className="check card-flat" style={{ justifyContent: "space-between", cursor: created ? "default" : "pointer" }}>
-                      <span className="row" style={{ gap: "0.5rem" }}>
+                    <label key={p.version_id} className="check card-flat" style={{ justifyContent: "space-between", cursor: created ? "default" : "pointer", padding: "0.55rem 0.75rem" }}>
+                      <span className="row" style={{ gap: "0.5rem", minWidth: 0 }}>
                         <input type="checkbox" disabled={Boolean(created)} checked={checked}
                           onChange={(e) => set({ problems: e.target.checked ? [...d.problems, p.version_id] : d.problems.filter((x) => x !== p.version_id) })} />
-                        <span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           <strong>{p.title}</strong>
                           <span className="small muted mono" style={{ marginLeft: "0.4rem" }}>{p.slug}</span>
                         </span>
                       </span>
-                      <span className="row" style={{ gap: "0.35rem" }}>
-                        {p.folder && <span className="tag" title={p.folder}>📁 {p.folder}</span>}
-                        {p.contest_flag && <FlagBadge flag={p.contest_flag} />}
+                      <span className="row" style={{ gap: "0.35rem", flexShrink: 0 }}>
+                        {p.folder && <span className="collection-pill" title={p.folder}>{p.folder}</span>}
+                        {isPublic(p) && <Badge tone="warn">Public</Badge>}
                         <DifficultyPill value={p.difficulty ?? "MEDIUM"} />
                       </span>
                     </label>
@@ -724,10 +720,10 @@ export default function ContestWizard() {
           {d.launchMode !== "scheduled" ? (
             <>
               <button type="button" className="primary" disabled={busy || issues.length > 0} onClick={() => finish("manual")}>
-                📢 Publish &amp; open registration (start whenever ready)
+                Publish &amp; open registration
               </button>
               <button type="button" disabled={busy || issues.length > 0} onClick={() => finish("startNow")}>
-                ▶ Create &amp; start immediately ({formatDuration(d.durationSeconds)})
+                Create &amp; start immediately ({formatDuration(d.durationSeconds)})
               </button>
               <button type="button" className="ghost" disabled={busy || issues.length > 0} onClick={() => finish("draft")}>
                 Save as private draft
@@ -736,17 +732,17 @@ export default function ContestWizard() {
           ) : (
             <>
               <button type="button" className="primary" disabled={busy || issues.length > 0 || !canScheduleFuture} onClick={() => finish("scheduled")}>
-                🗓 Create &amp; schedule ({!Number.isNaN(startMs) ? when(startIso(d.startsAt)) : "pick start"})
+                Create &amp; schedule ({!Number.isNaN(startMs) ? when(startIso(d.startsAt)) : "pick start"})
               </button>
               <button type="button" disabled={busy || issues.length > 0} onClick={() => finish("manual")}>
-                📢 Open registration (manual start)
+                Open registration (manual start)
               </button>
               <button type="button" className="ghost" disabled={busy || issues.length > 0} onClick={() => finish("draft")}>
                 Save as draft
               </button>
             </>
           )}
-          {created && <a className="btn ghost" href={"#/admin/contests/" + created}>Open contest page →</a>}
+          {created && <a className="btn ghost" href={"#/admin/contests/" + created}>Open contest page</a>}
         </div>
         <ProgressLog lines={log} />
         {log.some((l) => l.state === "error") && created && (
