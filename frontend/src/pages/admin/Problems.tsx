@@ -61,14 +61,14 @@ function matchesCollection(problemFolder: string | null | undefined, selected: s
 }
 
 function statusBadge(row: BankRow) {
-  if (row.deleted_at) return <Badge>Deleted</Badge>;
+  if (row.deleted_at) return <span className="state-ind neutral">Deleted</span>;
   if (row.validation_status === "FAILED" || row.validation_status === "JUDGE_ERROR") {
-    return <Badge tone="bad">Check failed</Badge>;
+    return <span className="state-ind bad">Failed</span>;
   }
-  if (row.status === "APPROVED" || row.status === "PUBLISHED") return <Badge tone="ok">Ready</Badge>;
-  if (row.status === "READY_FOR_REVIEW") return <Badge tone="warn">Review</Badge>;
-  if (row.status === "IN_TESTING") return <Badge tone="info">Testing</Badge>;
-  return <Badge tone="neutral">Draft</Badge>;
+  if (row.status === "APPROVED" || row.status === "PUBLISHED") return <span className="state-ind ok">Ready</span>;
+  if (row.status === "READY_FOR_REVIEW") return <span className="state-ind warn">Review</span>;
+  if (row.status === "IN_TESTING") return <span className="state-ind info">Testing</span>;
+  return <span className="state-ind neutral">Draft</span>;
 }
 
 function PlacementPills({ row }: { row: BankRow }) {
@@ -95,11 +95,9 @@ function PlacementPills({ row }: { row: BankRow }) {
 
   if (pills.length === 0) {
     return (
-      <div className="surface-pills">
-        <span className="surface-pill private" title="Private in Problem Bank — not visible to students">
-          Private
-        </span>
-      </div>
+      <span className="surface-unassigned" title="Private in Problem Bank — not visible to students">
+        Private
+      </span>
     );
   }
 
@@ -317,7 +315,7 @@ export function ProblemList() {
       <div className="admin-toolbar">
         <input
           className="toolbar-search"
-          placeholder="Search title, slug, topic, or collection…"
+          placeholder="Search problems…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -480,7 +478,7 @@ export function ProblemList() {
               <thead>
                 <tr>
                   {!showDeleted && organizer && (
-                    <th style={{ width: 40 }}>
+                    <th className="col-check">
                       <input
                         type="checkbox"
                         checked={allShownSelected}
@@ -490,18 +488,17 @@ export function ProblemList() {
                     </th>
                   )}
                   <th>Problem</th>
-                  <th style={{ width: 98 }}>Level</th>
-                  <th style={{ width: 112 }}>State</th>
-                  {!showDeleted && <th style={{ width: 225 }}>Assigned to</th>}
-                  <th style={{ width: showDeleted ? 120 : 210 }} className="right">
-                    Actions
-                  </th>
+                  <th className="col-shrink">Level</th>
+                  <th className="col-shrink">State</th>
+                  {!showDeleted && <th className="col-shrink">Assigned to</th>}
+                  <th className="col-shrink right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((p) => {
                   const isSel = selected.has(p.version_id);
                   const topics = p.tags ?? [];
+                  const topicSummary = topics.map(topicLabel).join(", ");
                   return (
                     <tr
                       key={p.version_id}
@@ -511,7 +508,7 @@ export function ProblemList() {
                       onClick={() => !showDeleted && organizer && toggleOne(p.version_id)}
                     >
                       {!showDeleted && organizer && (
-                        <td onClick={(e) => e.stopPropagation()}>
+                        <td className="col-check" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSel}
@@ -520,7 +517,7 @@ export function ProblemList() {
                           />
                         </td>
                       )}
-                      <td>
+                      <td className="col-problem">
                         <div className="cell-primary">
                           <a
                             href={"#/admin/problems/" + p.version_id}
@@ -546,30 +543,26 @@ export function ProblemList() {
                         </div>
                         <div className="cell-secondary">
                           <span className="cell-slug">
-                            {p.slug} · v{p.version_number}
+                            {p.slug}
+                            {p.version_number > 1 ? ` · v${p.version_number}` : ""}
                           </span>
-                          {topics.slice(0, 2).map((t) => (
-                            <span key={t} className="topic-mini">
-                              {topicLabel(t)}
-                            </span>
-                          ))}
-                          {topics.length > 2 && (
-                            <span className="topic-mini" title={topics.map(topicLabel).join(", ")}>
-                              +{topics.length - 2}
+                          {topics.length > 0 && (
+                            <span className="cell-topics" title={topicSummary}>
+                              · {topicSummary}
                             </span>
                           )}
                         </div>
                       </td>
-                      <td>
+                      <td className="col-shrink">
                         <DifficultyPill value={p.difficulty ?? "MEDIUM"} />
                       </td>
-                      <td>{statusBadge(p)}</td>
+                      <td className="col-shrink">{statusBadge(p)}</td>
                       {!showDeleted && (
-                        <td>
+                        <td className="col-shrink">
                           <PlacementPills row={p} />
                         </td>
                       )}
-                      <td className="right" onClick={(e) => e.stopPropagation()}>
+                      <td className="col-shrink right" onClick={(e) => e.stopPropagation()}>
                         <div className="row-actions">
                           {showDeleted ? (
                             <button
@@ -592,21 +585,29 @@ export function ProblemList() {
                               )}
                               <button
                                 type="button"
+                                className="icon-btn"
                                 onClick={() => setPreviewId(p.version_id)}
                                 title="Preview as student"
+                                aria-label={"Preview " + p.title}
                               >
-                                Preview
+                                <AdminIcon name="eye" size={14} />
                               </button>
-                              <a className="btn" href={"#/admin/problems/" + p.version_id}>
-                                Edit
+                              <a
+                                className="btn icon-btn"
+                                href={"#/admin/problems/" + p.version_id}
+                                title="Edit problem"
+                                aria-label={"Edit " + p.title}
+                              >
+                                <AdminIcon name="edit" size={14} />
                               </a>
                               <button
                                 type="button"
-                                className="danger"
+                                className="icon-btn danger"
                                 onClick={() => setDeleteTarget({ row: p, action: "delete" })}
                                 title="Delete problem"
+                                aria-label={"Delete " + p.title}
                               >
-                                <AdminIcon name="trash" size={13} />
+                                <AdminIcon name="trash" size={14} />
                               </button>
                             </>
                           )}

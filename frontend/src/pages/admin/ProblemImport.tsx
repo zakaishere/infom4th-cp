@@ -350,23 +350,31 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th style={{ width: 42 }}>Sel</th>
+                  <th className="col-check">Sel</th>
                   <th>Problem</th>
-                  <th style={{ width: 100 }}>Level</th>
-                  <th style={{ width: 105 }}>Tests</th>
-                  <th style={{ width: 190 }}>Topics</th>
-                  <th style={{ width: 230 }}>Status</th>
-                  <th style={{ width: 82 }} className="right">Action</th>
+                  <th className="col-shrink">Level</th>
+                  <th className="col-shrink">Tests</th>
+                  <th className="col-shrink">Status</th>
+                  <th className="col-shrink right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => {
                   const topics = tagsFor(r.problem);
+                  const topicSummary = topics.map(topicLabel).join(", ");
                   const targetCol = activeCollection ?? r.problem.folder;
                   const exists = existingSlugs.has(r.problem.slug) && r.state === "ready";
+                  const stateCls =
+                    r.state === "error"
+                      ? "bad"
+                      : r.state === "done"
+                      ? "ok"
+                      : r.state === "running"
+                      ? "info"
+                      : "neutral";
                   return (
                     <tr key={r.problem.slug} className={r.selected ? "row-selected" : ""}>
-                      <td>
+                      <td className="col-check">
                         <input
                           type="checkbox"
                           aria-label={"Select " + r.problem.title}
@@ -375,59 +383,43 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
                           onChange={(e) => update(r.problem.slug, { selected: e.target.checked })}
                         />
                       </td>
-                      <td>
+                      <td className="col-problem">
                         <div className="cell-primary">
                           <span className="cell-title" title={r.problem.title}>{r.problem.title}</span>
-                          {exists && <Badge tone="neutral">Exists</Badge>}
+                          {exists && <span className="collection-pill">Exists</span>}
                           {targetCol && <span className="collection-pill" title={targetCol}>{targetCol}</span>}
                         </div>
                         <div className="cell-secondary">
-                          <span className="cell-slug">{r.problem.slug}</span>
-                          <span>· {LANGUAGE_NAMES[r.problem.reference.language] ?? r.problem.reference.language}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <DifficultyPill value={r.problem.difficulty || "MEDIUM"} />
-                      </td>
-                      <td className="mono small">
-                        {r.problem.tests.length}{" "}
-                        <span className="muted">({r.problem.tests.filter((t) => t.sample).length}s)</span>
-                      </td>
-                      <td>
-                        <div className="surface-pills" title={topics.map(topicLabel).join(", ")}>
-                          {topics.length === 0 ? (
-                            <span className="small muted">—</span>
-                          ) : (
-                            <>
-                              {topics.slice(0, 2).map((t) => (
-                                <span key={t} className="topic-mini">{topicLabel(t)}</span>
-                              ))}
-                              {topics.length > 2 && <span className="topic-mini">+{topics.length - 2}</span>}
-                            </>
+                          <span className="cell-slug">
+                            {r.problem.slug} · {LANGUAGE_NAMES[r.problem.reference.language] ?? r.problem.reference.language}
+                          </span>
+                          {topics.length > 0 && (
+                            <span className="cell-topics" title={topicSummary}>
+                              · {topicSummary}
+                            </span>
                           )}
                         </div>
                       </td>
-                      <td>
-                        <div className="cell-primary">
-                          <Badge
-                            tone={
-                              r.state === "error"
-                                ? "bad"
-                                : r.state === "done"
-                                ? "ok"
-                                : r.state === "running"
-                                ? "info"
-                                : "neutral"
-                            }
+                      <td className="col-shrink">
+                        <DifficultyPill value={r.problem.difficulty || "MEDIUM"} />
+                      </td>
+                      <td className="col-shrink mono small">
+                        {r.problem.tests.length}{" "}
+                        <span className="muted">({r.problem.tests.filter((t) => t.sample).length}s)</span>
+                      </td>
+                      <td className="col-shrink">
+                        <div className="row" style={{ gap: "0.45rem", flexWrap: "nowrap" }}>
+                          <span className={"state-ind " + stateCls}>{r.state}</span>
+                          <span
+                            className="small muted"
+                            style={{ maxWidth: 210, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            title={r.message}
                           >
-                            {r.state}
-                          </Badge>
-                          <span className="small muted" style={{ overflow: "hidden", textOverflow: "ellipsis" }} title={r.message}>
                             {r.message}
                           </span>
                         </div>
                       </td>
-                      <td className="right">
+                      <td className="col-shrink right">
                         <div className="row-actions">
                           {r.versionId && (
                             <a href={"#/admin/problems/" + r.versionId} target="_blank" rel="noreferrer" className="btn">

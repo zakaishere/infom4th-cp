@@ -3,7 +3,7 @@ import { patch } from "../../api";
 import { navigate, useAction, useData } from "../../app";
 import { AdminIcon } from "../../components/AdminIcons";
 import { topicLabel } from "../../lib/topics";
-import { Badge, Empty, ErrorBox, Field, Loading, Modal, Stat } from "../../ui";
+import { Empty, ErrorBox, Field, Loading, Modal, Stat } from "../../ui";
 import { DifficultyPill, acceptance, type PracticeProblem } from "../Practice";
 import { BulkTagsModal, ProblemPreviewModal, type BankRow } from "./ProblemModals";
 
@@ -164,7 +164,7 @@ export default function PracticeSet() {
       <div className="admin-toolbar">
         <input
           className="toolbar-search"
-          placeholder="Search title, slug, or topic…"
+          placeholder="Search problems…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -259,29 +259,27 @@ export default function PracticeSet() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  {tab === "TD" && <th style={{ width: 112 }}>Session</th>}
+                  {tab === "TD" && <th className="col-shrink">Session</th>}
                   <th>Problem</th>
-                  <th style={{ width: 96 }}>Level</th>
-                  <th style={{ width: 185 }}>Topics</th>
-                  <th style={{ width: 105 }}>Solved</th>
-                  <th style={{ width: 96 }}>State</th>
-                  <th style={{ width: tab === "TD" ? 265 : 235 }} className="right">
-                    Actions
-                  </th>
+                  <th className="col-shrink">Level</th>
+                  <th className="col-shrink">Solved</th>
+                  <th className="col-shrink">State</th>
+                  <th className="col-shrink right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((p) => {
                   const rate = acceptance(p);
+                  const topicSummary = p.tags.map(topicLabel).join(", ");
                   return (
                     <tr key={p.problem_id} className={p.hidden ? "hidden-row" : ""}>
                       {tab === "TD" && (
-                        <td className="mono small">
+                        <td className="col-shrink mono small">
                           <strong>TD {p.td_number}</strong>
                           <span className="muted"> · #{(p.td_position ?? 0) || 1}</span>
                         </td>
                       )}
-                      <td>
+                      <td className="col-problem">
                         <div className="cell-primary">
                           <a href={"#/admin/problems/" + p.id} className="cell-title" title={p.title}>
                             {p.title}
@@ -289,56 +287,50 @@ export default function PracticeSet() {
                         </div>
                         <div className="cell-secondary">
                           <span className="cell-slug">{p.slug}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <DifficultyPill value={p.difficulty} />
-                      </td>
-                      <td>
-                        <div className="surface-pills" title={p.tags.map(topicLabel).join(", ")}>
-                          {p.tags.length === 0 ? (
-                            <span className="small muted">—</span>
-                          ) : (
-                            <>
-                              {p.tags.slice(0, 2).map((t) => (
-                                <span key={t} className="topic-mini">
-                                  {topicLabel(t)}
-                                </span>
-                              ))}
-                              {p.tags.length > 2 && <span className="topic-mini">+{p.tags.length - 2}</span>}
-                            </>
+                          {p.tags.length > 0 && (
+                            <span className="cell-topics" title={topicSummary}>
+                              · {topicSummary}
+                            </span>
                           )}
                         </div>
                       </td>
-                      <td className="mono small" title={rate == null ? "" : `Acceptance ${rate}%`}>
+                      <td className="col-shrink">
+                        <DifficultyPill value={p.difficulty} />
+                      </td>
+                      <td className="col-shrink mono small" title={rate == null ? "" : `Acceptance ${rate}%`}>
                         {p.solved_by}/{p.tried_by}
                       </td>
-                      <td>{p.hidden ? <Badge tone="neutral">Hidden</Badge> : <Badge tone="ok">Live</Badge>}</td>
-                      <td className="right">
+                      <td className="col-shrink">
+                        {p.hidden ? (
+                          <span className="state-ind neutral">Hidden</span>
+                        ) : (
+                          <span className="state-ind ok">Live</span>
+                        )}
+                      </td>
+                      <td className="col-shrink right">
                         <div className="row-actions">
                           {tab === "TD" && (
                             <>
                               <button
                                 type="button"
+                                className="icon-btn"
                                 disabled={busy}
                                 title="Move earlier in TD"
                                 onClick={() => shiftTdOrder(p, -1)}
                               >
-                                <AdminIcon name="chevronUp" size={13} />
+                                <AdminIcon name="chevronUp" size={14} />
                               </button>
                               <button
                                 type="button"
+                                className="icon-btn"
                                 disabled={busy}
                                 title="Move later in TD"
                                 onClick={() => shiftTdOrder(p, 1)}
                               >
-                                <AdminIcon name="chevronDown" size={13} />
+                                <AdminIcon name="chevronDown" size={14} />
                               </button>
                             </>
                           )}
-                          <button type="button" onClick={() => setPreviewId(p.id)}>
-                            Preview
-                          </button>
                           <button type="button" onClick={() => setTagsRow(p)}>
                             Topics
                           </button>
@@ -367,6 +359,14 @@ export default function PracticeSet() {
                             }
                           >
                             {p.hidden ? "Show" : "Hide"}
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            onClick={() => setPreviewId(p.id)}
+                            title="Preview as student"
+                          >
+                            <AdminIcon name="eye" size={14} />
                           </button>
                         </div>
                       </td>

@@ -133,34 +133,38 @@ export function AdminMissionList() {
               <thead>
                 <tr>
                   <th>Mission</th>
-                  <th style={{ width: 105 }}>State</th>
-                  <th style={{ width: 110 }}>Exercises</th>
-                  <th style={{ width: 115 }}>Points</th>
-                  <th style={{ width: 125 }}>Participants</th>
-                  <th style={{ width: 230 }} className="right">
-                    Actions
-                  </th>
+                  <th className="col-shrink">State</th>
+                  <th className="col-shrink">Exercises</th>
+                  <th className="col-shrink">Points</th>
+                  <th className="col-shrink">Participants</th>
+                  <th className="col-shrink right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {list.map((m) => (
                   <tr key={m.slug} className="row-clickable" onClick={() => navigate("/admin/missions/" + m.slug)}>
-                    <td>
+                    <td className="col-problem">
                       <div className="cell-primary">
                         <span className="cell-title">{m.title}</span>
                       </div>
                       <div className="cell-secondary">
                         <span className="cell-slug">{m.slug}</span>
                         {m.description && (
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>· {m.description}</span>
+                          <span className="cell-topics">· {m.description}</span>
                         )}
                       </div>
                     </td>
-                    <td>{m.open ? <Badge tone="ok">Open</Badge> : <Badge tone="neutral">Closed</Badge>}</td>
-                    <td className="mono">{m.problems}</td>
-                    <td className="mono">{fmtPts(m.totalPoints)} pts</td>
-                    <td className="mono">{m.participants}</td>
-                    <td className="right" onClick={(e) => e.stopPropagation()}>
+                    <td className="col-shrink">
+                      {m.open ? (
+                        <span className="state-ind ok">Open</span>
+                      ) : (
+                        <span className="state-ind neutral">Closed</span>
+                      )}
+                    </td>
+                    <td className="col-shrink mono">{m.problems}</td>
+                    <td className="col-shrink mono">{fmtPts(m.totalPoints)} pts</td>
+                    <td className="col-shrink mono">{m.participants}</td>
+                    <td className="col-shrink right" onClick={(e) => e.stopPropagation()}>
                       <div className="row-actions">
                         <a className="btn primary" href={"#/admin/missions/" + m.slug}>
                           Manage
@@ -168,8 +172,14 @@ export function AdminMissionList() {
                         <a className="btn" href={"#/missions/" + m.slug}>
                           Board
                         </a>
-                        <button type="button" className="danger" disabled={busy} onClick={() => void deleteMission(m)}>
-                          <AdminIcon name="trash" size={13} />
+                        <button
+                          type="button"
+                          className="icon-btn danger"
+                          disabled={busy}
+                          onClick={() => void deleteMission(m)}
+                          title="Delete mission"
+                        >
+                          <AdminIcon name="trash" size={14} />
                         </button>
                       </div>
                     </td>
@@ -336,13 +346,11 @@ export function AdminMissionDetail({ slug }: { slug: string }) {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th style={{ width: 52 }}>#</th>
+                  <th className="col-shrink">#</th>
                   <th>Exercise</th>
-                  <th style={{ width: 105 }}>Level</th>
-                  <th style={{ width: 180 }}>Points</th>
-                  <th style={{ width: 205 }} className="right">
-                    Actions
-                  </th>
+                  <th className="col-shrink">Level</th>
+                  <th className="col-shrink">Points</th>
+                  <th className="col-shrink right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -352,8 +360,8 @@ export function AdminMissionDetail({ slug }: { slug: string }) {
                   const changed = Number(draftWeight) !== ex.weight;
                   return (
                     <tr key={ex.problemId}>
-                      <td className="mono muted">{idx + 1}</td>
-                      <td>
+                      <td className="col-shrink mono muted">{idx + 1}</td>
+                      <td className="col-problem">
                         <div className="cell-primary">
                           <a href={"#/admin/problems/" + ex.version} className="cell-title">
                             {ex.title}
@@ -365,10 +373,10 @@ export function AdminMissionDetail({ slug }: { slug: string }) {
                           </div>
                         )}
                       </td>
-                      <td>
+                      <td className="col-shrink">
                         <DifficultyPill value={meta?.difficulty ?? "MEDIUM"} />
                       </td>
-                      <td>
+                      <td className="col-shrink">
                         <div className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }}>
                           <input
                             type="number"
@@ -376,14 +384,14 @@ export function AdminMissionDetail({ slug }: { slug: string }) {
                             max={1000}
                             value={draftWeight}
                             onChange={(e) => setWeights({ ...weights, [ex.problemId]: e.target.value })}
-                            style={{ width: 82, height: 30, padding: "0 0.45rem", fontSize: "0.84rem" }}
+                            style={{ width: 78, height: 28, padding: "0 0.45rem", fontSize: "0.82rem" }}
                           />
                           {changed && (
                             <button
                               type="button"
                               className="primary small"
                               disabled={busy}
-                              style={{ height: 30, padding: "0 0.55rem" }}
+                              style={{ height: 28, padding: "0 0.55rem" }}
                               onClick={() => saveWeight(ex.problemId, draftWeight)}
                             >
                               Save
@@ -391,21 +399,27 @@ export function AdminMissionDetail({ slug }: { slug: string }) {
                           )}
                         </div>
                       </td>
-                      <td className="right">
+                      <td className="col-shrink right">
                         <div className="row-actions">
-                          <button type="button" onClick={() => setPreviewId(ex.version)}>
-                            Preview
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            onClick={() => setPreviewId(ex.version)}
+                            title="Preview as student"
+                          >
+                            <AdminIcon name="eye" size={14} />
                           </button>
-                          <a className="btn" href={"#/admin/problems/" + ex.version}>
-                            Edit
+                          <a className="btn icon-btn" href={"#/admin/problems/" + ex.version} title="Edit problem">
+                            <AdminIcon name="edit" size={14} />
                           </a>
                           <button
                             type="button"
-                            className="danger"
+                            className="icon-btn danger"
                             disabled={busy}
                             onClick={() => removeExercise(ex.problemId, ex.title)}
+                            title="Remove from mission"
                           >
-                            Remove
+                            <AdminIcon name="trash" size={14} />
                           </button>
                         </div>
                       </td>

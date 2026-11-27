@@ -148,19 +148,17 @@ export default function DuelProblems() {
               <thead>
                 <tr>
                   <th>Problem</th>
-                  <th style={{ width: 100 }}>Level</th>
-                  <th style={{ width: 90 }}>Version</th>
-                  <th style={{ width: 125 }}>Rounds played</th>
-                  <th style={{ width: 105 }}>State</th>
-                  <th style={{ width: 210 }} className="right">
-                    Actions
-                  </th>
+                  <th className="col-shrink">Level</th>
+                  <th className="col-shrink">Version</th>
+                  <th className="col-shrink">Rounds played</th>
+                  <th className="col-shrink">State</th>
+                  <th className="col-shrink right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((p) => (
                   <tr key={p.problem_id} className={p.hidden ? "hidden-row" : ""}>
-                    <td>
+                    <td className="col-problem">
                       <div className="cell-primary">
                         <a href={"#/admin/problems/" + p.id} className="cell-title">
                           {p.title}
@@ -170,23 +168,34 @@ export default function DuelProblems() {
                         <span className="cell-slug">{p.slug}</span>
                       </div>
                     </td>
-                    <td>
+                    <td className="col-shrink">
                       <DifficultyPill value={p.difficulty} />
                     </td>
-                    <td className="mono small">v{p.version_number}</td>
-                    <td className="mono small">{p.rounds_played}</td>
-                    <td>{p.hidden ? <Badge tone="neutral">Hidden</Badge> : <Badge tone="ok">Active</Badge>}</td>
-                    <td className="right">
+                    <td className="col-shrink mono small">v{p.version_number}</td>
+                    <td className="col-shrink mono small">{p.rounds_played}</td>
+                    <td className="col-shrink">
+                      {p.hidden ? (
+                        <span className="state-ind neutral">Hidden</span>
+                      ) : (
+                        <span className="state-ind ok">Active</span>
+                      )}
+                    </td>
+                    <td className="col-shrink right">
                       <div className="row-actions">
-                        <button type="button" onClick={() => setPreviewId(p.id)}>
-                          Preview
-                        </button>
-                        <a className="btn" href={"#/admin/problems/" + p.id}>
-                          Edit
-                        </a>
                         <button type="button" disabled={busy} onClick={() => void toggle(p)}>
                           {p.hidden ? "Show" : "Hide"}
                         </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => setPreviewId(p.id)}
+                          title="Preview as student"
+                        >
+                          <AdminIcon name="eye" size={14} />
+                        </button>
+                        <a className="btn icon-btn" href={"#/admin/problems/" + p.id} title="Edit problem">
+                          <AdminIcon name="edit" size={14} />
+                        </a>
                       </div>
                     </td>
                   </tr>
