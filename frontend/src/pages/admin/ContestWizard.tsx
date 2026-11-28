@@ -77,13 +77,20 @@ const EMPTY: Draft = {
   touchedTiming: false, touchedScoring: false,
 };
 
-const defaultPoints = (scoring: Draft["scoring"], i: number) =>
-  scoring === "IOI" ? 100 : scoring === "CODEFORCES" ? 500 * (i + 1) : scoring === "ATCODER" ? 100 * (i + 1) : 1;
+const DIFF_WEIGHT: Record<string, number> = { EASY: 1, MEDIUM: 2, HARD: 3 };
+const defaultPoints = (scoring: Draft["scoring"], _i: number, difficulty?: string) => {
+  const mult = DIFF_WEIGHT[difficulty ?? "MEDIUM"] ?? 2;
+  if (scoring === "IOI") return 100 * mult;
+  if (scoring === "CODEFORCES") return 500 * mult;
+  if (scoring === "ATCODER") return 100 * mult;
+  return 1;
+};
 const label = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1));
 const inferredDay = (folder?: string | null) => {
   const m = folder ? /\bday\s*(\d+)\b/i.exec(folder) : null;
   return m ? Number(m[1]) : 1;
 };
+const hasExplicitDay = (folder?: string | null) => Boolean(folder && /\bday\s*\d+\b/i.test(folder));
 
 function splitDuration(totalSeconds: number) {
   const mins = Math.max(1, Math.round(totalSeconds / 60));
@@ -187,13 +194,27 @@ export default function ContestWizard() {
 
   const filteredProblems = useMemo(() => {
     const q = problemSearch.trim().toLowerCase();
-    return approved.filter((p) => {
+    const list = approved.filter((p) => {
       if (diffFilter && (p.difficulty ?? "MEDIUM") !== diffFilter) return false;
       if (privateOnly && isPublic(p)) return false;
       if (folderFilter === "__NONE__" && p.folder) return false;
       if (folderFilter && folderFilter !== "__NONE__" && !(p.folder === folderFilter || p.folder?.startsWith(folderFilter + "/"))) return false;
       if (!q) return true;
       return (p.title + " " + p.slug + " " + (p.tags ?? []).join(" ") + " " + (p.folder ?? "")).toLowerCase().includes(q);
+    });
+    return [...list].sort((a, b) => {
+      const aHas = hasExplicitDay(a.folder) ? 0 : 1;
+      const bHas = hasExplicitDay(b.folder) ? 0 : 1;
+      if (aHas !== bHas) return aHas - bHas;
+      if (aHas === 0) {
+        const dayDiff = inferredDay(a.folder) - inferredDay(b.folder);
+        if (dayDiff !== 0) return dayDiff;
+      }
+      const folderDiff = (a.folder ?? "").localeCompare(b.folder ?? "");
+      if (folderDiff !== 0) return folderDiff;
+      const dDiff = (DIFF_WEIGHT[a.difficulty ?? "MEDIUM"] ?? 2) - (DIFF_WEIGHT[b.difficulty ?? "MEDIUM"] ?? 2);
+      if (dDiff !== 0) return dDiff;
+      return a.title.localeCompare(b.title);
     });
   }, [approved, diffFilter, privateOnly, folderFilter, problemSearch]);
 
@@ -263,7 +284,7 @@ export default function ContestWizard() {
             slot: i + 1,
             label: label(i),
             releaseDay: d.kind === "WARMUP" ? Math.min(maxDays, Math.max(1, d.releaseDays?.[version] ?? inferredDay(byId[version]?.folder))) : 1,
-            ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i) }),
+            ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i, byId[version]?.difficulty) }),
           }));
         }
       }
@@ -430,7 +451,11 @@ export default function ContestWizard() {
             </Field>
             <div className="card-flat small row-between">
               <span><strong>No scheduling needed:</strong> runs for <strong>{formatDuration(d.durationSeconds)}</strong> from the moment you hit Start.</span>
-              <span className="muted">All problems open at start &amp; close together at end.</span>
+              <span className="muted">
+                {showReleaseDay
+                  ? `Day 1 opens at start; Day 2–Day ${maxDays} unlock automatically every 24h.`
+                  : "All problems open at start & close together at end."}
+              </span>
             </div>
           </>
         ) : (
@@ -468,7 +493,11 @@ export default function ContestWizard() {
                 {!Number.isNaN(startMs) ? `${when(startIso(d.startsAt))} → ${when(new Date(endMs).toISOString())}` : "Pick a start date & time"}{" "}
                 · <strong>{formatDuration(d.durationSeconds)}</strong>
               </span>
-              <span className="muted">All problems open at start &amp; close together at end.</span>
+              <span className="muted">
+                {showReleaseDay
+                  ? `Day 1 opens at start; Day 2–Day ${maxDays} unlock automatically every 24h.`
+                  : "All problems open at start & close together at end."}
+              </span>
             </div>
           </>
         )}
@@ -611,7 +640,7 @@ export default function ContestWizard() {
                         <label className="row small" style={{ flexWrap: "nowrap" }}>
                           pts
                           <input type="number" min={1} max={100000} style={{ width: 82 }} disabled={Boolean(created)}
-                            value={d.points[v] ?? defaultPoints(d.scoring, i)}
+                            value={d.points[v] ?? defaultPoints(d.scoring, i, info?.difficulty)}
                             onChange={(e) => set({ points: { ...d.points, [v]: Number(e.target.value) } })} />
                         </label>
                       )}

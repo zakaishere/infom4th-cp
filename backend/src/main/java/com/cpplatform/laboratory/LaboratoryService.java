@@ -600,7 +600,7 @@ public class LaboratoryService {
         // Validate/auto-approve versions before placing them on a live surface.
         List<Map<String,Object>> ready=new ArrayList<>();
         for(UUID versionId:versionIds) {
-            var row=db.one("SELECT v.id,v.problem_id,v.title,v.status,p.archived_at FROM problem_versions v JOIN problems p ON p.id=v.problem_id WHERE v.id=? AND NOT p.system_benchmark FOR UPDATE",versionId);
+            var row=db.one("SELECT v.id,v.problem_id,v.title,v.status,v.difficulty,p.folder,p.archived_at FROM problem_versions v JOIN problems p ON p.id=v.problem_id WHERE v.id=? AND NOT p.system_benchmark FOR UPDATE",versionId);
             Api.require(row.get("archived_at")==null,HttpStatus.CONFLICT,"Restore \""+row.get("title")+"\" before assigning it");
             String st=(String)row.get("status");
             if("READY_FOR_REVIEW".equals(st) && db.exists("SELECT EXISTS(SELECT 1 FROM problem_validation_results r WHERE r.problem_version_id=? AND r.status='PASSED')",versionId)) {
@@ -683,21 +683,33 @@ public class LaboratoryService {
                         && !db.exists("SELECT EXISTS(SELECT 1 FROM contest_runs r WHERE r.competition_version_id=? AND r.kind='OFFICIAL' AND (r.status<>'PENDING' OR r.starts_at<=now()))",cvId));
                 Api.require(editable,HttpStatus.CONFLICT,"Problems are locked because this contest has already started or finished");
                 String scoring=String.valueOf(cv.get("scoring_system"));
+                boolean isWarmup="WARMUP".equals(cv.get("contest_format"));
+                int maxDays=Math.max(1,(int)Math.ceil(((Number)cv.get("duration_seconds")).doubleValue()/86400.0));
                 int slot=((Number)db.one("SELECT coalesce(max(slot),0) AS n FROM competition_problems WHERE competition_version_id=?",cvId).get("n")).intValue();
+                var dayPattern=java.util.regex.Pattern.compile("\\bday\\s*(\\d+)\\b",java.util.regex.Pattern.CASE_INSENSITIVE);
                 for(var row:ready) {
                     UUID versionId=(UUID)row.get("id"),problemId=(UUID)row.get("problem_id");
                     if(db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=? AND problem_id=?)",cvId,problemId)) continue;
                     Api.require(slot<100,HttpStatus.BAD_REQUEST,"A contest can hold at most 100 problems");
                     slot++;
                     String label=slot<=26?String.valueOf((char)('A'+slot-1)):("P"+slot);
+                    int mult=switch(String.valueOf(row.get("difficulty"))) {
+                        case "EASY" -> 1;
+                        case "HARD" -> 3;
+                        default -> 2;
+                    };
                     Integer pts=switch(scoring) {
-                        case "IOI" -> 100;
-                        case "CODEFORCES" -> 500*slot;
-                        case "ATCODER" -> 100*slot;
+                        case "IOI", "ATCODER" -> 100*mult;
+                        case "CODEFORCES" -> 500*mult;
                         default -> null;
                     };
-                    db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) VALUES (?,?,?,?,?,?,1)",
-                            cvId,slot,label,problemId,versionId,pts);
+                    int relDay=1;
+                    if(isWarmup && row.get("folder") instanceof String fl) {
+                        var m=dayPattern.matcher(fl);
+                        if(m.find()) relDay=Math.min(maxDays,Math.max(1,Integer.parseInt(m.group(1))));
+                    }
+                    db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) VALUES (?,?,?,?,?,?,?)",
+                            cvId,slot,label,problemId,versionId,pts,relDay);
                     updated++;
                 }
             }
