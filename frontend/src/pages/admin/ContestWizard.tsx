@@ -11,6 +11,7 @@ import { Badge, CONTEST_FORMAT_LABEL, Empty, Field, Loading, consumeQueuedContes
 
 type ContestFormat = "STANDARD" | "BASIC" | "WARMUP";
 type Lab = {
+  id?: string;
   version_id: string;
   title: string;
   slug: string;
@@ -174,10 +175,18 @@ export default function ContestWizard() {
     });
   };
 
-  const approved = useMemo(
-    () => (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED"),
-    [lab.data],
-  );
+  const approved = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Lab[] = [];
+    for (const p of lab.data ?? []) {
+      if (p.status !== "APPROVED" && p.status !== "PUBLISHED") continue;
+      const key = p.id ?? p.slug;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  }, [lab.data]);
   const byId = useMemo(() => Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p])), [lab.data]);
 
   const allFolders = useMemo(() => {
@@ -256,6 +265,9 @@ export default function ContestWizard() {
     setLog([]);
     try {
       let id = created;
+      let existingProblemIds = new Set<string>();
+      let existingVersionIds = new Set<string>();
+      let usedSlots = new Set<number>();
       if (!id) {
         const r = await runStep("Creating contest", () => post<{ competitionId: string }>("/api/manage/competitions", {
           slug: d.slug,
@@ -277,16 +289,39 @@ export default function ContestWizard() {
         }));
         id = (r as { competitionId: string }).competitionId;
         setCreated(id);
-        for (const [i, version] of d.problems.entries()) {
-          const title = byId[version]?.title ?? version;
-          await runStep(`Adding problem ${label(i)}: ${title}`, () => post("/api/manage/competitions/" + id + "/problems", {
-            versionId: version,
-            slot: i + 1,
-            label: label(i),
-            releaseDay: d.kind === "WARMUP" ? Math.min(maxDays, Math.max(1, d.releaseDays?.[version] ?? inferredDay(byId[version]?.folder))) : 1,
-            ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, i, byId[version]?.difficulty) }),
-          }));
+      } else {
+        const existing = await get<{ problems?: { slot: number; problem_id: string; problem_version_id: string }[] }>("/api/manage/competitions/" + id);
+        for (const ep of existing.problems ?? []) {
+          existingProblemIds.add(ep.problem_id);
+          existingVersionIds.add(ep.problem_version_id);
+          usedSlots.add(ep.slot);
         }
+      }
+      const seenInBatch = new Set<string>();
+      const uniqueVersions = d.problems.filter((v) => {
+        const key = byId[v]?.id ?? v;
+        if (seenInBatch.has(key)) return false;
+        seenInBatch.add(key);
+        return true;
+      });
+      let nextSlot = 1;
+      for (const [i, version] of uniqueVersions.entries()) {
+        const pid = byId[version]?.id;
+        if (existingVersionIds.has(version) || (pid && existingProblemIds.has(pid))) {
+          nextSlot = Math.max(nextSlot, i + 2);
+          continue;
+        }
+        while (usedSlots.has(nextSlot)) nextSlot++;
+        const slot = nextSlot++;
+        usedSlots.add(slot);
+        const title = byId[version]?.title ?? version;
+        await runStep(`Adding problem ${label(slot - 1)}: ${title}`, () => post("/api/manage/competitions/" + id + "/problems", {
+          versionId: version,
+          slot,
+          label: label(slot - 1),
+          releaseDay: d.kind === "WARMUP" ? Math.min(maxDays, Math.max(1, d.releaseDays?.[version] ?? inferredDay(byId[version]?.folder))) : 1,
+          ...(d.scoring === "ICPC" ? {} : { points: d.points[version] ?? defaultPoints(d.scoring, slot - 1, byId[version]?.difficulty) }),
+        }));
       }
       if (handles.length && d.mode === "INDIVIDUAL") {
         const result = await runStep(`Registering ${handles.length} participant(s)`, () => post<{ user: string; status: string }[]>("/api/manage/competitions/" + id + "/participants", { users: handles }));

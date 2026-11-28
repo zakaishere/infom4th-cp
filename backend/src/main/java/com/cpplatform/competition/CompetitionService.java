@@ -181,6 +181,7 @@ public class CompetitionService {
         if(v.get("sealed_at")!=null)
             Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions WHERE id=? AND sealed_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"Only approved problems can be added to a published contest");
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions pv JOIN problems p ON p.id=pv.problem_id WHERE pv.id=? AND p.archived_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"This problem was deleted; restore it first");
+        Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems cp JOIN problem_versions pv ON pv.problem_id=cp.problem_id WHERE cp.competition_version_id=? AND pv.id=?)",v.get("id"),problemVersion),HttpStatus.CONFLICT,"This problem is already in the contest");
         Api.require(releaseDay>=1 && releaseDay<=(warmup(v)?days(v):1),HttpStatus.BAD_REQUEST,warmup(v)?"Pick a day from 1 to "+days(v):"Problems of this contest all open at the start");
         db.jdbc.update("INSERT INTO competition_problems(competition_version_id,slot,label,problem_id,problem_version_id,points,release_day) SELECT ?,?,?,problem_id,id,?,? FROM problem_versions WHERE id=?",
                 v.get("id"),slot,label,points,releaseDay,problemVersion);
