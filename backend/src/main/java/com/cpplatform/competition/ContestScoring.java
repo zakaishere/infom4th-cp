@@ -87,9 +87,9 @@ public final class ContestScoring {
         List<Row> rows=new ArrayList<>();
         for(int i=0;i<scored.size();i++) {
             var s=scored.get(i);
-            // ICPC keeps distinct ranks (deterministic tie break); points systems share ranks on exact ties.
+            // All scoring systems share ranks on exact ties while keeping deterministic display order.
             int rank=i+1;
-            if(!system.equals("ICPC") && i>0 && order.compare(scored.get(i-1),s)==0)rank=rows.get(i-1).rank();
+            if(i>0 && order.compare(scored.get(i-1),s)==0)rank=rows.get(i-1).rank();
             rows.add(new Row(rank,s.entry,s.solved,s.score,system.equals("ICPC") || system.equals("ATCODER")?s.penalty:null,s.cells));
         }
         List<Stat> stats=new ArrayList<>();

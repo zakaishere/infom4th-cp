@@ -24,7 +24,6 @@ public class SubmissionService {
                     && source.equals(p.get("source_code")) && language.equals(p.get("language_code")),HttpStatus.CONFLICT,"Idempotency key reused for different content");
             return (UUID)p.get("id");
         }
-        admit(actor,language);
         UUID submission,version;
         if(run!=null) {
             var r=contests.runAccess(actor,run,true);
@@ -34,6 +33,7 @@ public class SubmissionService {
             var member=db.one("SELECT entry_id FROM run_entry_members WHERE run_id=? AND user_id=?",run,actor.id());
             var problem=db.one("SELECT cp.problem_version_id FROM competition_problems cp WHERE cp.competition_version_id=? AND slot=?",r.get("competition_version_id"),slot);
             version=(UUID)problem.get("problem_version_id");
+            admit(actor,language);
             submission=db.id("INSERT INTO submissions(run_id,competition_version_id,entry_id,submitted_by,problem_slot,problem_version_id,language_code,source_code,idempotency_key,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,clock_timestamp()) RETURNING id",
                     run,r.get("competition_version_id"),member.get("entry_id"),actor.id(),slot,version,language,source,key);
         } else {
@@ -42,6 +42,7 @@ public class SubmissionService {
             // mode=samples: "run examples" judges only the statement's example tests and is not counted.
             boolean samples="samples".equals(body.get("mode"));
             if(samples)Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM test_cases WHERE problem_version_id=? AND is_sample)",version),HttpStatus.CONFLICT,"This problem has no example tests");
+            admit(actor,language);
             submission=db.id("INSERT INTO submissions(context,submitted_by,problem_version_id,language_code,source_code,idempotency_key,samples_only) VALUES ('PRACTICE',?,?,?,?,?,?) RETURNING id",
                     actor.id(),version,language,source,key,samples);
         }

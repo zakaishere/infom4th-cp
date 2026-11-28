@@ -58,8 +58,9 @@ public class AuthController {
     }
     @PostMapping("/api/auth/logout")
     Object logout(@RequestBody(required = false) Map<String,Object> body,Authentication authentication,HttpServletRequest request) {
-        if (body != null && body.get("refreshToken") instanceof String rt && !rt.isBlank()) {
-            auth.logout(Actor.of(authentication), rt);
+        if (authentication != null && authentication.getPrincipal() instanceof Actor actor
+                && body != null && body.get("refreshToken") instanceof String rt && !rt.isBlank()) {
+            auth.logout(actor, rt);
         }
         HttpSession session = request.getSession(false);
         if (session != null) {

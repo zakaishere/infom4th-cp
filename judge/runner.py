@@ -290,7 +290,15 @@ class DockerRunner:
                 # the Docker daemon cannot complete the kill below.
                 process.kill()
                 process.wait(timeout=5)
-                cpu, peak, oom = self._metrics(name)
+                try:
+                    cpu, peak, oom = self._metrics(name)
+                except InfrastructureError:
+                    state = json.loads(self.control(["inspect", name, "--format", "{{json .State}}"]))
+                    self.control(["kill", name], 20)
+                    if state.get("OOMKilled"):
+                        return Execution(process.returncode or -1, bytes(buffers["stdout"]), bytes(buffers["stderr"]),
+                                         timeout=timed_out, overflow=overflow, oom=True)
+                    raise
                 # Kill the entire cgroup/container, including forked descendants.
                 self.control(["kill", name], 20)
                 return Execution(process.returncode or -1, bytes(buffers["stdout"]), bytes(buffers["stderr"]),
@@ -425,7 +433,7 @@ class DockerRunner:
         """Kills leftover contestant processes and empties /tmp so tests stay independent."""
         try:
             self.control(["exec", "--user", "10001:10001", name, "sh", "-c",
-                          "kill -9 -1 2>/dev/null; rm -rf /tmp/* /tmp/.[!.]* 2>/dev/null; true"], 10)
+                          "kill -9 -1 2>/dev/null; rm -rf /tmp/* /tmp/.[!.]* /tmp/..?* 2>/dev/null; true"], 10)
             return True
         except InfrastructureError:
             return False

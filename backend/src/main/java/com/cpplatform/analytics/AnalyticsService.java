@@ -256,7 +256,7 @@ public class AnalyticsService {
     // One row per submission with its latest judging. Times are milliseconds; a rejudge is timed from when it was requested.
     private static final String TIMED="SELECT s.id,s.submitted_at,s.context,s.samples_only,s.language_code,s.submitted_by,u.handle,pv.title AS problem,c.title AS contest,r.kind AS run_kind,cp.label,"+
             "CASE WHEN s.context='CONTEST' THEN 'Contest' WHEN s.context='LABORATORY' THEN 'Problem testing' WHEN s.context='BENCHMARK' THEN 'Benchmark' WHEN s.samples_only THEN 'Practice examples' ELSE 'Practice' END AS kind,"+
-            "CASE WHEN s.context='CONTEST' OR (SELECT b.lane FROM benchmark_runs b WHERE b.id=s.benchmark_id)='official' THEN 'official' ELSE 'internal' END AS lane,"+
+            "CASE WHEN (s.context='CONTEST' AND r.kind='OFFICIAL') OR (SELECT b.lane FROM benchmark_runs b WHERE b.id=s.benchmark_id)='official' THEN 'official' ELSE 'internal' END AS lane,"+
             "l.status,l.verdict,l.passed_tests,l.total_tests,l.execution_time_ms,l.peak_memory_kb,l.generation,l.attempt_count,l.last_error_code,l.worker,l.compile_ms,l.tests_ms,"+
             "round(extract(epoch FROM coalesce(l.first_started_at,now())-l.created_at)*1000) AS wait_ms,"+
             "round(extract(epoch FROM l.completed_at-coalesce(l.last_started_at,l.first_started_at))*1000) AS judge_ms,"+
@@ -303,7 +303,7 @@ public class AnalyticsService {
                 "LEFT JOIN (SELECT lane,count(*) AS count,round(avg(judge_ms)) AS avg_judge_ms,round((percentile_cont(0.95) WITHIN GROUP (ORDER BY judge_ms))::numeric) AS p95_judge_ms,"+
                 "round(avg(attempt_count),2) AS avg_attempts,count(*) FILTER (WHERE attempt_count>1) AS retried,max(attempt_count) AS worst_attempts "+
                 window+"AND NOT samples_only GROUP BY lane) m ON m.lane=l.lane "+
-                "LEFT JOIN (SELECT lane,count(*) AS unpublished,round(max(extract(epoch FROM now()-created_at))*1000) AS oldest_unpublished_ms FROM judge_outbox WHERE published_at IS NULL GROUP BY lane) q ON q.lane=l.lane "+
+                "LEFT JOIN (SELECT lower(lane) AS lane,count(*) AS unpublished,round(max(extract(epoch FROM now()-created_at))*1000) AS oldest_unpublished_ms FROM judge_outbox WHERE published_at IS NULL GROUP BY lower(lane)) q ON q.lane=l.lane "+
                 "ORDER BY l.lane",hours));
         // Jobs that ran out of attempts. They are excluded from the averages above, which is why the block is separate.
         String failed="FROM ("+TIMED+"WHERE s.submitted_at>now()-make_interval(hours=>?)) d WHERE d.status='FAILED' ";

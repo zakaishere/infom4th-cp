@@ -133,7 +133,7 @@ services:
       JUDGE_LANE: official
       # Initial concurrency before an administrator saves a setting (live-adjustable).
       JUDGE_SLOTS: ${OFFICIAL_JUDGE_SLOTS:-2}
-      # Physical ceiling; raising it requires restarting this worker.
+      # Deployment default/warning threshold for live concurrency (admin UI can override up to 256 with warnings).
       JUDGE_MAX_SLOTS: ${OFFICIAL_JUDGE_MAX_SLOTS:-${OFFICIAL_JUDGE_SLOTS:-2}}
       JUDGE_MAX_MEMORY_MB: ${JUDGE_MAX_MEMORY_MB:-1024}
       JUDGE_MEMORY_BUDGET_MB: ${OFFICIAL_MEMORY_BUDGET_MB:-}

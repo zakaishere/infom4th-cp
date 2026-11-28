@@ -139,8 +139,9 @@ public class BenchmarkService {
         String source=rawSource==null || String.valueOf(rawSource).isBlank()?SAMPLES.get(language):String.valueOf(rawSource);
         Api.require(source!=null && source.length()<=MAX_SOURCE,HttpStatus.BAD_REQUEST,"The program must be at most "+MAX_SOURCE+" characters");
         Api.require(!activeRun(),HttpStatus.CONFLICT,"Another benchmark is still running");
-        // Contest judges belong to contestants the moment a contest is on.
+        // Contest judges belong to contestants the moment a contest is on; internal judges belong to live duels.
         Api.require(!lane.equals("official") || !contestBusy(),HttpStatus.CONFLICT,"A contest is running or starts within 30 minutes. Use the internal judges or wait.");
+        Api.require(!lane.equals("internal") || !db.exists("SELECT EXISTS(SELECT 1 FROM duels WHERE status='ACTIVE')"),HttpStatus.CONFLICT,"A live duel room is running on internal judges; wait until it finishes.");
         UUID version=(UUID)problem.get("version_id");
         Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM judge_workers w JOIN problem_runtime_pins pin ON pin.problem_version_id=? AND pin.language_code=? WHERE w.status='ONLINE' AND w.last_heartbeat_at>now()-interval '90 seconds' AND NOT w.drain_requested AND w.lane=? AND w.runtime_manifest->?->>'verified'='true' AND w.runtime_manifest->?->>'imageId'=pin.image_id)",version,language,lane,language,language),
                 HttpStatus.CONFLICT,"No "+lane+" judge is online for this language");

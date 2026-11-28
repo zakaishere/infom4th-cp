@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { download, post } from "../../api";
 import { useAction, useData } from "../../app";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, ReasonDialog, Stat, VERDICTS, when } from "../../ui";
@@ -32,11 +32,17 @@ function RunReport({ id, onChanged }: { id: string; onChanged: () => void }) {
   const r = live.data;
   const active = r?.active;
   // A report can hold a thousand rows, so it only refreshes while something can still change.
+  const reloadLive = live.reload;
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => { if (document.visibilityState === "visible") live.reload(); }, 2000);
-    return () => { clearInterval(timer); onChanged(); };
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+    const timer = setInterval(() => { if (document.visibilityState === "visible") reloadLive(); }, 2000);
+    return () => { clearInterval(timer); };
+  }, [active, id, reloadLive]);
+  const prevActive = useRef(active);
+  useEffect(() => {
+    if (prevActive.current && !active) onChanged();
+    prevActive.current = active;
+  }, [active, onChanged]);
   if (live.loading) return <Loading label="Loading the report…" />;
   if (!r) return <ErrorBox error={live.error} />;
   const s = r.summary, done = s.finished + s.failed, m = s.metrics;

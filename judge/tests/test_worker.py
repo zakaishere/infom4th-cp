@@ -328,9 +328,21 @@ class EnvironmentTests(unittest.TestCase):
                                             "JUDGE_HOST_ID": "judge-a", "JUDGE_HOST_MEMORY_BUDGET_MB": "20480"})
         self.assertEqual((config["ceiling"], config["initial"], config["hostId"]), (16, 4, "judge-a"))
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_busy_claim_requeues_after_deadline(self):
+        cap = Capacity(2, 1)
+        class AlwaysBusyApi:
+            def __init__(self):
+                self.calls = 0
+            def post(self, path, body):
+                self.calls += 1
+                raise CapacityBusy("LANE_LIMIT")
+        api = AlwaysBusyApi()
+        stop = threading.Event()
+        with self.assertRaises(Requeue):
+            execute({"jobId": "j-busy", "dispatchSequence": 1}, 0, cap, api, lambda: "w1", None, stop,
+                    backoff=lambda: 0.01, max_busy_wait=0.02)
+        self.assertGreaterEqual(api.calls, 2)
+        self.assertEqual(cap.snapshot()["active"], 0)
 
 
 class StartupVerificationTests(unittest.TestCase):
@@ -401,3 +413,7 @@ class SharedHostTests(unittest.TestCase):
         calls.clear()
         self.assertEqual(runner.remove_leftovers(), 0)
         self.assertEqual(calls, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

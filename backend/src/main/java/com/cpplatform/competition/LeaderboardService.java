@@ -128,9 +128,12 @@ public class LeaderboardService {
         for(Membership m:members)byUser.computeIfAbsent(m.user(),k->new ArrayList<>()).add(m);
         for(Solve s:solves) {
             credit(players,s.user(),s);
-            if(s.team()!=null)credit(teams,s.team(),s);
-            // Joining a team never carries points earned before joining.
-            for(Membership m:byUser.getOrDefault(s.user(),List.of()))if(!s.at().isBefore(m.joinedAt()))credit(teams,m.team(),s);
+            if(s.team()!=null) {
+                credit(teams,s.team(),s);
+            } else {
+                // Solo/practice solves credit the player's current teams, never before they joined.
+                for(Membership m:byUser.getOrDefault(s.user(),List.of()))if(!s.at().isBefore(m.joinedAt()))credit(teams,m.team(),s);
+            }
         }
         // Every listed account appears, on Σ 0 until the first solve that counts.
         for(UUID user:listed)players.computeIfAbsent(user,k->new HashMap<>());

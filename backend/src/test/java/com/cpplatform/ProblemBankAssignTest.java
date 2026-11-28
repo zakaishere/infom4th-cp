@@ -236,4 +236,30 @@ class ProblemBankAssignTest {
         assertEquals("SKIPPED", third.get("outcome"));
         assertEquals(newVersion, third.get("versionId"));
     }
+
+    @Test
+    void nonOwnerOrganizerCannotMutateOrAssignAnotherSettersPrivateProblem() {
+        UUID v = validatedReviewReadyProblem("Secret Private Problem");
+        String key = "org" + UUID.randomUUID().toString().replace("-", "");
+        UUID otherId = (UUID) auth.register(Map.of(
+                "email", key + "@example.test",
+                "handle", key.substring(0, 25),
+                "displayName", key,
+                "password", "TestPassword1!"
+        )).get("userId");
+        db.jdbc.update("INSERT INTO user_roles(user_id, role_code) VALUES (?, 'ADMIN')", otherId);
+        Actor otherAdmin = new Actor(otherId, Set.of("ADMIN", "PARTICIPANT"));
+
+        var moveEx = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> lab.moveToFolder(otherAdmin, List.of(v), "Hijacked"));
+        assertEquals(403, moveEx.getStatusCode().value());
+
+        var tagsEx = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> lab.bulkTags(otherAdmin, List.of(v), List.of("math"), false));
+        assertEquals(403, tagsEx.getStatusCode().value());
+
+        var assignEx = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> lab.assign(otherAdmin, Map.of("versionIds", List.of(v.toString()), "surface", "PRACTICE")));
+        assertEquals(403, assignEx.getStatusCode().value());
+    }
 }

@@ -24,7 +24,7 @@ public class OutboxDispatcher {
     @Scheduled(fixedDelayString="${cp.dispatch.delay-ms:250}")
     public void dispatch() {
         UUID claim=UUID.randomUUID();
-        var batch=tx.execute(status->db.jdbc.queryForList("WITH pending AS (SELECT id FROM judge_outbox WHERE published_at IS NULL AND available_at<=now() AND (claim_expires_at IS NULL OR claim_expires_at<now()) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 8) UPDATE judge_outbox o SET claim_token=?,claim_expires_at=now()+interval '120 seconds',attempts=attempts+1 FROM pending p WHERE o.id=p.id RETURNING o.*",claim));
+        var batch=tx.execute(status->db.jdbc.queryForList("WITH pending AS (SELECT o.id FROM judge_outbox o JOIN judging_jobs j ON j.id=o.job_id WHERE o.published_at IS NULL AND o.available_at<=now() AND (o.claim_expires_at IS NULL OR o.claim_expires_at<now()) ORDER BY j.priority DESC,o.created_at ASC FOR UPDATE OF o SKIP LOCKED LIMIT 8) UPDATE judge_outbox o SET claim_token=?,claim_expires_at=now()+interval '120 seconds',attempts=attempts+1 FROM pending p WHERE o.id=p.id RETURNING o.*",claim));
         if(batch==null)return;
         for(var event:batch) {
             UUID id=(UUID)event.get("id");

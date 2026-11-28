@@ -172,7 +172,7 @@ public class OidcSupport {
             response.setHeader("Cache-Control", "no-store");
             response.setHeader("Content-Security-Policy",
                     "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'");
-            String escapedError = error == null ? "null" : "\"" + error.replace("\\", "\\\\").replace("\"", "\\\"").replace("<", "\\u003c") + "\"";
+            String escapedError = error == null ? "null" : "\"" + error.replace("\\", "\\\\").replace("\"", "\\\"").replace("<", "\\u003c").replace("\n", "\\n").replace("\r", "\\r") + "\"";
             String safeSubtitle = ok
                     ? "Returning you to InfoM4th Arena…"
                     : (error != null ? error : "Please close this window and try again.")

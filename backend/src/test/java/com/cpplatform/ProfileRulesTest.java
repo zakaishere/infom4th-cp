@@ -34,6 +34,8 @@ class ProfileRulesTest {
         assertEquals(last(history,a),last(history,b));
         assertTrue(last(history,a)>Rating.START);
         assertTrue(last(history,c)<Rating.START);
+        // Unequal team sizes conserve total rating instead of inflating it from nothing.
+        assertEquals(3*Rating.START,last(history,a)+last(history,b)+last(history,c));
     }
 
     static ContestScoring.Submission sub(UUID entry,int slot,Instant at,String verdict){return new ContestScoring.Submission(UUID.randomUUID(),entry,slot,at,verdict,1,1);}

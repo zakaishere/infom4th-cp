@@ -289,16 +289,19 @@ export function PracticeProblem({ versionId, section = "practice", mission }: { 
 
   // Drag the divider between statement and editor.
   const dragging = useRef(false);
+  const splitRef = useRef(split);
+  splitRef.current = split;
   useEffect(() => {
     const move = (e: PointerEvent) => {
       if (!dragging.current) return;
       const pct = Math.min(70, Math.max(28, (100 * e.clientX) / window.innerWidth));
+      splitRef.current = pct;
       setSplit(pct);
     };
-    const up = () => { if (dragging.current) { dragging.current = false; document.body.classList.remove("resizing"); try { localStorage.setItem("cp.practice.split", String(split)); } catch { /* ignore */ } } };
+    const up = () => { if (dragging.current) { dragging.current = false; document.body.classList.remove("resizing"); try { localStorage.setItem("cp.practice.split", String(splitRef.current)); } catch { /* ignore */ } } };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-  }, [split]);
+  }, []);
 
   if (problem.loading) return <Loading label="Opening the problem…" />;
   if (!problem.data) return <main className="page"><ErrorBox error={problem.error} /><a href={listHref}>{backLabel}</a></main>;

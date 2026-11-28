@@ -421,10 +421,17 @@ function RoundWorkspace({ duelId, round, state, player, onSubmitted }: { duelId:
   const runId = run?.id, runDone = Boolean(run?.detail?.judging[0]?.verdict) || run?.detail?.judging[0]?.status === "FAILED";
   useEffect(() => {
     if (!runId || runDone) return;
+    let cancelled = false, inFlight = false;
     const timer = setInterval(async () => {
-      try { const detail = await get<SubmissionDetail>("/api/submissions/" + runId); setRun((r) => (r?.id === runId ? { ...r, detail } : r)); } catch { /* retried */ }
+      if (cancelled || inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      try {
+        const detail = await get<SubmissionDetail>("/api/submissions/" + runId);
+        if (!cancelled) setRun((r) => (r?.id === runId ? { ...r, detail } : r));
+      } catch { /* retried */ }
+      finally { inFlight = false; }
     }, 1000);
-    return () => clearInterval(timer);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [runId, runDone]);
 
   const roundFeed = state.feed.filter((f) => f.duel_round === round.number);

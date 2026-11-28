@@ -88,27 +88,46 @@ export function useData<T>(path: string | null, intervalMs = 0) {
   const [data, setData] = useState<T | undefined>(undefined);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(path !== null);
+  const reqId = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
   const reload = useCallback(async () => {
     if (!path) return;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const id = ++reqId.current;
     try {
-      setData(await get<T>(path));
+      const next = await get<T>(path, controller.signal);
+      if (id !== reqId.current) return;
+      setData(next);
       setError(null);
     } catch (e) {
+      if (id !== reqId.current || (e instanceof DOMException && e.name === "AbortError")) return;
       setError(e instanceof ApiError ? e : new ApiError(0, "Network error; retrying"));
     } finally {
-      setLoading(false);
+      if (id === reqId.current) setLoading(false);
     }
   }, [path]);
   useEffect(() => {
     setLoading(path !== null);
     setData(undefined);
+    setError(null);
     reload();
-    if (!intervalMs || !path) return;
+    if (!intervalMs || !path) {
+      return () => {
+        reqId.current++;
+        controllerRef.current?.abort();
+      };
+    }
     // Pause polling while the tab is hidden to spare the API during large contests.
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") reload();
     }, intervalMs);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      reqId.current++;
+      controllerRef.current?.abort();
+    };
   }, [path, intervalMs, reload]);
   return { data, error, loading, reload, setData };
 }

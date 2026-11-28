@@ -31,11 +31,12 @@ public final class Rating {
                     expected+=1/(1+Math.pow(10,(strength[j]-strength[i])/400));
                 }
                 double swing=(actual-expected)/Math.sqrt(n-1);
+                double memberSwing=swing/Math.max(1,me.members().size());
                 for(UUID user:me.members()) {
                     int before=current(history,user);
                     // New players move faster until the rating has settled.
                     int k=history.getOrDefault(user,List.of()).size()<PROVISIONAL_CONTESTS?80:40;
-                    history.computeIfAbsent(user,x->new ArrayList<>()).add(new Change(contest.run(),me.entry(),before,Math.max(0,before+(int)Math.round(k*swing))));
+                    history.computeIfAbsent(user,x->new ArrayList<>()).add(new Change(contest.run(),me.entry(),before,Math.max(0,before+(int)Math.round(k*memberSwing))));
                 }
             }
         }

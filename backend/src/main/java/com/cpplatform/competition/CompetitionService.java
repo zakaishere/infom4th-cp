@@ -13,7 +13,10 @@ import java.sql.Timestamp;
 @Service
 public class CompetitionService {
     private final Database db;private final Permissions access;private final LaboratoryService lab;
-    public CompetitionService(Database db,Permissions access,LaboratoryService lab){this.db=db;this.access=access;this.lab=lab;}
+    private final ContestResults results;private final LeaderboardService leaderboard;
+    public CompetitionService(Database db,Permissions access,LaboratoryService lab,@org.springframework.context.annotation.Lazy ContestResults results,LeaderboardService leaderboard){
+        this.db=db;this.access=access;this.lab=lab;this.results=results;this.leaderboard=leaderboard;
+    }
     @Transactional
     public UUID create(Actor actor,Map<String,Object> body) {
         access.organizer(actor);
@@ -134,6 +137,7 @@ public class CompetitionService {
         db.jdbc.update("DELETE FROM competition_versions WHERE competition_id=?",competition);
         db.jdbc.update("DELETE FROM competition_staff WHERE competition_id=?",competition);
         db.jdbc.update("DELETE FROM competitions WHERE id=?",competition);
+        results.invalidate();leaderboard.invalidate();
         db.audit(actor.id(),"COMPETITION_DELETE","competition",competition,c.get("title")+" ("+c.get("slug")+")"+(reason!=null&&!reason.isBlank()?": "+reason:""));
     }
     /** Problems can be edited before sealing, or while a scheduled/manual-start official run has not started yet. */
@@ -179,7 +183,7 @@ public class CompetitionService {
         db.one("SELECT id FROM competitions WHERE id=? FOR UPDATE",competition);
         var v=version(competition);Api.require(canEditProblems(v),HttpStatus.CONFLICT,"Problems are locked once the contest has started");
         if(v.get("sealed_at")!=null)
-            Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions WHERE id=? AND sealed_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"Only approved problems can be added to a published contest");
+            Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions pv WHERE pv.id=? AND pv.status IN ('APPROVED','PUBLISHED') AND EXISTS(SELECT 1 FROM problem_validation_results r WHERE r.problem_version_id=pv.id AND r.status='PASSED'))",problemVersion),HttpStatus.CONFLICT,"Only approved and validated problems can be added to a published contest");
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM problem_versions pv JOIN problems p ON p.id=pv.problem_id WHERE pv.id=? AND p.archived_at IS NOT NULL)",problemVersion),HttpStatus.CONFLICT,"This problem was deleted; restore it first");
         Api.require(!db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems cp JOIN problem_versions pv ON pv.problem_id=cp.problem_id WHERE cp.competition_version_id=? AND pv.id=?)",v.get("id"),problemVersion),HttpStatus.CONFLICT,"This problem is already in the contest");
         Api.require(releaseDay>=1 && releaseDay<=(warmup(v)?days(v):1),HttpStatus.BAD_REQUEST,warmup(v)?"Pick a day from 1 to "+days(v):"Problems of this contest all open at the start");
@@ -295,6 +299,7 @@ public class CompetitionService {
     public void setRated(Actor actor,UUID competition,boolean rated,String reason) {
         access.competition(actor,competition,false);
         db.jdbc.update("UPDATE competitions SET rated=? WHERE id=?",rated,competition);
+        results.invalidate();leaderboard.invalidate();
         db.audit(actor.id(),rated?"COMPETITION_RATED":"COMPETITION_UNRATED","competition",competition,reason);
     }
     /** Lets a user register for a private competition. */
@@ -378,7 +383,8 @@ public class CompetitionService {
             case "start-now" -> {
                 // Starts a scheduled or manual-start contest immediately; it still ends after its configured duration.
                 Api.require("OFFICIAL".equals(r.get("kind")) && "PENDING".equals(r.get("status")),HttpStatus.CONFLICT,"Only a contest that has not started yet can be started now");
-                Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM competition_problems WHERE competition_version_id=?)",r.get("competition_version_id")),HttpStatus.CONFLICT,"Attach at least one problem before starting the contest");
+                var errors=readiness((UUID)r.get("competition_id"));
+                Api.require(errors.isEmpty(),HttpStatus.CONFLICT,"Contest is not ready to start: "+String.join("; ",errors));
                 db.jdbc.update("UPDATE contest_runs SET starts_at=now(),ends_at=now()+(ends_at-starts_at),status='RUNNING',manual_start=false WHERE id=?",run);
                 db.jdbc.update("UPDATE competitions SET status='RUNNING' WHERE id=? AND status='SCHEDULED'",r.get("competition_id"));
             }

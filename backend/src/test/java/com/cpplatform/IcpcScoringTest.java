@@ -35,6 +35,7 @@ class IcpcScoringTest {
     @Test void tiesAreDeterministicAndPendingDoesNotPenalize() {
         var result=IcpcScoring.calculate(List.of(b,a),List.of(1),List.of(s(a,1,100,null)),start,null,1200,false);
         assertEquals(a,result.get(0).entry());assertEquals(0,result.get(0).penaltySeconds());
+        assertEquals(1,result.get(0).rank());assertEquals(1,result.get(1).rank());
     }
     @Test void onlyFirstAcceptedCountsAndUnsolvedAttemptsAddNoPenalty() {
         var result=IcpcScoring.calculate(List.of(a),List.of(1,2),

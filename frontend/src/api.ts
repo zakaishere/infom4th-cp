@@ -34,7 +34,7 @@ function readCookie(name: string): string | null {
   return null;
 }
 
-type Options = { body?: unknown; idempotencyKey?: string; anonymous?: boolean };
+type Options = { body?: unknown; idempotencyKey?: string; anonymous?: boolean; signal?: AbortSignal };
 
 export async function api<T = any>(method: string, path: string, options: Options = {}): Promise<T> {
   const headers: Record<string, string> = {};
@@ -49,6 +49,7 @@ export async function api<T = any>(method: string, path: string, options: Option
     credentials: "include",
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.signal,
   });
   if (response.status === 204) return undefined as T;
   const text = await response.text();
@@ -222,7 +223,7 @@ export async function syncServerClock() {
   }
 }
 
-export const get = <T = any>(path: string) => api<T>("GET", path);
+export const get = <T = any>(path: string, signal?: AbortSignal) => api<T>("GET", path, signal ? { signal } : {});
 export const post = <T = any>(path: string, body: unknown = {}, idempotencyKey?: string) => api<T>("POST", path, { body, idempotencyKey });
 export const put = <T = any>(path: string, body: unknown) => api<T>("PUT", path, { body });
 export const patch = <T = any>(path: string, body: unknown) => api<T>("PATCH", path, { body });

@@ -45,7 +45,7 @@ Two kinds of settings exist:
 
 | Kind | Where | Applies |
 | --- | --- | --- |
-| Physical ceilings: JUDGE_MAX_SLOTS, JUDGE_MAX_MEMORY_MB, JUDGE_MEMORY_BUDGET_MB, JUDGE_HOST_ID, JUDGE_HOST_MEMORY_BUDGET_MB, JUDGE_LANE, runtime images | Worker environment (.env / compose) | Worker restart |
+| Worker defaults & environment: JUDGE_MAX_SLOTS (warning threshold), JUDGE_MAX_MEMORY_MB, JUDGE_MEMORY_BUDGET_MB, JUDGE_HOST_ID, JUDGE_HOST_MEMORY_BUDGET_MB, JUDGE_LANE, runtime images | Worker environment (.env / compose) | Worker restart |
 | Desired limits: global official/internal limits, worker execution limit, drain, admission limits | Admin UI, Judging settings, or PATCH /api/admin/judging/... | Live, within about 5 seconds |
 
 JUDGE_SLOTS is only the initial concurrency of a worker until an administrator saves

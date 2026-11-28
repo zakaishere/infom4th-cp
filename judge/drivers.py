@@ -141,7 +141,7 @@ void read(std::string& v) {
             case 'b': v += '\b'; break; case 'f': v += '\f'; break;
             case 'u': {
                 unsigned u = hex4();
-                if (u >= 0xD800 && u < 0xDC00 && at + 1 < in.size() && in[at] == '\\' && in[at + 1] == 'u') { at += 2; u = 0x10000 + ((u - 0xD800) << 10) + (hex4() - 0xDC00); }
+                if (u >= 0xD800 && u < 0xDC00 && at + 1 < in.size() && in[at] == '\\' && in[at + 1] == 'u') { at += 2; unsigned lo = hex4(); if (lo < 0xDC00 || lo > 0xDFFF) bad(); u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00); }
                 utf8(v, u); break;
             }
             default: v += c;
@@ -243,7 +243,7 @@ static char *__r_string(void) {
         else if (c == 'b') s[n++] = '\b'; else if (c == 'f') s[n++] = '\f';
         else if (c == 'u') {
             unsigned u = __hex4();
-            if (u >= 0xD800 && u < 0xDC00 && __at + 1 < __len && __in[__at] == '\\' && __in[__at + 1] == 'u') { __at += 2; u = 0x10000 + ((u - 0xD800) << 10) + (__hex4() - 0xDC00); }
+            if (u >= 0xD800 && u < 0xDC00 && __at + 1 < __len && __in[__at] == '\\' && __in[__at + 1] == 'u') { __at += 2; unsigned lo = __hex4(); if (lo < 0xDC00 || lo > 0xDFFF) __bad(); u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00); }
             if (u < 0x80) s[n++] = (char)u;
             else if (u < 0x800) { s[n++] = (char)(0xC0 | u >> 6); s[n++] = (char)(0x80 | (u & 0x3F)); }
             else if (u < 0x10000) { s[n++] = (char)(0xE0 | u >> 12); s[n++] = (char)(0x80 | (u >> 6 & 0x3F)); s[n++] = (char)(0x80 | (u & 0x3F)); }
@@ -549,7 +549,7 @@ func (p *__parser) str() string {
 		case 'f': b = append(b, '\f')
 		case 'u':
 			u := p.hex4()
-			if u >= 0xD800 && u < 0xDC00 && p.at+1 < len(p.s) && p.s[p.at] == '\\' && p.s[p.at+1] == 'u' { p.at += 2; u = 0x10000 + (u-0xD800)<<10 + (p.hex4() - 0xDC00) }
+			if u >= 0xD800 && u < 0xDC00 && p.at+1 < len(p.s) && p.s[p.at] == '\\' && p.s[p.at+1] == 'u' { p.at += 2; lo := p.hex4(); if lo < 0xDC00 || lo > 0xDFFF { __bad() }; u = 0x10000 + (u-0xD800)<<10 + (lo - 0xDC00) }
 			b = append(b, string(u)...)
 		default: b = append(b, c)
 		}
@@ -657,7 +657,7 @@ mod __cp {
                     b'u' => {
                         let mut u = p.hex4();
                         if (0xD800..0xDC00).contains(&u) && p.at + 1 < p.s.len() && p.s[p.at] == b'\\' && p.s[p.at + 1] == b'u' {
-                            p.at += 2; u = 0x10000 + ((u - 0xD800) << 10) + (p.hex4().wrapping_sub(0xDC00));
+                            p.at += 2; let lo = p.hex4(); if !(0xDC00..=0xDFFF).contains(&lo) { bad(); } u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00);
                         }
                         let c = char::from_u32(u).unwrap_or('\u{FFFD}');
                         let mut buf = [0u8; 4];

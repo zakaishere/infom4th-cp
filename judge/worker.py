@@ -169,9 +169,10 @@ class Control:
             self.capacity.mark_stale()
 
 
-def execute(message, slot, capacity, api, worker_id, runner, stop, backoff=lambda: random.uniform(1.0, 3.0)):
+def execute(message, slot, capacity, api, worker_id, runner, stop, backoff=lambda: random.uniform(1.0, 3.0), max_busy_wait=15.0):
     """Claim and judge one delivery. Returns normally to acknowledge; raises Requeue to return it."""
     job_id = message["jobId"]
+    busy_since = None
     while True:
         if stop.is_set():
             raise Requeue()
@@ -180,12 +181,18 @@ def execute(message, slot, capacity, api, worker_id, runner, stop, backoff=lambd
                 raise Requeue()
             capacity.wait(0.5)
             continue
+        wid = worker_id()
         try:
             claimed = api.post("/jobs/"+job_id+"/claim",
-                               {"workerId": worker_id(), "dispatchSequence": message["dispatchSequence"]})
+                               {"workerId": wid, "dispatchSequence": message["dispatchSequence"]})
         except CapacityBusy:
-            # Global lane, worker or host capacity is full; keep the delivery and retry.
+            # Global lane, worker or host capacity is full; retry briefly then requeue for peer workers.
             capacity.release()
+            now = time.monotonic()
+            if busy_since is None:
+                busy_since = now
+            elif now - busy_since >= max_busy_wait:
+                raise Requeue()
             stop.wait(backoff())
             continue
         except WorkerUnavailable:
@@ -197,7 +204,7 @@ def execute(message, slot, capacity, api, worker_id, runner, stop, backoff=lambd
         try:
             if not claimed:
                 return  # stale or duplicate dispatch; recovery covers abandoned jobs
-            run_claimed(job_id, claimed, api, worker_id(), runner)
+            run_claimed(job_id, claimed, api, wid, runner)
             return
         finally:
             capacity.release()
@@ -254,8 +261,8 @@ class SlotConsumer:
                 continue
             try:
                 self.session()
-            except Exception:
-                LOG.warning("RabbitMQ consumer for slot %d reconnecting", self.slot)
+            except Exception as exc:
+                LOG.warning("RabbitMQ consumer for slot %d reconnecting: %s", self.slot, exc)
                 self.stop.wait(5)
 
     def session(self):
@@ -277,6 +284,9 @@ class SlotConsumer:
                 eligible = self.capacity.eligible(self.slot)
                 if running is None and pending and eligible:
                     tag, message = pending.popleft()
+                    while pending and channel.is_open:
+                        extra_tag, _ = pending.popleft()
+                        channel.basic_nack(extra_tag, requeue=True)
                     running = (tag, executor.submit(self.handler, message, self.slot))
                 idle = running is None and not pending
                 if idle and eligible and not tags:

@@ -146,8 +146,10 @@ export default function Arena({ runId }: { runId: string }) {
   const clarifications = useData<Clarification[]>(phase === "loading" ? null : "/api/runs/" + runId + "/clarifications");
   useEffect(() => {
     if (phase === "loading") return;
-    let cancelled = false, cursor = 0, first = true;
+    let cancelled = false, cursor = 0, first = true, inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const events = await get<{ id: number; kind: string }[]>("/api/runs/" + runId + "/events?after=" + cursor);
         if (cancelled || events.length === 0) { first = false; return; }
@@ -160,6 +162,7 @@ export default function Arena({ runId }: { runId: string }) {
         }
         cursor = events[events.length - 1].id; first = false;
       } catch { /* transient; next poll retries */ }
+      finally { inFlight = false; }
     };
     poll();
     const timer = setInterval(() => { if (document.visibilityState === "visible") poll(); }, 4000);

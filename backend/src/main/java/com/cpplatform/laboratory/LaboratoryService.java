@@ -392,10 +392,23 @@ public class LaboratoryService {
         return s;
     }
 
+    /** Verifies per-problem edit or read permission for every problem or version ID in a bulk selection. */
+    private void requireProblemAccess(Actor actor,List<UUID> ids,boolean edit) {
+        if(actor.superAdmin()) return;
+        UUID[] arr=ids.toArray(UUID[]::new);
+        var versions=db.jdbc.queryForList("SELECT DISTINCT ON (p.id) v.id FROM problems p JOIN problem_versions v ON v.problem_id=p.id "
+                +"WHERE NOT p.system_benchmark AND (p.id=ANY(?::uuid[]) OR v.id=ANY(?::uuid[])) ORDER BY p.id,v.version_number DESC",UUID.class,arr,arr);
+        for(UUID vid:versions) {
+            if(edit) access.problem(actor,vid,true);
+            else access.problemRead(actor,vid);
+        }
+    }
+
     /** Bulk-sets or clears the contest pool flag on one or more problems (accepts problem IDs or version IDs). */
     @Transactional
     public int setContestFlags(Actor actor,List<UUID> ids,Object rawFlag) {
         access.organizer(actor);
+        requireProblemAccess(actor,ids,true);
         String flag=normalizeFlag(rawFlag);
         UUID[] arr=ids.toArray(UUID[]::new);
         int updated=db.jdbc.update("UPDATE problems SET contest_flag=? WHERE NOT system_benchmark AND (id=ANY(?::uuid[]) OR id IN (SELECT problem_id FROM problem_versions WHERE id=ANY(?::uuid[])))",
@@ -485,6 +498,7 @@ public class LaboratoryService {
     @Transactional
     public int moveToFolder(Actor actor,List<UUID> ids,Object rawFolder) {
         access.organizer(actor);
+        requireProblemAccess(actor,ids,true);
         String folder=normalizeFolder(rawFolder);
         if(folder!=null) ensureCollection(actor.id(),folder);
         UUID[] arr=ids.toArray(UUID[]::new);
@@ -530,6 +544,7 @@ public class LaboratoryService {
     @Transactional
     public int bulkTags(Actor actor,List<UUID> ids,Object rawTags,boolean append) {
         access.organizer(actor);
+        requireProblemAccess(actor,ids,true);
         String[] incoming=normalizeTags(rawTags);
         UUID[] arr=ids.toArray(UUID[]::new);
         var problems=db.jdbc.queryForList("SELECT id,tags FROM problems WHERE NOT system_benchmark AND (id=ANY(?::uuid[]) OR id IN (SELECT problem_id FROM problem_versions WHERE id=ANY(?::uuid[]))) FOR UPDATE",arr,arr);
@@ -579,6 +594,7 @@ public class LaboratoryService {
         if("remove".equals(action)) {
             int updated=0;
             for(UUID versionId:versionIds) {
+                access.problem(actor,versionId,true);
                 var row=db.one("SELECT problem_id FROM problem_versions WHERE id=?",versionId);
                 UUID problemId=(UUID)row.get("problem_id");
                 switch(surface) {
@@ -600,6 +616,8 @@ public class LaboratoryService {
         // Validate/auto-approve versions before placing them on a live surface.
         List<Map<String,Object>> ready=new ArrayList<>();
         for(UUID versionId:versionIds) {
+            if("CONTEST".equals(surface)) access.problemRead(actor,versionId);
+            else access.problem(actor,versionId,false);
             var row=db.one("SELECT v.id,v.problem_id,v.title,v.status,v.difficulty,p.folder,p.archived_at FROM problem_versions v JOIN problems p ON p.id=v.problem_id WHERE v.id=? AND NOT p.system_benchmark FOR UPDATE",versionId);
             Api.require(row.get("archived_at")==null,HttpStatus.CONFLICT,"Restore \""+row.get("title")+"\" before assigning it");
             String st=(String)row.get("status");
@@ -699,8 +717,9 @@ public class LaboratoryService {
                         default -> 2;
                     };
                     Integer pts=switch(scoring) {
-                        case "IOI", "ATCODER" -> 100*mult;
-                        case "CODEFORCES" -> 500*mult;
+                        case "IOI" -> 100*mult;
+                        case "CODEFORCES" -> 500*slot;
+                        case "ATCODER" -> 100*slot;
                         default -> null;
                     };
                     int relDay=1;

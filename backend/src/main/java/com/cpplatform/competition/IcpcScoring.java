@@ -37,7 +37,11 @@ public final class IcpcScoring {
         result.sort(Comparator.comparingInt(Standing::solved).reversed()
                 .thenComparingLong(Standing::penaltySeconds).thenComparing(Standing::entry));
         List<Standing> ranked=new ArrayList<>();
-        for(int i=0;i<result.size();i++){var s=result.get(i);ranked.add(new Standing(i+1,s.entry,s.solved,s.penaltySeconds,s.problems));}
+        for(int i=0;i<result.size();i++) {
+            var s=result.get(i);
+            int rank=(i>0 && result.get(i-1).solved()==s.solved() && result.get(i-1).penaltySeconds()==s.penaltySeconds())?ranked.get(i-1).rank():(i+1);
+            ranked.add(new Standing(rank,s.entry,s.solved,s.penaltySeconds,s.problems));
+        }
         return ranked;
     }
 }

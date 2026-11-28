@@ -33,7 +33,7 @@ public class DuelService {
     /** Seconds between "the room starts" or "round decided" and the next round's clock; the twist is shown meanwhile. */
     static final int COUNTDOWN=6;
     /** A submission still judged this long after its round ended no longer blocks the decision. */
-    static final int STUCK_JUDGING_SECONDS=600;
+    static final int STUCK_JUDGING_SECONDS=90;
     static final List<String> MODIFIERS=List.of("CLASSIC","BLIND","NO_FOR","NO_PLUS","GOLF","FASTEST","LANGUAGE");
     private static final Set<String> IMPROVING=Set.of("GOLF","FASTEST");
     private static final Set<String> PENDING=Set.of("QUEUED","RUNNING","RETRY");
@@ -123,9 +123,10 @@ public class DuelService {
         Api.require(actor.id().equals(d.get("created_by")),HttpStatus.FORBIDDEN,"Only the host starts the room");
         Api.require("WAITING".equals(d.get("status")),HttpStatus.CONFLICT,"This room is not waiting");
         var players=players(id);
-        if("TEAMS".equals(d.get("mode")))
-            Api.require(players.stream().anyMatch(p->team(p)==1) && players.stream().anyMatch(p->team(p)==2),HttpStatus.CONFLICT,"Each team needs at least one player");
-        else Api.require(players.size()>=2,HttpStatus.CONFLICT,"Wait for at least one opponent");
+        if("TEAMS".equals(d.get("mode"))) {
+            long t1=players.stream().filter(p->team(p)==1).count(),t2=players.stream().filter(p->team(p)==2).count();
+            Api.require(t1>=1 && t1==t2,HttpStatus.CONFLICT,"Both teams need an equal number of players (at least 1 each) to start");
+        } else Api.require(players.size()>=2,HttpStatus.CONFLICT,"Wait for at least one opponent");
         begin(d);
     }
 
@@ -157,7 +158,7 @@ public class DuelService {
             UUID version=(UUID)picked.get(i).get("id");
             String twist=twists.get(random.nextInt(twists.size()));
             String language=null;
-            if("LANGUAGE".equals(twist)) {
+            if("LANGUAGE".equals(twist) || "FASTEST".equals(twist)) {
                 var languages=db.jdbc.queryForList("SELECT pl.language_code FROM problem_version_languages pl JOIN languages l ON l.code=pl.language_code WHERE pl.problem_version_id=? AND l.enabled ORDER BY 1",String.class,version);
                 language=languages.get(random.nextInt(languages.size()));
             }
@@ -233,7 +234,6 @@ public class DuelService {
             Api.require(id.equals(p.get("duel_id")) && samples==Boolean.TRUE.equals(p.get("samples_only")) && source.equals(p.get("source_code")) && language.equals(p.get("language_code")),HttpStatus.CONFLICT,"Idempotency key reused for different content");
             return (UUID)p.get("id");
         }
-        submissions.admit(actor,language);
         var d=db.one("SELECT * FROM duels WHERE id=? FOR UPDATE",id);
         Api.require(db.exists("SELECT EXISTS(SELECT 1 FROM duel_players WHERE duel_id=? AND user_id=? AND left_at IS NULL)",id,actor.id()),HttpStatus.FORBIDDEN,"You are not playing in this room");
         Api.require("ACTIVE".equals(d.get("status")),HttpStatus.CONFLICT,"This room is not running");
@@ -250,6 +250,7 @@ public class DuelService {
         Api.require(IMPROVING.contains(twist) || mine.stream().noneMatch(s->"ACCEPTED".equals(s.get("verdict"))),HttpStatus.CONFLICT,"You already solved this round");
         long locked=lockedSeconds(mine,((Number)d.get("lockout_seconds")).intValue());
         Api.require(locked<=0,HttpStatus.CONFLICT,"Wrong answer penalty: you can submit again in "+locked+" s");
+        submissions.admit(actor,language);
         UUID submission=db.id("INSERT INTO submissions(context,submitted_by,problem_version_id,language_code,source_code,idempotency_key,duel_id,duel_round,samples_only) VALUES ('DUEL',?,?,?,?,?,?,?,?) RETURNING id",
                 actor.id(),version,language,source,key,id,number,samples);
         // Between practice (0) and contests (100): a duel is a live race.
@@ -263,16 +264,16 @@ public class DuelService {
             case "BLIND" -> Api.require(!samples,HttpStatus.CONFLICT,"Blind round: there are no examples to run");
             case "NO_FOR" -> Api.require(!FOR.matcher(source).find(),HttpStatus.BAD_REQUEST,"This round bans the word \"for\" (comments and strings included)");
             case "NO_PLUS" -> Api.require(source.indexOf('+')<0,HttpStatus.BAD_REQUEST,"This round bans the + character (includes, comments and strings included)");
-            case "LANGUAGE" -> Api.require(language.equals(forcedLanguage),HttpStatus.BAD_REQUEST,"This round must be solved in "+forcedLanguage);
+            case "LANGUAGE", "FASTEST" -> Api.require(forcedLanguage==null || language.equals(forcedLanguage),HttpStatus.BAD_REQUEST,"This round must be solved in "+forcedLanguage);
             default -> {}
         }
     }
 
     private static boolean pending(Map<String,Object> s){return s.get("status")==null || PENDING.contains(s.get("status"));}
 
-    /** Seconds left in the penalty after the player's latest rejected submission; compilation errors are free. */
+    /** Seconds left in the penalty after the player's latest rejected submission; compilation and judge errors are free. */
     private long lockedSeconds(List<Map<String,Object>> mine,int lockout) {
-        var last=mine.stream().filter(s->s.get("verdict")!=null && !"ACCEPTED".equals(s.get("verdict")) && !"COMPILATION_ERROR".equals(s.get("verdict")) && s.get("completed_at")!=null)
+        var last=mine.stream().filter(s->s.get("verdict")!=null && !"ACCEPTED".equals(s.get("verdict")) && !"COMPILATION_ERROR".equals(s.get("verdict")) && !"JUDGE_ERROR".equals(s.get("verdict")) && s.get("completed_at")!=null)
                 .map(s->Api.time(s.get("completed_at"))).max(Comparator.naturalOrder());
         if(last.isEmpty())return 0;
         long now=db.jdbc.queryForObject("SELECT (extract(epoch FROM clock_timestamp())*1000)::bigint",Long.class);
@@ -325,7 +326,7 @@ public class DuelService {
         for(var p:players)sideOf.put((UUID)p.get("user_id"),"TEAMS".equals(mode)?(Object)team(p):p.get("user_id"));
         Map<Object,Entry> best=new HashMap<>();
         for(var s:race) {
-            if(pending(s) && !stuck)continue;
+            if((pending(s) && !stuck) || "JUDGE_ERROR".equals(s.get("verdict")))continue;
             UUID user=(UUID)s.get("submitted_by");Object side=sideOf.get(user);
             if(side==null)continue;
             Instant at=Api.time(s.get("submitted_at"));

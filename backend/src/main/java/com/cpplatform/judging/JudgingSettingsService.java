@@ -156,7 +156,7 @@ public class JudgingSettingsService {
     Map<String,Object> queue() {
         var database=new LinkedHashMap<String,Object>();
         for(String lane:LANES)database.put(lane,new LinkedHashMap<>(Map.of("queued",0L,"retry",0L,"running",0L)));
-        for(var r:db.jdbc.queryForList("SELECT CASE WHEN r.kind='OFFICIAL' THEN 'official' ELSE 'internal' END AS lane,j.status,count(*) AS count,min(j.created_at) AS oldest FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id LEFT JOIN contest_runs r ON r.id=s.run_id WHERE j.status IN ('QUEUED','RETRY','RUNNING') GROUP BY 1,2")) {
+        for(var r:db.jdbc.queryForList("SELECT CASE WHEN r.kind='OFFICIAL' OR b.lane='official' THEN 'official' ELSE 'internal' END AS lane,j.status,count(*) AS count,min(j.created_at) AS oldest FROM judging_jobs j JOIN submissions s ON s.id=j.submission_id LEFT JOIN contest_runs r ON r.id=s.run_id LEFT JOIN benchmark_runs b ON b.id=s.benchmark_id WHERE j.status IN ('QUEUED','RETRY','RUNNING') GROUP BY 1,2")) {
             @SuppressWarnings("unchecked") var lane=(Map<String,Object>)database.get(r.get("lane"));
             lane.put(r.get("status").toString().toLowerCase(Locale.ROOT),((Number)r.get("count")).longValue());
             if(!"RUNNING".equals(r.get("status")))lane.merge("oldestWaitingCreatedAt",r.get("oldest"),(a,b)->((Comparable<Object>)a).compareTo(b)<=0?a:b);

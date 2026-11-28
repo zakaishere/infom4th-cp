@@ -3,7 +3,10 @@ package com.cpplatform.common;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.*;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 import java.util.Map;
 
@@ -23,8 +26,13 @@ public class Errors {
         log.error("Database operation failed",error);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error","The server could not complete this action; nothing was changed. Try again, and check the server log if it continues."));
     }
-    @ExceptionHandler({IllegalArgumentException.class, ClassCastException.class})
-    ResponseEntity<?> malformed(RuntimeException error) {
+    @ExceptionHandler({IllegalArgumentException.class, ClassCastException.class, HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class, MissingRequestHeaderException.class})
+    ResponseEntity<?> malformed(Exception error) {
         return ResponseEntity.badRequest().body(Map.of("error","Invalid request"));
+    }
+    @ExceptionHandler(IllegalStateException.class)
+    ResponseEntity<?> illegalState(IllegalStateException error) {
+        log.error("Unexpected server state",error);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error","The server could not complete this action; try again later."));
     }
 }

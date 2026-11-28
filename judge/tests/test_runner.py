@@ -112,7 +112,8 @@ class PipelineTests(unittest.TestCase):
         result=self.runner.judge(self.job())
         self.assertEqual(result["verdict"],"WRONG_ANSWER")
         self.assertEqual(len(result["cases"]),1)
-        self.assertNotIn("wrong",str(result))
+        self.assertEqual(result["cases"][0]["actualOutput"],"wrong")
+        self.assertNotIn("'5'",str(result))
         self.assertEqual(list(self.runner.root.iterdir()),[])
 
     def test_ioi_jobs_run_every_test_and_keep_the_first_failure_verdict(self):

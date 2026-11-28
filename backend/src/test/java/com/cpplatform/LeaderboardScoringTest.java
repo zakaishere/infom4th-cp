@@ -65,4 +65,14 @@ class LeaderboardScoringTest {
         assertTrue(board.players().isEmpty());
         assertTrue(board.teams().isEmpty());
     }
+
+    @Test void contestSolveForOneTeamDoesNotCreditOtherTeamsOfSameMember() {
+        UUID otherTeam=UUID.randomUUID();
+        var members=List.of(new Membership(ana,team,T),new Membership(ana,otherTeam,T));
+        var board=LeaderboardService.calculate(
+                List.of(new Solve(ana,p1,"EASY",T.plusSeconds(60),team)),
+                members,Set.of(),T);
+        assertEquals(1,board.teams().size());
+        assertEquals(team,board.teams().get(0).key());
+    }
 }

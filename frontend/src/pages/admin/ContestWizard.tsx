@@ -79,11 +79,11 @@ const EMPTY: Draft = {
 };
 
 const DIFF_WEIGHT: Record<string, number> = { EASY: 1, MEDIUM: 2, HARD: 3 };
-const defaultPoints = (scoring: Draft["scoring"], _i: number, difficulty?: string) => {
+const defaultPoints = (scoring: Draft["scoring"], i: number, difficulty?: string) => {
   const mult = DIFF_WEIGHT[difficulty ?? "MEDIUM"] ?? 2;
   if (scoring === "IOI") return 100 * mult;
-  if (scoring === "CODEFORCES") return 500 * mult;
-  if (scoring === "ATCODER") return 100 * mult;
+  if (scoring === "CODEFORCES") return 500 * (i + 1);
+  if (scoring === "ATCODER") return 100 * (i + 1);
   return 1;
 };
 const label = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1));
