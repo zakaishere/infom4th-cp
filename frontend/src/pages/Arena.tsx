@@ -110,12 +110,13 @@ export default function Arena({ runId }: { runId: string }) {
     return () => clearInterval(timer);
   }, [nextDayDue, reloadRun]);
   const slot = view.kind === "problem" ? view.slot : null;
+  const juryPreview = organizer && !entry;
   useEffect(() => {
-    if (slot === null || problems[slot] || phase === "upcoming") return;
+    if (slot === null || problems[slot] || (phase === "upcoming" && !juryPreview)) return;
     get<ProblemDetail>("/api/runs/" + runId + "/problems/" + slot)
       .then((p) => setProblems((all) => ({ ...all, [slot]: p })))
       .catch((e) => toast("error", e.message));
-  }, [slot, problems, runId, phase, toast]);
+  }, [slot, problems, runId, phase, juryPreview, toast]);
 
   const submissions = useData<SubmissionRow[]>(phase === "loading" ? null : "/api/submissions?run=" + runId, 0);
   const anyPending = (submissions.data ?? []).some(pending);
@@ -217,7 +218,7 @@ export default function Arena({ runId }: { runId: string }) {
         <button className="small" onClick={exit}>Exit</button>
       </header>
 
-      {phase === "upcoming" ? (
+      {phase === "upcoming" && !juryPreview ? (
         <div className="lock-screen" style={{ position: "static", minHeight: "calc(100vh - 56px)" }}>
           <div className="stack" style={{ alignItems: "center" }}>
             {r.manual_start ? (

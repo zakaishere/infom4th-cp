@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { del, patch, post, serverNow } from "../../api";
 import { navigate, useAction, useData, useRoute, useServerClock, useToast } from "../../app";
 import { FullscreenPanel, type FullscreenData } from "../../components/FullscreenLog";
+import { AdminIcon } from "../../components/AdminIcons";
 import { SearchSelect } from "../../components/SearchSelect";
+import { ProblemPreviewModal } from "./ProblemModals";
 import { SubmissionModal } from "../../components/Problem";
 import Standings from "../../components/Standings";
 import { DifficultyPill } from "../Practice";
@@ -171,7 +173,7 @@ type Detail = Competition & {
   version: { id: string; sealed_at: string | null; duration_seconds: number; mode: string; description_md: string; rules_md: string; freeze_before_end_seconds: number; wrong_attempt_penalty_seconds: number;
     scoring_system?: "ICPC" | "IOI" | "CODEFORCES" | "ATCODER";
     contest_format?: ContestFormat; publish_to_practice?: boolean; require_fullscreen?: boolean };
-  problems: { slot: number; label: string; problem_version_id: string; release_day?: number }[];
+  problems: { slot: number; label: string; problem_version_id: string; points?: number | null; release_day?: number }[];
   practice_published_at?: string | null;
   runs: Run[];
 };
@@ -183,10 +185,14 @@ export function ContestDetail({ id }: { id: string }) {
   const toast = useToast();
   const d = useData<Detail>("/api/manage/competitions/" + id, 15000);
   const readiness = useData<{ ready: boolean; errors: string[] }>("/api/manage/competitions/" + id + "/readiness", 15000);
-  const lab = useData<{ version_id: string; title: string; slug: string; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; folder?: string | null }[]>("/api/lab/problems");
+  const lab = useData<{ id?: string; version_id: string; title: string; slug: string; status: string; difficulty?: "EASY" | "MEDIUM" | "HARD"; folder?: string | null }[]>("/api/lab/problems");
   const participantsData = useData<{ id: string; handle: string | null; display_name: string | null; email: string | null; team: string | null; status: string; created_at?: string }[]>("/api/manage/competitions/" + id + "/participants", 20000);
 
   const [attach, setAttach] = useState({ versionId: "", label: "", releaseDay: 1 });
+  const [dayFilter, setDayFilter] = useState<number>(0);
+  const [diffFilter, setDiffFilter] = useState<"" | "EASY" | "MEDIUM" | "HARD">("");
+  const [problemQuery, setProblemQuery] = useState("");
+  const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [startsAt, setStartsAt] = useState(() => toZoneInput(serverNow() + 3600_000).slice(0, 14) + "00");
   const [visibility, setVisibility] = useState("PUBLIC");
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -210,7 +216,18 @@ export function ContestDetail({ id }: { id: string }) {
   const maxDays = Math.max(1, Math.ceil(c.version.duration_seconds / 86400));
   const showReleaseDay = c.version.contest_format === "WARMUP" && maxDays > 1;
   const hasStaggeredDays = c.problems.some((p) => (p.release_day ?? 1) > 1);
-  const approved = (lab.data ?? []).filter((p) => p.status === "APPROVED" || p.status === "PUBLISHED");
+  const approved = useMemo(() => {
+    const seen = new Set<string>();
+    const out: NonNullable<typeof lab.data> = [];
+    for (const p of lab.data ?? []) {
+      if (p.status !== "APPROVED" && p.status !== "PUBLISHED") continue;
+      const key = p.id ?? p.slug;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  }, [lab.data]);
   const byVersion = Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p]));
   const official = c.runs.find((r) => r.kind === "OFFICIAL");
   const activeRunId = selectedRun ?? official?.id ?? c.runs[0]?.id ?? null;
@@ -223,6 +240,18 @@ export function ContestDetail({ id }: { id: string }) {
   const defaultTab: ManageTab = started && activeRun ? "monitor" : "problems";
   const activeTab: ManageTab = section ?? defaultTab;
   const sortedProblems = [...c.problems].sort((a, b) => (a.release_day ?? 1) - (b.release_day ?? 1) || a.slot - b.slot);
+  const showPointsCol = (c.version.scoring_system ?? "ICPC") !== "ICPC";
+  const qLower = problemQuery.trim().toLowerCase();
+  const visibleProblems = sortedProblems.filter((p) => {
+    if (dayFilter > 0 && (p.release_day ?? 1) !== dayFilter) return false;
+    const info = byVersion[p.problem_version_id];
+    if (diffFilter && (info?.difficulty ?? "MEDIUM") !== diffFilter) return false;
+    if (qLower) {
+      const hay = `${p.label} ${info?.title ?? ""} ${info?.slug ?? ""} ${info?.folder ?? ""}`.toLowerCase();
+      if (!hay.includes(qLower)) return false;
+    }
+    return true;
+  });
 
   const copyLobbyLink = () => {
     if (!official) return;
@@ -363,56 +392,132 @@ export function ContestDetail({ id }: { id: string }) {
           {sortedProblems.length === 0 ? (
             <Empty>No problems attached yet. Pick an approved problem below to add it.</Empty>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: 56 }}>#</th>
-                    <th>Problem</th>
-                    <th style={{ width: 110 }}>Difficulty</th>
-                    {(showReleaseDay || hasStaggeredDays) && <th style={{ width: 140 }}>Release day</th>}
-                    {canEditProblems && <th className="right" style={{ width: 110 }} />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedProblems.map((p) => {
-                    const info = byVersion[p.problem_version_id];
-                    return (
-                      <tr key={p.slot}>
-                        <td><span className="problem-letter">{p.label}</span></td>
-                        <td>
-                          <strong>{info?.title ?? <span className="mono small">{p.problem_version_id}</span>}</strong>
-                          {info?.slug && <div className="small muted mono">{info.slug}</div>}
-                        </td>
-                        <td>{info?.difficulty ? <DifficultyPill value={info.difficulty} /> : <span className="small muted">—</span>}</td>
-                        {(showReleaseDay || hasStaggeredDays) && (
-                          <td>
-                            {canEditProblems && showReleaseDay ? (
-                              <select aria-label={`Release day for ${p.label}`} style={{ width: "auto" }} disabled={busy}
-                                value={Math.min(maxDays, p.release_day ?? 1)}
-                                onChange={(e) => {
-                                  const releaseDay = Number(e.target.value);
-                                  run(async () => { await patch("/api/manage/competitions/" + id + "/problems/" + p.slot, { releaseDay }); refresh(); }, `Moved ${p.label} to Day ${releaseDay}`);
-                                }}>
-                                {Array.from({ length: maxDays }, (_, k) => k + 1).map((dayNum) => <option key={dayNum} value={dayNum}>Day {dayNum}</option>)}
-                              </select>
-                            ) : <span className="tag">Day {p.release_day ?? 1}</span>}
-                          </td>
-                        )}
-                        {canEditProblems && (
-                          <td className="right">
-                            <button type="button" className="small danger ghost" disabled={busy}
-                              onClick={() => run(async () => { await del("/api/manage/competitions/" + id + "/problems/" + p.slot); refresh(); }, `Removed ${p.label}`)}>
-                              Remove
-                            </button>
-                          </td>
-                        )}
+            <>
+              {(showReleaseDay || hasStaggeredDays || sortedProblems.length > 5) && (
+                <div className="admin-toolbar" style={{ padding: "0.55rem 0.7rem" }}>
+                  <input
+                    className="toolbar-search"
+                    placeholder="Filter contest problems…"
+                    value={problemQuery}
+                    onChange={(e) => setProblemQuery(e.target.value)}
+                  />
+                  {(showReleaseDay || hasStaggeredDays) && (
+                    <div className="seg-group" role="group" aria-label="Filter by release day">
+                      <button type="button" className={dayFilter === 0 ? "active" : ""} onClick={() => setDayFilter(0)}>
+                        All ({sortedProblems.length})
+                      </button>
+                      {Array.from({ length: maxDays }, (_, k) => k + 1).map((dayNum) => {
+                        const cnt = sortedProblems.filter((p) => (p.release_day ?? 1) === dayNum).length;
+                        return (
+                          <button
+                            key={dayNum}
+                            type="button"
+                            className={dayFilter === dayNum ? "active" : ""}
+                            onClick={() => setDayFilter(dayNum)}
+                          >
+                            Day {dayNum} ({cnt})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="seg-group" role="group" aria-label="Filter by difficulty">
+                    {([
+                      ["", "All"],
+                      ["EASY", "Easy"],
+                      ["MEDIUM", "Med"],
+                      ["HARD", "Hard"],
+                    ] as const).map(([val, lbl]) => (
+                      <button
+                        key={val || "all"}
+                        type="button"
+                        className={diffFilter === val ? "active" : ""}
+                        onClick={() => setDiffFilter(val)}
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {visibleProblems.length === 0 ? (
+                <Empty>No contest problems match the current filter.</Empty>
+              ) : (
+                <div className="table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 56 }}>#</th>
+                        <th>Problem</th>
+                        <th className="col-shrink">Level</th>
+                        {showPointsCol && <th className="col-shrink right">Points</th>}
+                        {(showReleaseDay || hasStaggeredDays) && <th className="col-shrink">Release day</th>}
+                        <th className="col-shrink right">Actions</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {visibleProblems.map((p) => {
+                        const info = byVersion[p.problem_version_id];
+                        return (
+                          <tr key={p.slot}>
+                            <td><span className="problem-letter">{p.label}</span></td>
+                            <td className="col-problem">
+                              <div className="cell-primary">
+                                <span className="cell-title">{info?.title ?? p.problem_version_id}</span>
+                                {info?.folder && <span className="collection-pill">{info.folder}</span>}
+                              </div>
+                              {info?.slug && <div className="cell-secondary"><span className="cell-slug">{info.slug}</span></div>}
+                            </td>
+                            <td className="col-shrink">{info?.difficulty ? <DifficultyPill value={info.difficulty} /> : <span className="small muted">—</span>}</td>
+                            {showPointsCol && (
+                              <td className="col-shrink right mono small">{p.points ?? 100}</td>
+                            )}
+                            {(showReleaseDay || hasStaggeredDays) && (
+                              <td className="col-shrink">
+                                {canEditProblems && showReleaseDay ? (
+                                  <select aria-label={`Release day for ${p.label}`} style={{ width: "auto" }} disabled={busy}
+                                    value={Math.min(maxDays, p.release_day ?? 1)}
+                                    onChange={(e) => {
+                                      const releaseDay = Number(e.target.value);
+                                      run(async () => { await patch("/api/manage/competitions/" + id + "/problems/" + p.slot, { releaseDay }); refresh(); }, `Moved ${p.label} to Day ${releaseDay}`);
+                                    }}>
+                                    {Array.from({ length: maxDays }, (_, k) => k + 1).map((dayNum) => <option key={dayNum} value={dayNum}>Day {dayNum}</option>)}
+                                  </select>
+                                ) : <span className="collection-pill">Day {p.release_day ?? 1}</span>}
+                              </td>
+                            )}
+                            <td className="col-shrink right">
+                              <div className="row-actions">
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  title="Preview statement"
+                                  onClick={() => setPreviewVersionId(p.problem_version_id)}
+                                >
+                                  <AdminIcon name="eye" size={14} />
+                                </button>
+                                {canEditProblems && (
+                                  <button
+                                    type="button"
+                                    className="icon-btn danger"
+                                    title={"Remove " + p.label}
+                                    disabled={busy}
+                                    onClick={() => run(async () => { await del("/api/manage/competitions/" + id + "/problems/" + p.slot); refresh(); }, `Removed ${p.label}`)}
+                                  >
+                                    <AdminIcon name="trash" size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
 
           {canEditProblems && (
@@ -608,6 +713,13 @@ export function ContestDetail({ id }: { id: string }) {
             setConfirmDelete(false);
             navigate("/admin/contests");
           }, "Contest deleted")}
+        />
+      )}
+
+      {previewVersionId && (
+        <ProblemPreviewModal
+          versionId={previewVersionId}
+          onClose={() => setPreviewVersionId(null)}
         />
       )}
     </div>
