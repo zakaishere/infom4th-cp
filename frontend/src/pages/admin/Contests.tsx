@@ -206,16 +206,6 @@ export function ContestDetail({ id }: { id: string }) {
     if (route.query.get("tab") === "fullscreen") setSection("monitor");
   }, [route.query.get("tab")]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (d.loading) return <Loading />;
-  if (!d.data) return <ErrorBox error={d.error} />;
-
-  const c = d.data;
-  const sealed = Boolean(c.version.sealed_at);
-  const formatName = CONTEST_FORMAT_LABEL[c.version.contest_format ?? "STANDARD"] ?? "Normal";
-  const length = formatDuration(c.version.duration_seconds);
-  const maxDays = Math.max(1, Math.ceil(c.version.duration_seconds / 86400));
-  const showReleaseDay = c.version.contest_format === "WARMUP" && maxDays > 1;
-  const hasStaggeredDays = c.problems.some((p) => (p.release_day ?? 1) > 1);
   const approved = useMemo(() => {
     const seen = new Set<string>();
     const out: NonNullable<typeof lab.data> = [];
@@ -228,6 +218,17 @@ export function ContestDetail({ id }: { id: string }) {
     }
     return out;
   }, [lab.data]);
+
+  if (d.loading) return <Loading />;
+  if (!d.data) return <ErrorBox error={d.error} />;
+
+  const c = d.data;
+  const sealed = Boolean(c.version.sealed_at);
+  const formatName = CONTEST_FORMAT_LABEL[c.version.contest_format ?? "STANDARD"] ?? "Normal";
+  const length = formatDuration(c.version.duration_seconds);
+  const maxDays = Math.max(1, Math.ceil(c.version.duration_seconds / 86400));
+  const showReleaseDay = c.version.contest_format === "WARMUP" && maxDays > 1;
+  const hasStaggeredDays = c.problems.some((p) => (p.release_day ?? 1) > 1);
   const byVersion = Object.fromEntries((lab.data ?? []).map((p) => [p.version_id, p]));
   const official = c.runs.find((r) => r.kind === "OFFICIAL");
   const activeRunId = selectedRun ?? official?.id ?? c.runs[0]?.id ?? null;
