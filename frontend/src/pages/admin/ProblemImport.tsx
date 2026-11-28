@@ -36,14 +36,22 @@ const transport: ImportTransport = {
 export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   const { organizer } = useAuth();
   const serverLangs = useData<{ code: string; enabled: boolean }[]>("/api/languages");
-  const existingProblems = useData<{ slug: string; version_id: string }[]>("/api/lab/problems");
+  const existingProblems = useData<{ slug: string; version_id: string; status?: string; validation_status?: string | null }[]>("/api/lab/problems");
   const collectionsData = useData<{ collections: { name: string; problem_count: number }[] }>("/api/lab/problems/collections");
 
   const enabledLangs = (serverLangs.data ?? []).filter((l) => l.enabled).map((l) => l.code);
-  const existingSlugs = useMemo(
-    () => new Set((existingProblems.data ?? []).map((p) => p.slug)),
-    [existingProblems.data],
-  );
+  const existingBySlug = useMemo(() => {
+    const map = new Map<string, { status?: string; validation_status?: string | null }>();
+    for (const p of existingProblems.data ?? []) {
+      if (!map.has(p.slug)) map.set(p.slug, p);
+    }
+    return map;
+  }, [existingProblems.data]);
+  const isReplaceable = (slug: string) => {
+    const prev = existingBySlug.get(slug);
+    if (!prev) return false;
+    return prev.status === "DRAFT" || (prev.status === "IN_TESTING" && ["FAILED", "JUDGE_ERROR"].includes(prev.validation_status ?? ""));
+  };
   const collections = collectionsData.data?.collections ?? [];
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -142,7 +150,11 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
             problem,
             selected: true,
             state: "ready",
-            message: existingSlugs.has(problem.slug) ? "Already in bank (will update collection/tags)" : "Ready to import",
+            message: !existingBySlug.has(problem.slug)
+              ? "Ready to import"
+              : isReplaceable(problem.slug)
+              ? "Replaces failed/draft attempt in bank"
+              : "Already in bank (will update collection/tags)",
           })),
         );
       }
@@ -194,7 +206,7 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
   const errorCount = rows.filter((r) => r.state === "error").length;
   const totalTests = rows.reduce((n, r) => n + r.problem.tests.length, 0);
   const sampleTests = rows.reduce((n, r) => n + r.problem.tests.filter((t) => t.sample).length, 0);
-  const newInFile = rows.filter((r) => !existingSlugs.has(r.problem.slug)).length;
+  const newInFile = rows.filter((r) => !existingBySlug.has(r.problem.slug) || isReplaceable(r.problem.slug)).length;
 
   return (
     <div className="stack" style={{ gap: "1.1rem" }}>
@@ -382,7 +394,8 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
                   const topics = tagsFor(r.problem);
                   const topicSummary = topics.map(topicLabel).join(", ");
                   const targetCol = activeCollection ?? r.problem.folder;
-                  const exists = existingSlugs.has(r.problem.slug) && r.state === "ready";
+                  const replaces = isReplaceable(r.problem.slug) && r.state === "ready";
+                  const exists = existingBySlug.has(r.problem.slug) && !replaces && r.state === "ready";
                   const stateCls =
                     r.state === "error"
                       ? "bad"
@@ -406,6 +419,7 @@ export default function ProblemImport({ duel = false }: { duel?: boolean }) {
                         <div className="cell-primary">
                           <span className="cell-title" title={r.problem.title}>{r.problem.title}</span>
                           {exists && <span className="collection-pill">Exists</span>}
+                          {replaces && <span className="collection-pill">Replaces failed</span>}
                           {targetCol && <span className="collection-pill" title={targetCol}>{targetCol}</span>}
                         </div>
                         <div className="cell-secondary">

@@ -132,7 +132,7 @@ export function ProblemList() {
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState<"" | "EASY" | "MEDIUM" | "HARD">("");
   const [collectionFilter, setCollectionFilter] = useState(initialCollection);
-  const [statusFilter, setStatusFilter] = useState<"" | "READY" | "REVIEW" | "DRAFT">("");
+  const [statusFilter, setStatusFilter] = useState<"" | "READY" | "REVIEW" | "FAILED" | "DRAFT">("");
   const [sort, setSort] = useState<"newest" | "easiest" | "hardest" | "title">("newest");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -141,6 +141,7 @@ export function ProblemList() {
   const [collectionsOpen, setCollectionsOpen] = useState(false);
   const [tagsTarget, setTagsTarget] = useState<BankRow[] | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ row: BankRow; action: "delete" | "restore" } | null>(null);
+  const [bulkDeleteRows, setBulkDeleteRows] = useState<BankRow[] | null>(null);
 
   const { busy, run } = useAction();
 
@@ -199,6 +200,7 @@ export function ProblemList() {
         if (!matchesCollection(p.folder, collectionFilter)) return false;
         if (statusFilter === "READY" && !["APPROVED", "PUBLISHED"].includes(p.status)) return false;
         if (statusFilter === "REVIEW" && p.status !== "READY_FOR_REVIEW") return false;
+        if (statusFilter === "FAILED" && !["FAILED", "JUDGE_ERROR"].includes(p.validation_status ?? "")) return false;
         if (statusFilter === "DRAFT" && !["DRAFT", "IN_TESTING"].includes(p.status)) return false;
       }
       if (difficulty && (p.difficulty ?? "MEDIUM") !== difficulty) return false;
@@ -391,6 +393,7 @@ export function ProblemList() {
             <option value="">All states</option>
             <option value="READY">Ready to assign</option>
             <option value="REVIEW">Needs review</option>
+            <option value="FAILED">Failed validation</option>
             <option value="DRAFT">Draft / Testing</option>
           </select>
         )}
@@ -481,6 +484,14 @@ export function ProblemList() {
                   onClick={() => setAssignState({ rows: selectedRows, surface: "COLLECTION" })}
                 >
                   <AdminIcon name="folder" /> Collection…
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={busy}
+                  onClick={() => setBulkDeleteRows(selectedRows)}
+                >
+                  <AdminIcon name="trash" /> Delete
                 </button>
                 <button
                   type="button"
@@ -717,6 +728,31 @@ export function ProblemList() {
                 reloadAll();
               },
               deleteTarget.action === "delete" ? "Problem deleted" : "Problem restored",
+            )
+          }
+        />
+      )}
+
+      {bulkDeleteRows && (
+        <ReasonDialog
+          title={`Delete ${bulkDeleteRows.length} selected problem${bulkDeleteRows.length === 1 ? "" : "s"}`}
+          confirm={`Delete ${bulkDeleteRows.length} problem${bulkDeleteRows.length === 1 ? "" : "s"}`}
+          danger
+          onClose={() => setBulkDeleteRows(null)}
+          description="Moves the selected problems to Deleted and hides them from Practice, TDs, Missions, and Duels. Their short names become reusable for fresh imports."
+          onSubmit={(reason) =>
+            run(
+              async () => {
+                const res = await post<{ deleted: number }>("/api/lab/problems/bulk-delete", {
+                  versionIds: bulkDeleteRows.map((p) => p.version_id),
+                  reason,
+                });
+                setBulkDeleteRows(null);
+                setSelected(new Set());
+                reloadAll();
+                return res;
+              },
+              `Deleted ${bulkDeleteRows.length} problem${bulkDeleteRows.length === 1 ? "" : "s"}`,
             )
           }
         />

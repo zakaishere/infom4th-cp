@@ -173,4 +173,67 @@ class ProblemBankAssignTest {
         // Deleting collection clears folder without deleting problems.
         assertEquals(2, lab.deleteCollection(admin, "C Course/Session 1"));
     }
+
+    @Test
+    void reimportingFailedProblemAutomaticallyReplacesItWhileSkippingPassedOnes() {
+        String slug = "repair-" + UUID.randomUUID().toString().substring(0, 8);
+        Map<String, Object> payload = Map.of(
+                "slug", slug,
+                "title", "Expected Error",
+                "statement", "Choose best typing strategy",
+                "languages", List.of("CPP"),
+                "folder", "Warmup/Day 7",
+                "tests", List.of(
+                        Map.of("input", "1 1 50", "expected", "continue", "sample", true),
+                        Map.of("input", "3 1 100", "expected", "restart", "sample", false)
+                ),
+                "reference", Map.of("label", "Main", "language", "CPP", "sourceCode", "int main() { return 1; }")
+        );
+
+        var first = lab.importProblem(admin, payload);
+        assertEquals("IMPORTED", first.get("outcome"));
+        UUID failedVersion = (UUID) first.get("versionId");
+
+        // Trigger validation and simulate reference solution failing (WRONG_ANSWER).
+        UUID validation = lab.validate(admin, failedVersion);
+        UUID submission = db.id("SELECT s.id FROM submissions s WHERE s.validation_id=?", validation);
+        UUID job = db.id("SELECT id FROM judging_jobs WHERE submission_id=? ORDER BY generation DESC LIMIT 1", submission);
+        var claimed = judge.claim(job, worker, 0).orElseThrow();
+        var failedCases = ((List<?>) claimed.get("tests")).stream()
+                .map(t -> Map.of("id", ((Map<?, ?>) t).get("id"), "verdict", "WRONG_ANSWER", "executionTimeMs", 5, "peakMemoryKb", 512))
+                .toList();
+        judge.complete(job, worker, Api.uuid(claimed.get("leaseToken")), Map.of(
+                "verdict", "WRONG_ANSWER",
+                "cases", failedCases,
+                "executionTimeMs", 5,
+                "peakMemoryKb", 512
+        ));
+        judge.finishValidations();
+
+        // Re-importing the fixed payload automatically archives the failed attempt and imports fresh.
+        var fixed = lab.importProblem(admin, payload);
+        assertEquals("IMPORTED", fixed.get("outcome"));
+        UUID newVersion = (UUID) fixed.get("versionId");
+        assertNotEquals(failedVersion, newVersion);
+
+        // Now validate and pass the fixed version; a third re-import must safely SKIP it.
+        UUID val2 = lab.validate(admin, newVersion);
+        UUID sub2 = db.id("SELECT s.id FROM submissions s WHERE s.validation_id=?", val2);
+        UUID job2 = db.id("SELECT id FROM judging_jobs WHERE submission_id=? ORDER BY generation DESC LIMIT 1", sub2);
+        var claimed2 = judge.claim(job2, worker, 0).orElseThrow();
+        var passedCases = ((List<?>) claimed2.get("tests")).stream()
+                .map(t -> Map.of("id", ((Map<?, ?>) t).get("id"), "verdict", "ACCEPTED", "executionTimeMs", 5, "peakMemoryKb", 512))
+                .toList();
+        judge.complete(job2, worker, Api.uuid(claimed2.get("leaseToken")), Map.of(
+                "verdict", "ACCEPTED",
+                "cases", passedCases,
+                "executionTimeMs", 5,
+                "peakMemoryKb", 512
+        ));
+        judge.finishValidations();
+
+        var third = lab.importProblem(admin, payload);
+        assertEquals("SKIPPED", third.get("outcome"));
+        assertEquals(newVersion, third.get("versionId"));
+    }
 }

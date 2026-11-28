@@ -11,7 +11,7 @@ import java.util.*;
 public class LaboratoryService {
     private final Database db; private final Permissions access;
     public LaboratoryService(Database db,Permissions access) {this.db=db;this.access=access;}
-    /** Atomic import: invalid tests/references roll back the entire new problem. Existing slugs are never edited. */
+    /** Atomic import: invalid tests/references roll back the entire new problem. Unplaced failed/draft attempts are replaced automatically. */
     @Transactional
     public Map<String,Object> importProblem(Actor actor,Map<String,Object> body) {
         access.setter(actor);
@@ -19,23 +19,49 @@ public class LaboratoryService {
         Api.require(slug.matches("[a-z0-9]+(-[a-z0-9]+)*"),HttpStatus.BAD_REQUEST,"Invalid problem short name");
         // Serialize imports of the same slug, including requests retried after a lost response.
         db.jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))","problem-import:"+slug);
-        var existing=db.jdbc.queryForList("SELECT p.id AS problem_id,v.id FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE p.slug=? ORDER BY v.version_number DESC LIMIT 1",slug);
+        var existing=db.jdbc.queryForList("""
+                SELECT p.id AS problem_id,p.archived_at,v.id,v.status,
+                       (SELECT r.status FROM problem_validation_results r WHERE r.problem_version_id=v.id ORDER BY r.created_at DESC LIMIT 1) AS validation_status,
+                       EXISTS(SELECT 1 FROM competition_problems cp WHERE cp.problem_id=p.id) AS in_contest,
+                       EXISTS(SELECT 1 FROM practice_publications pp WHERE pp.problem_id=p.id AND NOT pp.hidden) AS in_practice,
+                       EXISTS(SELECT 1 FROM duel_problems dp WHERE dp.problem_id=p.id AND NOT dp.hidden) AS in_duel
+                FROM problems p JOIN problem_versions v ON v.problem_id=p.id
+                WHERE p.slug=? ORDER BY v.version_number DESC LIMIT 1
+                """,slug);
         String contestFlag=normalizeFlag(body.get("contestFlag"));
         String folder=normalizeFolder(body.get("folder"));
         String[] tags=body.containsKey("tags")?normalizeTags(body.get("tags")):null;
         if(!existing.isEmpty()) {
-            UUID version=(UUID)existing.get(0).get("id");
-            access.problemRead(actor,version);
-            if(contestFlag!=null) db.jdbc.update("UPDATE problems SET contest_flag=? WHERE id=?",contestFlag,existing.get(0).get("problem_id"));
-            if(folder!=null) {
-                ensureCollection(actor.id(),folder);
-                db.jdbc.update("UPDATE problems SET folder=? WHERE id=?",folder,existing.get(0).get("problem_id"));
+            var prev=existing.get(0);
+            UUID prevProblem=(UUID)prev.get("problem_id");
+            UUID prevVersion=(UUID)prev.get("id");
+            String prevStatus=String.valueOf(prev.get("status"));
+            String prevVal=String.valueOf(prev.get("validation_status"));
+            boolean unplaced=!Boolean.TRUE.equals(prev.get("in_contest"))
+                    && !Boolean.TRUE.equals(prev.get("in_practice"))
+                    && !Boolean.TRUE.equals(prev.get("in_duel"));
+            boolean replaceable=unplaced && ("DRAFT".equals(prevStatus)
+                    || ("IN_TESTING".equals(prevStatus) && List.of("FAILED","JUDGE_ERROR").contains(prevVal)));
+            if(prev.get("archived_at")!=null) {
+                access.problem(actor,prevVersion,true);
+                String suffix="-deleted-"+UUID.randomUUID().toString().substring(0,6);
+                String freed=slug.substring(0,Math.min(slug.length(),120-suffix.length())).replaceAll("-+$","")+suffix;
+                db.jdbc.update("UPDATE problems SET slug=? WHERE id=?",freed,prevProblem);
+            } else if(replaceable) {
+                delete(actor,prevVersion,"Automatically replaced by re-import");
+            } else {
+                access.problemRead(actor,prevVersion);
+                if(contestFlag!=null) db.jdbc.update("UPDATE problems SET contest_flag=? WHERE id=?",contestFlag,prevProblem);
+                if(folder!=null) {
+                    ensureCollection(actor.id(),folder);
+                    db.jdbc.update("UPDATE problems SET folder=? WHERE id=?",folder,prevProblem);
+                }
+                if(tags!=null && tags.length>0) {
+                    db.jdbc.update("UPDATE problems SET tags=?::text[] WHERE id=? AND cardinality(tags)=0",tags,prevProblem);
+                    db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=? AND cardinality(tags)=0",tags,prevProblem);
+                }
+                return Map.of("outcome","SKIPPED","versionId",prevVersion);
             }
-            if(tags!=null && tags.length>0) {
-                db.jdbc.update("UPDATE problems SET tags=?::text[] WHERE id=? AND cardinality(tags)=0",tags,existing.get(0).get("problem_id"));
-                db.jdbc.update("UPDATE practice_publications SET tags=?::text[] WHERE problem_id=? AND cardinality(tags)=0",tags,existing.get(0).get("problem_id"));
-            }
-            return Map.of("outcome","SKIPPED","versionId",version);
         }
         var fields=new LinkedHashMap<String,Object>();
         fields.put("slug",slug);fields.put("title",Api.text(body,"title",255));
@@ -482,6 +508,20 @@ public class LaboratoryService {
                 approve(actor,version,note);
                 count++;
             }
+        }
+        return count;
+    }
+
+    /** Soft-deletes every selected problem that is not in an active contest. */
+    @Transactional
+    public int bulkDelete(Actor actor,List<UUID> versionIds,String reason) {
+        String note=(reason==null || reason.isBlank())?"Deleted in bulk from Problem Bank":reason.trim();
+        int count=0;
+        for(UUID version:versionIds.stream().distinct().toList()) {
+            var rows=db.jdbc.queryForList("SELECT p.archived_at FROM problems p JOIN problem_versions v ON v.problem_id=p.id WHERE v.id=?",version);
+            if(rows.isEmpty() || rows.get(0).get("archived_at")!=null) continue;
+            delete(actor,version,note);
+            count++;
         }
         return count;
     }
